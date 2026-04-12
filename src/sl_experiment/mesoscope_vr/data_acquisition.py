@@ -2336,7 +2336,7 @@ class _MesoscopeVRSystem:
 
             # Logs the distance snapshot.
             traveled_distance = float(self._microcontrollers.wheel_encoder.traveled_distance)
-            distance_bytes = np.array([traveled_distance], dtype="<i8").view(np.uint8)
+            distance_bytes = np.array([traveled_distance], dtype="<f8").view(np.uint8)
 
             log_package = LogPackage(
                 source_id=self._source_id,
