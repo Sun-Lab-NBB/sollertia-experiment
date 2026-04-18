@@ -28,3 +28,10 @@ def run_cli() -> None:
     from ..command_line_interfaces.execute import run  # noqa: PLC0415
 
     run()
+
+
+def configure_cli() -> None:
+    """Entry point for the 'sl-configure' CLI command."""
+    from ..command_line_interfaces.configure import configure_cli as _configure_cli  # noqa: PLC0415
+
+    _configure_cli()

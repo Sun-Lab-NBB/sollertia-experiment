@@ -21,15 +21,12 @@ from sl_shared_assets import (
     SessionData,
     GasPuffTrial,
     SessionTypes,
-    ZaberPositions,
     ExperimentState,
     WaterRewardTrial,
-    MesoscopePositions,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     MesoscopeHardwareState,
     WindowCheckingDescriptor,
-    MesoscopeSystemConfiguration,
     MesoscopeExperimentDescriptor,
     MesoscopeExperimentConfiguration,
 )
@@ -38,6 +35,8 @@ from ataraxis_data_structures import DataLogger, LogPackage
 from ataraxis_communication_interface import MQTTCommunication, MicroControllerInterface
 
 from .tools import MesoscopeData, CachedMotifDecomposer, get_system_configuration
+from .positions import MesoscopePositions, ZaberPositions
+from .configuration import MesoscopeSystemConfiguration
 from .runtime_ui import RuntimeControlUI
 from .visualizers import VisualizerMode, BehaviorVisualizer
 from .maintenance_ui import MaintenanceControlUI
@@ -2657,6 +2656,7 @@ def window_checking_logic(
         session_type=SessionTypes.WINDOW_CHECKING,
         python_version=python_version,
         sl_experiment_version=library_version,
+        acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -2858,6 +2858,7 @@ def lick_training_logic(
         session_type=SessionTypes.LICK_TRAINING,
         python_version=python_version,
         sl_experiment_version=library_version,
+        acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -3171,6 +3172,7 @@ def run_training_logic(
         session_type=SessionTypes.RUN_TRAINING,
         python_version=python_version,
         sl_experiment_version=library_version,
+        acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -3594,6 +3596,7 @@ def experiment_logic(
         experiment_name=experiment_name,
         python_version=python_version,
         sl_experiment_version=library_version,
+        acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 

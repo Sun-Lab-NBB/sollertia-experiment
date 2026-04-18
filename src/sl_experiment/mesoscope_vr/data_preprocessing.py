@@ -21,7 +21,6 @@ from sl_shared_assets import (
     SessionData,
     SurgeryData,
     SessionTypes,
-    MesoscopeGoogleSheets,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
@@ -31,6 +30,8 @@ from sl_shared_assets import (
     get_google_credentials_path,
     calculate_directory_checksum,
 )
+
+from .configuration import MesoscopeGoogleSheets
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ataraxis_data_structures import assemble_log_archives
 

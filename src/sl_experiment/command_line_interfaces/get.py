@@ -4,9 +4,6 @@ managed by the host-machine.
 
 import click
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from sl_shared_assets import (
-    get_system_configuration_data,
-)
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
@@ -16,6 +13,7 @@ from .mcp_servers import run_get_server
 from ..mesoscope_vr import (
     CRCCalculator,
     discover_zaber_devices,
+    get_system_configuration_data,
 )
 from ..shared_components import get_project_experiments
 
