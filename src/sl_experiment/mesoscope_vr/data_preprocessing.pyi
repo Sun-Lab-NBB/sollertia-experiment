@@ -6,8 +6,9 @@ from numpy.typing import NDArray as NDArray
 from sl_shared_assets import (
     SessionData,
     SurgeryData as SurgeryData,
-    MesoscopeGoogleSheets as MesoscopeGoogleSheets,
 )
+
+from .configuration import MesoscopeGoogleSheets as MesoscopeGoogleSheets
 
 from .tools import (
     MesoscopeData as MesoscopeData,

@@ -3,8 +3,9 @@
 import sys
 
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from sl_shared_assets import MesoscopeFileSystem, get_system_configuration_data
 from importlib_metadata import metadata as _metadata
+
+from ..mesoscope_vr.configuration import MesoscopeFileSystem, get_system_configuration_data
 
 
 def get_version_data() -> tuple[str, str]:

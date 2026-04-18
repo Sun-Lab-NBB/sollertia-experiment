@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from _typeshed import Incomplete
-from sl_shared_assets import (
-    ZaberPositions,
+from .positions import ZaberPositions
+from .configuration import (
     MesoscopeCameras as MesoscopeCameras,
     MesoscopeExternalAssets as MesoscopeExternalAssets,
     MesoscopeMicroControllers as MesoscopeMicroControllers,

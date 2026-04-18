@@ -13,10 +13,11 @@ from sl_shared_assets import (
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
-    MesoscopeSystemConfiguration as MesoscopeSystemConfiguration,
     MesoscopeExperimentDescriptor,
     MesoscopeExperimentConfiguration,
 )
+
+from .configuration import MesoscopeSystemConfiguration as MesoscopeSystemConfiguration
 from ataraxis_data_structures import DataLogger
 from ataraxis_communication_interface import MQTTCommunication
 

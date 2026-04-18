@@ -4,10 +4,9 @@ from dataclasses import field, dataclass
 import numpy as np
 from _typeshed import Incomplete
 from numpy.typing import NDArray as NDArray
-from sl_shared_assets import (
-    SessionData as SessionData,
-    MesoscopeSystemConfiguration,
-)
+from sl_shared_assets import SessionData as SessionData
+
+from .configuration import MesoscopeSystemConfiguration
 
 def get_system_configuration() -> MesoscopeSystemConfiguration: ...
 
