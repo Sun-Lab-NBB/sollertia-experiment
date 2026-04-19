@@ -4,6 +4,7 @@ This module exposes tools from the 'sl-get' and 'sl-manage' CLI groups through t
 enabling AI agents to programmatically interact with data acquisition system features.
 """
 
+import uuid
 from typing import Literal
 from pathlib import Path
 
@@ -152,6 +153,38 @@ def set_zaber_device_setting_tool(
         return f"Error: {exception}"
     else:
         return f"Success: {result}"
+
+
+@get_mcp.tool()
+def check_mount_accessibility_tool(path: str) -> str:
+    """Verifies that a filesystem path exists and is writable.
+
+    Probes the path by writing and removing a temporary file to confirm write access. Useful for verifying
+    that a mounted storage location is reachable before invoking acquisition or transfer operations.
+
+    Args:
+        path: The absolute filesystem path to verify.
+
+    Returns:
+        A formatted string reporting existence, mount status, and writability, or an error description.
+    """
+    target = Path(path)
+    if str(target) in ("", "."):
+        return f"Error: Path '{path}' is empty or relative; provide an absolute path."
+    if not target.exists():
+        return f"Path: {target} | Exists: False | OK: False"
+
+    is_mount = target.is_mount()
+    test_file = target.joinpath(f".mount_test_{uuid.uuid4().hex[:8]}")
+    try:
+        test_file.write_text("test")
+        test_file.unlink()
+    except PermissionError:
+        return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: Permission denied"
+    except OSError as os_error:
+        return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: {os_error}"
+
+    return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: True | OK: True"
 
 
 @get_mcp.tool()
