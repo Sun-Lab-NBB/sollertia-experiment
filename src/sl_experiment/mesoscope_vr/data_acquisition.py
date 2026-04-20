@@ -2881,7 +2881,7 @@ def lick_training_logic(
     # Initializes the descriptor with the current session's experimenter and animal weight
     descriptor = LickTrainingDescriptor(
         experimenter=experimenter,
-        mouse_weight_g=animal_weight,
+        animal_weight_g=animal_weight,
     )
 
     # Configures the session to use either the previous session's parameters (if available) or the default parameters.
@@ -3195,7 +3195,7 @@ def run_training_logic(
     # Initializes the descriptor with the current session's experimenter and animal weight
     descriptor = RunTrainingDescriptor(
         experimenter=experimenter,
-        mouse_weight_g=animal_weight,
+        animal_weight_g=animal_weight,
     )
 
     # Configures the session to use either the previous session's parameters (if available) or the default parameters.
@@ -3255,8 +3255,9 @@ def run_training_logic(
     running_duration_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
     epoch_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
-    # Initializes the assets used to guard against interrupting run epochs for mice that take many large steps. For mice
-    # with a distinct walking pattern of many very large steps, the speed transiently dips below the threshold for a
+    # Initializes the assets used to guard against interrupting run epochs for animals that take many large steps. For
+    # animals with a distinct walking pattern of many very large steps, the speed transiently dips below the threshold
+    # for a
     # very brief moment of time, flagging the epoch as unrewarded. To avoid this issue, instead of interrupting the
     # epoch outright, the system now allows the speed to be below the threshold for a short period of time. These
     # assets help with that task pattern.
@@ -3407,7 +3408,7 @@ def run_training_logic(
                     # purposefully does not track 'manual' water rewards.
                     progress_bar.update(descriptor.water_reward_size_ul / 1000)  # Converts uL to ml
 
-                # Also resets the timer. While mice typically stop consuming water rewards, which would reset the
+                # Also resets the timer. While animals typically stop consuming water rewards, which would reset the
                 # timer, this guards against animals that carry on running without consuming water rewards.
                 running_duration_timer.reset()
 
@@ -3636,7 +3637,7 @@ def experiment_logic(
     # Initializes the descriptor with the current session's experimenter and animal weight
     descriptor = MesoscopeExperimentDescriptor(
         experimenter=experimenter,
-        mouse_weight_g=animal_weight,
+        animal_weight_g=animal_weight,
     )
 
     # Configures the session to use either the previous session's parameters (if available) or the default parameters.

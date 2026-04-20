@@ -650,7 +650,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             sheet_id=sheets_data.water_log_sheet_id,
         )
         wr_sheet.update_water_log(
-            weight=descriptor.mouse_weight_g,
+            weight=descriptor.animal_weight_g,
             water_ml=total_water,
             experimenter_id=descriptor.experimenter,
             session_type=session_data.session_type,
