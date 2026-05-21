@@ -1,5 +1,5 @@
-"""Provides the 'sl-run' Command Line Interface (CLI) for running the data acquisition and system maintenance sessions
-supported by the data acquisition system managed by the host-machine.
+"""Provides the 'sle run' subcommand for running the data acquisition and system maintenance sessions supported by the
+data acquisition system managed by the host-machine.
 """
 
 import click
@@ -306,9 +306,9 @@ def run_training(
 def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int | None) -> None:
     """Runs the specified experiment session.
 
-    Experiment runtimes are carried out after the lick and run training sessions. This command allows running any valid
-    Sun lab experiment supported by the data acquisition system managed by the host-machine. To create a
-    new experiment configuration for the local data-acquisition system, use the 'sl-configure experiment' CLI command.
+    Experiment runtimes are carried out after the lick and run training sessions. This command runs any experiment
+    configuration supported by the data acquisition system managed by the host-machine. To create a new experiment
+    configuration for the local data-acquisition system, use the 'sle configure experiment' subcommand.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],

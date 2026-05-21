@@ -1,5 +1,5 @@
-"""Provides the 'sl-manage' Command Line Interface (CLI) for managing the data accessible to the data acquisition
-system managed by the host-machine.
+"""Provides the 'sle manage' subcommand for managing the data accessible to the data acquisition system managed by
+the host-machine.
 """
 
 from pathlib import Path
@@ -124,5 +124,5 @@ def migrate_animal(source: str, destination: str, animal: str) -> None:
     help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
 )
 def start_manage_mcp_server(transport: str) -> None:  # pragma: no cover
-    """Starts the MCP server for agentic access to sl-manage tools."""
+    """Starts the MCP server for agentic access to 'sle manage' tools."""
     run_manage_server(transport=transport)  # type: ignore[arg-type]

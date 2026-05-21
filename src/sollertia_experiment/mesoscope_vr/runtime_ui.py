@@ -210,7 +210,7 @@ class RuntimeControlUI:
         try:
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Control Panel")
-            app.setOrganizationName("SunLab")
+            app.setOrganizationName("Sollertia")
             app.setStyle("Fusion")
 
             window = _ControlUIWindow(

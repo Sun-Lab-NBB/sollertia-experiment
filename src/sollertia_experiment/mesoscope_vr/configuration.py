@@ -283,7 +283,7 @@ def get_system_configuration_data() -> MesoscopeSystemConfiguration:
     if not config_path.exists():
         message = (
             f"Unable to load the Mesoscope-VR data acquisition system configuration. Expected the configuration file "
-            f"at {config_path}, but it does not exist. Call the 'sl-configure system' CLI command to generate a "
+            f"at {config_path}, but it does not exist. Call the 'sle configure system' CLI command to generate a "
             f"default configuration file."
         )
         console.error(message=message, error=FileNotFoundError)

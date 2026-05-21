@@ -100,7 +100,7 @@ def _process_stack(
 
     Raises:
         NotImplementedError: If the extracted frame-variant ScanImage metadata cannot be processed due to a mismatch
-            between the ScanImage version and the version of the sl-experiment library.
+            between the ScanImage version and the version of the sollertia-experiment library.
 
     Args:
         tiff_path: The path to the TIFF file that stores the stack of the mesoscope-acquired frames to process.
@@ -142,7 +142,7 @@ def _process_stack(
                     # Use the schema to parse and convert the value
                     _, converter = _METADATA_SCHEMA[key]
                     arrays[key][i] = converter(value)
-                elif key == "epoch":  # Epoch data is converted to the Sun lab's timestamp format.
+                elif key == "epoch":  # Epoch data is converted to the Sollertia platform's timestamp format.
                     # Parses the epoch [year month day hour minute second.microsecond] as microseconds elapsed since
                     # the UTC onset.
                     epoch_vals = [float(x) for x in value[1:-1].split()]
@@ -881,7 +881,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sl-configure project' command to create the project before "
+            f"target project does not exist. Use the 'sle configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)

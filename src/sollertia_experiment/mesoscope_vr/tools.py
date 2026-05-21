@@ -25,7 +25,7 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
     if not isinstance(system_configuration, MesoscopeSystemConfiguration):
         message = (
             f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
-            f"belongs to the {system_configuration.name} data acquisition system. Use the 'sl-configure system' CLI "
+            f"belongs to the {system_configuration.name} data acquisition system. Use the 'sle configure system' CLI "
             f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
         )
         console.error(message, error=TypeError)

@@ -140,7 +140,7 @@ class MaintenanceControlUI:
         try:
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Maintenance Panel")
-            app.setOrganizationName("SunLab")
+            app.setOrganizationName("Sollertia")
             app.setStyle("Fusion")
 
             window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)

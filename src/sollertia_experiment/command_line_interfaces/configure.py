@@ -1,6 +1,4 @@
-"""Provides the 'sl-configure' Command Line Interface (CLI) for authoring the Mesoscope-VR data acquisition system
-configuration.
-"""
+"""Provides the 'sle configure' subcommand for authoring the Mesoscope-VR data acquisition system configuration."""
 
 from __future__ import annotations
 

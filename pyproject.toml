@@ -5,9 +5,9 @@ build-backend = "hatchling.build"
 
 # Project metadata section. Provides the general ID information about the project.
 [project]
-name = "sl-experiment"
+name = "sollertia-experiment"
 version = "5.0.0rc1"
-description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
+description = "Provides data acquisition and preprocessing runtimes for Sollertia platform data acquisition systems."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
@@ -23,7 +23,7 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["sunlab", "data", "acquisition", "ataraxis", "interface", "experiment", "mesoscope"]
+keywords = ["sollertia", "ataraxis", "data-acquisition", "mesoscope", "experiment"]
 
 classifiers = [
     # Development status
@@ -70,16 +70,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sun-Lab-NBB/sl-experiment"
-Documentation = "https://sl-experiment-api-docs.netlify.app/"
+Homepage = "https://github.com/Sun-Lab-NBB/sollertia-experiment"
+Documentation = "https://sollertia-experiment-api-docs.netlify.app/"
 
-# Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
-# below.
+# Currently, the library is interfaced with through the consolidated 'sle' CLI exposed below.
 [project.scripts]
-sl-get = "sl_experiment.command_line_interfaces.entry_points:get_cli"
-sl-manage = "sl_experiment.command_line_interfaces.entry_points:manage_cli"
-sl-run = "sl_experiment.command_line_interfaces.entry_points:run_cli"
-sl-configure = "sl_experiment.command_line_interfaces.entry_points:configure_cli"
+sle = "sollertia_experiment.command_line_interfaces.entry_points:sle_cli"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]
@@ -106,7 +102,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/sl_experiment"]
+packages = ["src/sollertia_experiment"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -177,7 +173,7 @@ length-sort = true                 # Places shorter imports first
 disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages that have type stubs available.
 exclude = [
-    "sl-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
+    "sollertia-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
     "venv.*/",            # Ignores virtual environments
     "build/",             # Ignores the sdist directory
     "dist/",              # Ignores the wheel directory

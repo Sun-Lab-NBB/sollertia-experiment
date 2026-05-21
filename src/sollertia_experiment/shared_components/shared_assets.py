@@ -9,16 +9,16 @@ from ..mesoscope_vr.configuration import MesoscopeFileSystem, get_system_configu
 
 
 def get_version_data() -> tuple[str, str]:
-    """Returns the current Python and sl-experiment versions.
+    """Returns the current Python and sollertia-experiment versions.
 
     Returns:
         A tuple of two strings. The first string stores the Python version, and the second string stores the
-        sl-experiment version.
+        sollertia-experiment version.
     """
-    # Determines the local Python version and the version of the sl-experiment library.
-    sl_experiment_version = _metadata("sl-experiment")["version"]  # type: ignore[index]
+    # Determines the local Python version and the version of the sollertia-experiment library.
+    sollertia_experiment_version = _metadata("sollertia-experiment")["version"]  # type: ignore[index]
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-    return python_version, sl_experiment_version
+    return python_version, sollertia_experiment_version
 
 
 def get_animal_project(animal_id: str) -> tuple[str, ...]:
@@ -51,4 +51,4 @@ def get_project_experiments(project: str, filesystem_configuration: MesoscopeFil
         A tuple of naturally-sorted experiment configurations available for the target project.
     """
     configuration_path = filesystem_configuration.root_directory.joinpath(project, "configuration")
-    return natsorted([configuration.stem for configuration in configuration_path.glob("*.yaml")])
+    return tuple(natsorted([configuration.stem for configuration in configuration_path.glob("*.yaml")]))

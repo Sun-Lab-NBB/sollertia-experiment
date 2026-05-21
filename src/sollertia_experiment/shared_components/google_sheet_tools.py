@@ -61,7 +61,7 @@ _required_water_restriction_headers: set[str] = {
 
 def _convert_date_time_to_timestamp(date: str, time: str) -> int:
     """Converts the input date and time strings to the number of microseconds elapsed since the UTC epoch onset format
-    used in the Sun lab to store timestamps.
+    used by the Sollertia platform to store timestamps.
 
     Args:
         date: The date string in the format "%m-%d-%y" or "%m-%d-%Y".
@@ -208,10 +208,10 @@ def _replace_empty_values(row_data: list[str]) -> list[str | None]:
 
 
 class SurgeryLog:
-    """Interfaces with the Sun lab's surgery log Google Sheet.
+    """Interfaces with the Sollertia platform's surgery log Google Sheet.
 
     Notes:
-        This class is purpose-built to work with the specific surgery log format used in the Sun lab.
+        This class is purpose-built to work with the specific surgery log format used by the Sollertia platform.
 
     Args:
         project_name: The name of the project for which to access the surgery log data.
@@ -230,7 +230,7 @@ class SurgeryLog:
         _animals: Stores the unique identifiers of all animals whose data is stored in the surgery log.
 
     Raises:
-        ValueError: If the target Google Sheet is not a valid Sun lab surgery log.
+        ValueError: If the target Google Sheet is not a valid Sollertia platform surgery log.
     """
 
     def __init__(
@@ -580,11 +580,11 @@ class SurgeryLog:
 
 
 class WaterLog:
-    """Interfaces with the Sun lab's water restriction and animal interaction log Google Sheet.
+    """Interfaces with the Sollertia platform's water restriction and animal interaction log Google Sheet.
 
     Notes:
         This class is purpose-built to work with the specific water restriction and animal interaction log format used
-        in the Sun lab.
+        by the Sollertia platform.
 
         This class is specifically designed to access the log data in a 'session-oriented' format. Specifically, it
         assumes that the log is accessed as part of a data acquisition session that uses a specific row to store all
@@ -611,7 +611,7 @@ class WaterLog:
         _session_row_index: The index of the log's row that stores the processed session's data.
 
     Raises:
-        ValueError: If the target Google Sheet is not a valid Sun lab water restriction and animal interaction log.
+        ValueError: If the target Google Sheet is not a valid Sollertia platform water restriction and animal interaction log.
     """
 
     def __init__(

@@ -1,7 +1,7 @@
-"""Provides MCP servers for agentic interaction with sl-experiment CLI functionality.
+"""Provides MCP servers for agentic interaction with sollertia-experiment CLI functionality.
 
-This module exposes tools from the 'sl-get' and 'sl-manage' CLI groups through the Model Context Protocol (MCP),
-enabling AI agents to programmatically interact with data acquisition system features.
+This module exposes tools from the 'sle get' and 'sle manage' subcommand groups through the Model Context Protocol
+(MCP), enabling AI agents to programmatically interact with data acquisition system features.
 """
 
 import uuid
@@ -31,11 +31,11 @@ from ..mesoscope_vr import (
     get_system_configuration_path,
 )
 
-# Initializes the MCP server for sl-get tools.
-get_mcp = FastMCP(name="sl-experiment-get", json_response=True)
+# Initializes the MCP server for 'sle get' tools.
+get_mcp = FastMCP(name="sollertia-experiment-get", json_response=True)
 
-# Initializes the MCP server for sl-manage tools.
-manage_mcp = FastMCP(name="sl-experiment-manage", json_response=True)
+# Initializes the MCP server for 'sle manage' tools.
+manage_mcp = FastMCP(name="sollertia-experiment-manage", json_response=True)
 
 
 @get_mcp.tool()
@@ -470,7 +470,7 @@ def _check_path(path: Path) -> dict[str, Any]:
         return report
     report["is_mount"] = path.is_mount()
     try:
-        probe = path.joinpath(f".__sl_experiment_probe_{uuid.uuid4().hex[:8]}")
+        probe = path.joinpath(f".__sollertia_experiment_probe_{uuid.uuid4().hex[:8]}")
         probe.touch()
         probe.unlink()
         report["writable"] = True
@@ -654,7 +654,7 @@ def read_session_system_configuration_tool(session_path: str) -> dict[str, Any]:
 
 
 def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Starts the sl-get MCP server with the specified transport.
+    """Starts the 'sle get' MCP server with the specified transport.
 
     Args:
         transport: The transport protocol to use. Supported values are 'stdio' for standard input/output
@@ -665,7 +665,7 @@ def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
 
 
 def run_manage_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Starts the sl-manage MCP server with the specified transport.
+    """Starts the 'sle manage' MCP server with the specified transport.
 
     Args:
         transport: The transport protocol to use. Supported values are 'stdio' for standard input/output

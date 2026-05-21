@@ -1,6 +1,6 @@
 """Provides the interfaces (ModuleInterface class implementations) for the hardware modules assembled and configured
-according to the instructions from the Sun lab's microcontrollers library:
-https://github.com/Sun-Lab-NBB/sl-micro-controllers.
+according to the instructions from the Sollertia platform microcontrollers project:
+https://github.com/Sun-Lab-NBB/sollertia-micro-controllers.
 """
 
 import math
