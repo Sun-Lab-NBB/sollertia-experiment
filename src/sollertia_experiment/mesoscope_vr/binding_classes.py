@@ -457,7 +457,6 @@ class MicroControllerInterfaces:
         self.wheel_encoder: EncoderInterface = EncoderInterface(
             encoder_ppr=self._configuration.wheel_encoder_ppr,
             wheel_diameter=self._configuration.wheel_diameter_cm,
-            cm_per_unity_unit=self._configuration.cm_per_unity_unit,
             polling_frequency=microcontroller_configuration.wheel_encoder_polling_delay_us,
         )
 

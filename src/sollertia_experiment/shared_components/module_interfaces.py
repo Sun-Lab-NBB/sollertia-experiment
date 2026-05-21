@@ -46,10 +46,13 @@ class EncoderInterface(ModuleInterface):
     Notes:
         Type code 2.
 
+        The encoder is constructed without a Unity scale and reports zero Unity motion until ``set_unity_scale`` is
+        called. VR-experiment runtimes load the cm-per-Unity-unit conversion factor from the VR TaskTemplate and
+        apply it via ``set_unity_scale`` at experiment-start.
+
     Args:
         encoder_ppr: The resolution of the module's quadrature encoder, in Pulses Per Revolution (PPR).
         wheel_diameter: The diameter of the running wheel attached to the encoder, in centimeters.
-        cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in centimeters.
         polling_frequency: The frequency, in microseconds, at which to check the encoder's state when monitoring the
             encoder.
 
@@ -57,7 +60,8 @@ class EncoderInterface(ModuleInterface):
         _ppr: The resolution of the managed quadrature encoder.
         _wheel_diameter: The diameter of the running wheel connected to the encoder.
         _cm_per_pulse: The conversion factor that translates encoder pulses into centimeters.
-        _unity_unit_per_pulse: The conversion factor that translates encoder pulses into Unity units.
+        _unity_unit_per_pulse: The conversion factor that translates encoder pulses into Unity units. Zero until
+            ``set_unity_scale`` is called.
         _polling_frequency: The frequency, in microseconds, at which to check the encoder's state when monitoring the
             encoder.
         _distance_tracker: The SharedMemoryArray instance that transfers the distance data collected by the module from
@@ -71,7 +75,6 @@ class EncoderInterface(ModuleInterface):
         self,
         encoder_ppr: int,
         wheel_diameter: float,
-        cm_per_unity_unit: float,
         polling_frequency: int,
     ) -> None:
         data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52)}  # kRotatedCCW, kRotatedCW
@@ -94,12 +97,9 @@ class EncoderInterface(ModuleInterface):
             decimals=8,
         )
 
-        # Computes the conversion factor to translate encoder pulses into unity units. Rounds to 8 decimal places for
-        # consistency and to ensure repeatability.
-        self._unity_unit_per_pulse: np.float64 = np.round(
-            a=np.float64((math.pi * wheel_diameter) / (encoder_ppr * cm_per_unity_unit)),
-            decimals=8,
-        )
+        # Defaults to zero. VR-experiment runtimes call set_unity_scale() with the cm-per-Unity-unit conversion
+        # loaded from the VR TaskTemplate before consuming encoder data.
+        self._unity_unit_per_pulse: np.float64 = np.float64(0.0)
 
         # Saves the encoder's polling frequency in microseconds.
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
@@ -219,6 +219,23 @@ class EncoderInterface(ModuleInterface):
         """Resets the traveled distance trackers to zero."""
         self._distance_tracker[0] = _ZERO_FLOAT64
         self._distance_tracker[1] = _ZERO_FLOAT64
+
+    def set_unity_scale(self, cm_per_unity_unit: float) -> None:
+        """Updates the encoder pulse to Unity unit conversion factor used to report animal motion to Unity.
+
+        Notes:
+            VR-experiment runtimes call this method at experiment-start with the cm-per-Unity-unit conversion factor
+            loaded from the VR TaskTemplate. The new value takes effect on the next encoder message processed by
+            the interface.
+
+        Args:
+            cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in
+                centimeters.
+        """
+        self._unity_unit_per_pulse = np.round(
+            a=np.float64((math.pi * self._wheel_diameter) / (self._ppr * cm_per_unity_unit)),
+            decimals=8,
+        )
 
 
 class LickInterface(ModuleInterface):

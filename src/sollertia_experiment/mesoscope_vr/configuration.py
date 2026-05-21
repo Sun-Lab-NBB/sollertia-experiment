@@ -14,6 +14,8 @@ from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import AcquisitionSystems, get_working_directory
 from ataraxis_data_structures import YamlConfig
 
+from ..vr_task import VRTaskConfiguration
+
 _CONFIGURATION_DIR: str = "configuration"
 """Subdirectory under the working directory that stores the Mesoscope-VR system configuration YAML."""
 
@@ -136,8 +138,6 @@ class MesoscopeMicroControllers:
     change to be reported to the PC."""
     wheel_encoder_polling_delay_us: int = 500
     """The delay, in microseconds, between consecutive encoder state readouts."""
-    cm_per_unity_unit: float = 10.0
-    """The length of each Virtual Reality (VR) environment's distance 'unit' (Unity unit) in real-world centimeters."""
     screen_trigger_pulse_duration_ms: int = 500
     """The duration, in milliseconds, of the TTL pulse used to toggle the VR screen power state."""
     sensor_polling_delay_ms: int = 1
@@ -165,10 +165,9 @@ class MesoscopeExternalAssets:
     """The USB port used by the LickPort Zaber motor controllers."""
     wheel_port: str = "/dev/ttyUSB2"
     """The USB port used by the Wheel Zaber motor controllers."""
-    unity_ip: str = "127.0.0.1"
-    """The IP address of the MQTT broker used to communicate with the Unity game engine."""
-    unity_port: int = 1883
-    """The port number of the MQTT broker used to communicate with the Unity game engine."""
+    vr_task: VRTaskConfiguration = field(default_factory=VRTaskConfiguration)
+    """Stores the runtime configuration used to communicate with the Unity game engine that runs the Virtual Reality
+    task."""
 
 
 @dataclass
