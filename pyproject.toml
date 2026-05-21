@@ -41,7 +41,7 @@ classifiers = [
 
 # Runtime project dependencies.
 dependencies = [
-    "zaber-motion==9.2.1",
+    "zaber-motion==9.3.0",
     "crc==7.1.0",
     "tabulate2==1.10.2",
     "click==8.4.0",

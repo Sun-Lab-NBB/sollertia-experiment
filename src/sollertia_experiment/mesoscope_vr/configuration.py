@@ -9,9 +9,10 @@ Mesoscope-VR acquisition runtime is the only consumer of these classes.
 from pathlib import Path
 from dataclasses import field, dataclass
 
+from ataraxis_video_system import EncoderSpeedPresets
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from ataraxis_data_structures import YamlConfig
 from sollertia_shared_assets import AcquisitionSystems, get_working_directory
+from ataraxis_data_structures import YamlConfig
 
 _CONFIGURATION_DIR: str = "configuration"
 """Subdirectory under the working directory that stores the Mesoscope-VR system configuration YAML."""
@@ -55,18 +56,22 @@ class MesoscopeCameras:
 
     face_camera_index: int = 0
     """The index of the face camera in the list of all available Harvester-managed cameras."""
-    body_camera_index: int = 1
-    """The index of the body camera in the list of all available Harvester-managed cameras."""
+    face_camera_display_frame_rate: int = 25
+    """The rate, in frames per second, at which the face camera's acquired frames are displayed in the live preview
+    window. This is independent of the rate at which frames are saved to disk."""
     face_camera_quantization: int = 20
     """The quantization parameter used by the face camera to encode acquired frames as video files."""
-    face_camera_preset: int = 7
-    """The encoding speed preset used by the face camera to encode acquired frames as video files. Must be one of the
-    valid members of the EncoderSpeedPresets enumeration from the ataraxis-video-system library."""
+    face_camera_preset: EncoderSpeedPresets = EncoderSpeedPresets.SLOWEST
+    """The encoding speed preset used by the face camera to encode acquired frames as video files."""
+    body_camera_index: int = 1
+    """The index of the body camera in the list of all available Harvester-managed cameras."""
+    body_camera_display_frame_rate: int = 25
+    """The rate, in frames per second, at which the body camera's acquired frames are displayed in the live preview
+    window. This is independent of the rate at which frames are saved to disk."""
     body_camera_quantization: int = 20
     """The quantization parameter used by the body camera to encode acquired frames as video files."""
-    body_camera_preset: int = 7
-    """The encoding speed preset used by the body camera to encode acquired frames as video files. Must be one of the
-    valid members of the EncoderSpeedPresets enumeration from the ataraxis-video-system library."""
+    body_camera_preset: EncoderSpeedPresets = EncoderSpeedPresets.SLOWEST
+    """The encoding speed preset used by the body camera to encode acquired frames as video files."""
 
 
 @dataclass(slots=True)

@@ -12,6 +12,9 @@ Authors: Ivan Kondratyev (Inkaros), Kushaan Gupta, Natalie Yeung, Katlynn Ryu, J
 
 from ataraxis_base_utilities import console
 
-# Ensures the console is enabled whenever this library is imported.
+# Ensures the console is enabled whenever this library is imported. Progress display is also enabled so that
+# console.track() and console.progress() bars used by long-running runtimes remain visible to the user.
 if not console.enabled:
     console.enable()
+if not console.progress_enabled:
+    console.enable_progress()

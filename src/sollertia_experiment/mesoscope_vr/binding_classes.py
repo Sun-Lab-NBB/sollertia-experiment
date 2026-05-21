@@ -3,16 +3,10 @@
 from pathlib import Path  # noqa: TC003
 
 import numpy as np
-from ataraxis_video_system import (
-    VideoSystem,
-    VideoEncoders,
-    CameraInterfaces,
-    OutputPixelFormats,
-    EncoderSpeedPresets,
-)
+from ataraxis_time import TimeUnits, convert_time
+from ataraxis_video_system import VideoSystem, VideoEncoders, CameraInterfaces, OutputPixelFormats
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger  # noqa: TC002
-from ataraxis_time import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .positions import ZaberPositions
@@ -617,11 +611,11 @@ class VideoSystems:
             output_directory=output_directory,
             camera_index=camera_configuration.face_camera_index,
             camera_interface=CameraInterfaces.HARVESTERS,
-            display_frame_rate=25,
+            display_frame_rate=camera_configuration.face_camera_display_frame_rate,
             video_encoder=VideoEncoders.H265,
             gpu=0,
-            encoder_speed_preset=EncoderSpeedPresets(camera_configuration.face_camera_preset),
-            output_pixel_format=OutputPixelFormats.YUV420,  # Monochrome videos do not require chrominance sampling.
+            encoder_speed_preset=camera_configuration.face_camera_preset,
+            output_pixel_format=OutputPixelFormats.YUV420,  # Mesoscope-VR cameras are monochrome.
             quantization_parameter=camera_configuration.face_camera_quantization,
         )
 
@@ -633,11 +627,11 @@ class VideoSystems:
             output_directory=output_directory,
             camera_index=camera_configuration.body_camera_index,
             camera_interface=CameraInterfaces.HARVESTERS,
-            display_frame_rate=25,
+            display_frame_rate=camera_configuration.body_camera_display_frame_rate,
             video_encoder=VideoEncoders.H265,
             gpu=0,
-            encoder_speed_preset=EncoderSpeedPresets(camera_configuration.body_camera_preset),
-            output_pixel_format=OutputPixelFormats.YUV420,  # Monochrome videos do not require chrominance sampling.
+            encoder_speed_preset=camera_configuration.body_camera_preset,
+            output_pixel_format=OutputPixelFormats.YUV420,  # Mesoscope-VR cameras are monochrome.
             quantization_parameter=camera_configuration.body_camera_quantization,
         )
 

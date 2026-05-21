@@ -4,31 +4,32 @@ This module exposes tools from the 'sle get' and 'sle manage' subcommand groups 
 (MCP), enabling AI agents to programmatically interact with data acquisition system features.
 """
 
-import uuid
-import contextlib
 from enum import Enum
+import uuid
 from typing import Any, Literal, get_type_hints
 from pathlib import Path
+import contextlib
 from dataclasses import MISSING, fields, is_dataclass
 
 import yaml  # type: ignore[import-untyped]
-from sollertia_shared_assets import SessionData
 from mcp.server.fastmcp import FastMCP
+from ataraxis_base_utilities import ensure_directory_exists
+from sollertia_shared_assets import SessionData
 
 from ..mesoscope_vr import (
     CRCCalculator,
+    ZaberPositions,
     MesoscopePositions,
     MesoscopeSystemConfiguration,
-    ZaberPositions,
     purge_session,
     get_zaber_devices_info,
     preprocess_session_data,
     set_zaber_device_setting,
     get_zaber_device_settings,
-    migrate_animal_between_projects,
-    validate_zaber_device_configuration,
     get_system_configuration_data,
     get_system_configuration_path,
+    migrate_animal_between_projects,
+    validate_zaber_device_configuration,
 )
 
 # Initializes the MCP server for 'sle get' tools.
@@ -411,7 +412,7 @@ def _write_yaml_validated(
     if file_path.exists() and not overwrite:
         return {"error": f"File already exists: {file_path}. Pass overwrite=True to replace."}
 
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_directory_exists(path=file_path.parent)
     temp_path = file_path.with_name(f".{file_path.stem}.{uuid.uuid4().hex[:8]}.tmp.yaml")
 
     try:

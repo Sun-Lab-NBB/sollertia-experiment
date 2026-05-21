@@ -13,10 +13,10 @@ from itertools import chain
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from tqdm import tqdm
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
+from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
     SessionData,
     SurgeryData,
@@ -27,9 +27,6 @@ from sollertia_shared_assets import (
     MesoscopeExperimentDescriptor,
     get_google_credentials_path,
 )
-
-from .configuration import MesoscopeGoogleSheets
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ataraxis_data_structures import (
     delete_directory,
     transfer_directory,
@@ -38,6 +35,7 @@ from ataraxis_data_structures import (
 )
 
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
+from .configuration import MesoscopeGoogleSheets
 from ..shared_components import WaterLog, SurgeryLog
 
 if TYPE_CHECKING:
@@ -494,9 +492,9 @@ def _preprocess_mesoscope_directory(
 
         # Displays a progress bar that tracks the frame processing.
         progress_path = Path(*image_directory.parts[-6:])
-        with tqdm(
+        with console.progress(
             total=len(valid_stacks),
-            desc=f"Processing TIFF stacks for {progress_path}",
+            description=f"Processing TIFF stacks for {progress_path}",
             unit="stack",
         ) as pbar:
             for future in as_completed(futures):
@@ -847,7 +845,9 @@ def purge_session(session_data: SessionData) -> None:
     ]
 
     # Removes all session-specific data directories from all destinations.
-    for candidate in tqdm(deletion_candidates, desc="Deleting session directories", unit="directory"):
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting session directories", unit="directory"
+    ):
         delete_directory(directory_path=candidate)
 
     # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
@@ -961,7 +961,9 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         system_configuration.filesystem.root_directory.joinpath(source_project, animal),
         system_configuration.filesystem.server_directory.joinpath(source_project, animal),
     ]
-    for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
+    ):
         delete_directory(directory_path=candidate)
 
     console.echo("Migration: Complete.", level=LogLevel.SUCCESS)

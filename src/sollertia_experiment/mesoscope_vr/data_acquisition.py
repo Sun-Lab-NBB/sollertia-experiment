@@ -3333,7 +3333,9 @@ def run_training_logic(
         console.echo(message=message, level=LogLevel.SUCCESS)
 
         # Creates a tqdm progress bar that tracks the overall training progress by communicating the total volume of
-        # water delivered to the animal
+        # water delivered to the animal. Uses tqdm directly (instead of console.progress) because the bar relies on
+        # set_postfix_str() and a custom bar_format to display the running training time alongside the volume readout,
+        # neither of which the ataraxis-base-utilities ProgressBar wrapper currently exposes.
         progress_bar = tqdm(
             total=round(descriptor.maximum_water_volume_ml, ndigits=3),
             desc="Delivered water volume",
@@ -3714,7 +3716,9 @@ def experiment_logic(
                 recovery_guided_trials=state.aversive_recovery_guided_trials,
             )
 
-            # Creates a tqdm progress bar for the current experiment state
+            # Creates a tqdm progress bar for the current experiment state. Uses tqdm directly because the bar relies on
+            # a custom bar_format to display the percentage and elapsed seconds, which the ataraxis-base-utilities
+            # ProgressBar wrapper currently does not expose.
             with tqdm(
                 total=state.state_duration_s,
                 desc=f"Executing experiment state {state.experiment_state_code}",
