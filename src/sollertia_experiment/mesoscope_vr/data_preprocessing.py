@@ -13,11 +13,11 @@ from itertools import chain
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from tqdm import tqdm
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from sl_shared_assets import (
+from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from sollertia_shared_assets import (
     SessionData,
     SurgeryData,
     SessionTypes,
@@ -25,17 +25,17 @@ from sl_shared_assets import (
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
+    get_google_credentials_path,
+)
+from ataraxis_data_structures import (
     delete_directory,
     transfer_directory,
-    get_google_credentials_path,
+    assemble_log_archives,
     calculate_directory_checksum,
 )
 
-from .configuration import MesoscopeGoogleSheets
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from ataraxis_data_structures import assemble_log_archives
-
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
+from .configuration import MesoscopeGoogleSheets
 from ..shared_components import WaterLog, SurgeryLog
 
 if TYPE_CHECKING:
@@ -98,7 +98,7 @@ def _process_stack(
 
     Raises:
         NotImplementedError: If the extracted frame-variant ScanImage metadata cannot be processed due to a mismatch
-            between the ScanImage version and the version of the sl-experiment library.
+            between the ScanImage version and the version of the sollertia-experiment library.
 
     Args:
         tiff_path: The path to the TIFF file that stores the stack of the mesoscope-acquired frames to process.
@@ -140,7 +140,7 @@ def _process_stack(
                     # Use the schema to parse and convert the value
                     _, converter = _METADATA_SCHEMA[key]
                     arrays[key][i] = converter(value)
-                elif key == "epoch":  # Epoch data is converted to the Sun lab's timestamp format.
+                elif key == "epoch":  # Epoch data is converted to the Sollertia platform's timestamp format.
                     # Parses the epoch [year month day hour minute second.microsecond] as microseconds elapsed since
                     # the UTC onset.
                     epoch_vals = [float(x) for x in value[1:-1].split()]
@@ -492,9 +492,9 @@ def _preprocess_mesoscope_directory(
 
         # Displays a progress bar that tracks the frame processing.
         progress_path = Path(*image_directory.parts[-6:])
-        with tqdm(
+        with console.progress(
             total=len(valid_stacks),
-            desc=f"Processing TIFF stacks for {progress_path}",
+            description=f"Processing TIFF stacks for {progress_path}",
             unit="stack",
         ) as pbar:
             for future in as_completed(futures):
@@ -845,7 +845,9 @@ def purge_session(session_data: SessionData) -> None:
     ]
 
     # Removes all session-specific data directories from all destinations.
-    for candidate in tqdm(deletion_candidates, desc="Deleting session directories", unit="directory"):
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting session directories", unit="directory"
+    ):
         delete_directory(directory_path=candidate)
 
     # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
@@ -879,7 +881,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sl-configure project' command to create the project before "
+            f"target project does not exist. Use the 'sle configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -959,7 +961,9 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         system_configuration.filesystem.root_directory.joinpath(source_project, animal),
         system_configuration.filesystem.server_directory.joinpath(source_project, animal),
     ]
-    for candidate in tqdm(deletion_candidates, desc="Deleting redundant animal directories", unit="directory"):
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
+    ):
         delete_directory(directory_path=candidate)
 
     console.echo("Migration: Complete.", level=LogLevel.SUCCESS)

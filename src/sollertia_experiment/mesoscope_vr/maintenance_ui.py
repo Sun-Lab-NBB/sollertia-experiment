@@ -6,9 +6,9 @@ import contextlib
 from multiprocessing import Process
 
 import numpy as np
-from PyQt6.QtGui import QFont, QCloseEvent
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import (
+from PySide6.QtGui import QFont, QCloseEvent
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
     QLabel,
     QWidget,
     QGroupBox,
@@ -140,7 +140,7 @@ class MaintenanceControlUI:
         try:
             app = QApplication(sys.argv)
             app.setApplicationName("Mesoscope-VR Maintenance Panel")
-            app.setOrganizationName("SunLab")
+            app.setOrganizationName("Sollertia")
             app.setStyle("Fusion")
 
             window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)

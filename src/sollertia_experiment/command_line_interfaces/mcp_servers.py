@@ -1,41 +1,42 @@
-"""Provides MCP servers for agentic interaction with sl-experiment CLI functionality.
+"""Provides MCP servers for agentic interaction with sollertia-experiment CLI functionality.
 
-This module exposes tools from the 'sl-get' and 'sl-manage' CLI groups through the Model Context Protocol (MCP),
-enabling AI agents to programmatically interact with data acquisition system features.
+This module exposes tools from the 'sle get' and 'sle manage' subcommand groups through the Model Context Protocol
+(MCP), enabling AI agents to programmatically interact with data acquisition system features.
 """
 
-import uuid
-import contextlib
 from enum import Enum
+import uuid
 from typing import Any, Literal, get_type_hints
 from pathlib import Path
+import contextlib
 from dataclasses import MISSING, fields, is_dataclass
 
 import yaml  # type: ignore[import-untyped]
-from sl_shared_assets import SessionData
 from mcp.server.fastmcp import FastMCP
+from ataraxis_base_utilities import ensure_directory_exists
+from sollertia_shared_assets import SessionData
 
 from ..mesoscope_vr import (
     CRCCalculator,
+    ZaberPositions,
     MesoscopePositions,
     MesoscopeSystemConfiguration,
-    ZaberPositions,
     purge_session,
     get_zaber_devices_info,
     preprocess_session_data,
     set_zaber_device_setting,
     get_zaber_device_settings,
-    migrate_animal_between_projects,
-    validate_zaber_device_configuration,
     get_system_configuration_data,
     get_system_configuration_path,
+    migrate_animal_between_projects,
+    validate_zaber_device_configuration,
 )
 
-# Initializes the MCP server for sl-get tools.
-get_mcp = FastMCP(name="sl-experiment-get", json_response=True)
+# Initializes the MCP server for 'sle get' tools.
+get_mcp = FastMCP(name="sollertia-experiment-get", json_response=True)
 
-# Initializes the MCP server for sl-manage tools.
-manage_mcp = FastMCP(name="sl-experiment-manage", json_response=True)
+# Initializes the MCP server for 'sle manage' tools.
+manage_mcp = FastMCP(name="sollertia-experiment-manage", json_response=True)
 
 
 @get_mcp.tool()
@@ -411,7 +412,7 @@ def _write_yaml_validated(
     if file_path.exists() and not overwrite:
         return {"error": f"File already exists: {file_path}. Pass overwrite=True to replace."}
 
-    file_path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_directory_exists(path=file_path.parent)
     temp_path = file_path.with_name(f".{file_path.stem}.{uuid.uuid4().hex[:8]}.tmp.yaml")
 
     try:
@@ -470,7 +471,7 @@ def _check_path(path: Path) -> dict[str, Any]:
         return report
     report["is_mount"] = path.is_mount()
     try:
-        probe = path.joinpath(f".__sl_experiment_probe_{uuid.uuid4().hex[:8]}")
+        probe = path.joinpath(f".__sollertia_experiment_probe_{uuid.uuid4().hex[:8]}")
         probe.touch()
         probe.unlink()
         report["writable"] = True
@@ -654,7 +655,7 @@ def read_session_system_configuration_tool(session_path: str) -> dict[str, Any]:
 
 
 def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Starts the sl-get MCP server with the specified transport.
+    """Starts the 'sle get' MCP server with the specified transport.
 
     Args:
         transport: The transport protocol to use. Supported values are 'stdio' for standard input/output
@@ -665,7 +666,7 @@ def run_get_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdi
 
 
 def run_manage_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") -> None:
-    """Starts the sl-manage MCP server with the specified transport.
+    """Starts the 'sle manage' MCP server with the specified transport.
 
     Args:
         transport: The transport protocol to use. Supported values are 'stdio' for standard input/output

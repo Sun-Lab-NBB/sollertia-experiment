@@ -1,16 +1,22 @@
-Welcome to sl-experiment API documentation page
-===============================================
+Welcome to sollertia-experiment API documentation page
+======================================================
 
-sl-experiment is a Python library that provides the assets for acquiring and preprocessing scientific data in the
-Sun (NeuroAI) lab.
+Provides data acquisition and preprocessing runtimes for Sollertia platform data acquisition systems.
 
-This library uses the tools released as part of the 'Ataraxis' science-automation project, developed in the
-`Sun lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. The main purpose of this library is to specialize
-the context-agnostic Ataraxis tools to work for the specific runtime context(s) in the Sun lab.
+This library is part of the `Sollertia <https://github.com/Sun-Lab-NBB/sollertia>`_ AI-assisted scientific data
+acquisition and processing platform, built on the `Ataraxis <https://github.com/Sun-Lab-NBB/ataraxis>`_ framework and
+developed in the `Sun (NeuroAI) lab <https://neuroai.github.io/sunlab/>`_ at Cornell University. It is the data
+acquisition runtime of the platform, paired with the shared dataclasses and configuration tools provided by
+`sollertia-shared-assets <https://github.com/Sun-Lab-NBB/sollertia-shared-assets>`_ and the data processing pipeline
+exposed by `sollertia-forgery <https://github.com/Sun-Lab-NBB/sollertia-forgery>`_.
 
-This website only contains the API documentation for the assets offered by this library. See the project
-GitHub repository for the installation instructions and additional library usage details:
-`sl-experiment GitHub repository <https://github.com/Sun-Lab-NBB/sl-experiment>`_.
+This website only contains the API documentation for the classes and methods offered by this library. See the project
+GitHub repository for installation instructions and library usage examples:
+`sollertia-experiment GitHub repository <https://github.com/Sun-Lab-NBB/sollertia-experiment>`_.
 
-.. _`sl-experiment GitHub repository`: https://github.com/Sun-Lab-NBB/sl-experiment
-.. _`Sun lab`: https://neuroai.github.io/sunlab/
+.. _`Sollertia`: https://github.com/Sun-Lab-NBB/sollertia
+.. _`Ataraxis`: https://github.com/Sun-Lab-NBB/ataraxis
+.. _`sollertia-shared-assets`: https://github.com/Sun-Lab-NBB/sollertia-shared-assets
+.. _`sollertia-forgery`: https://github.com/Sun-Lab-NBB/sollertia-forgery
+.. _`sollertia-experiment GitHub repository`: https://github.com/Sun-Lab-NBB/sollertia-experiment
+.. _`Sun (NeuroAI) lab`: https://neuroai.github.io/sunlab/

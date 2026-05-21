@@ -1,36 +1,33 @@
-# sl-experiment
+# sollertia-experiment
 
-A Python library that provides tools to acquire, manage, and preprocess scientific data in the Sun (NeuroAI) lab.
+Provides data acquisition and preprocessing runtimes for Sollertia platform data acquisition systems.
 
-![PyPI - Version](https://img.shields.io/pypi/v/sl-experiment)
-![PyPI - Python Version](https://img.shields.io/pypi/pyversions/sl-experiment)
+![PyPI - Version](https://img.shields.io/pypi/v/sollertia-experiment)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/sollertia-experiment)
 [![uv](https://tinyurl.com/uvbadge)](https://github.com/astral-sh/uv)
 [![Ruff](https://tinyurl.com/ruffbadge)](https://github.com/astral-sh/ruff)
 ![type-checked: mypy](https://img.shields.io/badge/type--checked-mypy-blue?style=flat-square&logo=python)
-![PyPI - License](https://img.shields.io/pypi/l/sl-experiment)
-![PyPI - Status](https://img.shields.io/pypi/status/sl-experiment)
-![PyPI - Wheel](https://img.shields.io/pypi/wheel/sl-experiment)
+![PyPI - License](https://img.shields.io/pypi/l/sollertia-experiment)
+![PyPI - Status](https://img.shields.io/pypi/status/sollertia-experiment)
+![PyPI - Wheel](https://img.shields.io/pypi/wheel/sollertia-experiment)
 
 ___
 
 ## Detailed Description
 
-This library functions as the central hub for collecting and preprocessing the data for all current and future projects
-in the Sun lab. To do so, it exposes the API to interface with all data acquisition systems in the lab. Primarily, this
-relies on specializing various general-purpose libraries released as part of the 'Ataraxis' science-automation project
-to work within the specific hardware implementations available in the lab.
+This library is part of the [Sollertia](https://github.com/Sun-Lab-NBB/sollertia) AI-assisted scientific data
+acquisition and processing platform, built on the [Ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) framework and
+developed in the Sun (NeuroAI) lab at Cornell University. It is the data acquisition and preprocessing runtime of the
+platform, pairing with the shared dataclasses and configuration tools provided by
+[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) and feeding the downstream data
+processing pipeline exposed by [sollertia-forgery](https://github.com/Sun-Lab-NBB/sollertia-forgery).
 
-This library is explicitly designed to work with the specific hardware and data handling strategies used in the Sun lab
-and broadly consists of two parts: the shared assets and the acquisition-system-specific bindings. 
-The shared assets are reused by all acquisition systems and are mostly inherited 
-from the [sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library.
-The acquisition-system-specific code is tightly integrated with the hardware used in the lab and is generally not
-designed to be reused in any other context. See the [data acquisition systems](#data-acquisition-systems) section for
-more details on currently supported acquisition systems.
-
-The rest of this ReadMe assumes familiarity with the procedures, experiments, and tools used in the Sun lab
-to acquire scientific data. See the lab [publications](https://neuroai.github.io/sunlab/publications) before reading
-further for an introduction to the work done in the lab.
+This library broadly consists of two parts: the shared assets reused by all acquisition systems (most of which are
+inherited from [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets)) and the
+acquisition-system-specific bindings. The acquisition-system-specific code is tightly integrated with the platform
+hardware and is generally not designed to be reused in any other context. See the
+[data acquisition systems](#data-acquisition-systems) section for more details on currently supported acquisition
+systems.
 
 ___
 
@@ -40,7 +37,7 @@ ___
 - [Data Acquisition Systems](#data-acquisition-systems)
 - [Mesoscope-VR System](#mesoscope-vr-data-acquisition-system)
 - [Acquired Data Structure and Management](#acquired-data-structure-and-management)
-- [Acquiring Data in the Sun Lab](#acquiring-data-in-the-sun-lab)
+- [Acquiring Data](#acquiring-data)
 - [API Documentation](#api-documentation)
 - [Recovering from Interruptions](#recovering-from-interruptions)
 - [Versioning](#versioning)
@@ -57,7 +54,7 @@ ___
 Note, installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
-   [stable releases](https://github.com/Sun-Lab-NBB/sl-experiment/releases).
+   [stable releases](https://github.com/Sun-Lab-NBB/sollertia-experiment/releases).
 2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. ```cd``` to the root directory of the prepared project distribution.
 4. Run ```python -m pip install .``` to install the project. Alternatively, if using a distribution with precompiled
@@ -65,7 +62,7 @@ Note, installation from source is ***highly discouraged*** for anyone who is not
 
 ### pip
 
-Use the following command to install the library using pip: ```pip install sl-experiment```.
+Use the following command to install the library using pip: ```pip install sollertia-experiment```.
 
 ___
 
@@ -73,16 +70,16 @@ ___
 
 A data acquisition (and runtime control) system can be broadly defined as a collection of hardware and software tools
 used to conduct training or experiment sessions that acquire scientific data. Each data acquisition system can use one
-or more machines (PCs) to acquire the data, with this library (sl-experiment) typically running on the **main** data
+or more machines (PCs) to acquire the data, with this library (sollertia-experiment) typically running on the **main** data
 acquisition machine. Additionally, each system typically uses a Network Attached Storage (NAS), a remote storage server,
 or both to safely store the data after the acquisition (with redundancy and parity).
 
-In the Sun lab, each data acquisition system is built around the main tool used to acquire the brain activity data. For
-example, the main system in the Sun lab is the [Mesoscope-VR](#mesoscope-vr-data-acquisition-system) system, which uses
-the [2-Photon Random Access Mesoscope (2P-RAM)](https://elifesciences.org/articles/14472). All other components of that
-system are built around the Mesoscope to facilitate the acquisition of the brain activity data. Due to this inherent
-specialization, each data acquisition system in the lab is treated as an independent unit that requires custom software
-to acquire, preprocess, and process the resultant data.
+In the Sollertia platform, each data acquisition system is built around the main tool used to acquire the brain
+activity data. For example, the flagship system is the [Mesoscope-VR](#mesoscope-vr-data-acquisition-system) system,
+which uses the [2-Photon Random Access Mesoscope (2P-RAM)](https://elifesciences.org/articles/14472). All other
+components of that system are built around the Mesoscope to facilitate the acquisition of the brain activity data. Due
+to this inherent specialization, each Sollertia platform data acquisition system is treated as an independent unit
+that requires custom software to acquire, preprocess, and process the resultant data.
 
 ***Note!*** Since each data acquisition system is unique, the section below is iteratively expanded to include
 system-specific assembly instructions for **each supported acquisition system**. Commonly, updates to this section
@@ -92,21 +89,20 @@ ___
 
 ## Mesoscope-VR Data Acquisition System
 
-This is the main data acquisition system currently used in the Sun lab. The system broadly consists of four major
-parts:
+This is the flagship Sollertia platform data acquisition system. The system broadly consists of four major parts:
 1. The [2-Photon Random Access Mesoscope (2P-RAM)](https://elifesciences.org/articles/14472), assembled by
    [Thor Labs](https://www.thorlabs.com/newgrouppage9.cfm?objectgroup_id=10646) and controlled by
    [ScanImage](https://www.mbfbioscience.com/products/scanimage/) software. The Mesoscope control and data acquisition
    are performed by a dedicated computer referred to as the **'ScanImagePC'**. This PC is assembled and configured by
-   [MBF Bioscience](https://www.mbfbioscience.com/). The only modification carried out by the Sun lab during assembly 
-   was the configuration of a Server Message Block (SMB) protocol access to the root directory used by the ScanImage 
-   software to save the Mesoscope data.
+   [MBF Bioscience](https://www.mbfbioscience.com/). The only modification carried out during assembly was the
+   configuration of a Server Message Block (SMB) protocol access to the root directory used by the ScanImage software
+   to save the Mesoscope data.
 2. The [Unity game engine](https://unity.com/products/unity-engine) running the Virtual Reality game world used in all
    experiments to control the task environment and resolve the task logic. The virtual environment runs on the main data
    acquisition computer referred to as the **'VRPC'** and relies on the [MQTT](https://mqtt.org/) communication protocol
-   and the [Sun lab's implementation of the GIMBL package](https://github.com/Sun-Lab-NBB/Unity-tasks) to 
+   and the [sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) Unity package to
    bidirectionally interface with the virtual task environment.
-3. The [microcontroller-powered hardware](https://github.com/Sun-Lab-NBB/sl-micro-controllers) that allows the animal
+3. The [microcontroller-powered hardware](https://github.com/Sun-Lab-NBB/sollertia-micro-controllers) that allows the animal
    to bidirectionally interface with various physical components (modules) of the Mesoscope-VR system.
 4. A set of visual and IR-range cameras, used to acquire behavior video data.
 
@@ -153,8 +149,8 @@ card, but this is not a strict requirement.
 ### System Assembly
 
 The Mesoscope-VR system consists of multiple interdependent components. We are constantly making minor changes to the
-system to optimize its performance and facilitate novel experiments and projects carried out in the lab. Treat this
-section as a general system composition guide, but consult lab publications over this section for instructions on
+system to optimize its performance and facilitate novel experiments and projects. Treat this section as a general
+system composition guide, but consult the original publication for each project over this section for instructions on
 building specific system implementations used to acquire the data featured in different publications.
 
 Physical assembly and mounting of ***all*** hardware components mentioned in the specific subsections below is discussed
@@ -173,8 +169,8 @@ LickPort. The third group of motors, the **Wheel**, controls the position of the
 to the head-fixed animal's body and is used to position the animal on the running wheel to promote good running 
 behavior.
 
-The current snapshot of Zaber motor configurations used in the lab, alongside the motor parts list, and electrical 
-wiring instructions is available 
+The current snapshot of Zaber motor configurations used by the Sollertia platform, alongside the motor parts list and
+electrical wiring instructions, is available
 [here](https://drive.google.com/drive/folders/1SL75KE3S2vuR9TTkxe6N4wvrYdK-Zmxn?usp=drive_link).
 
 **Warning!** Zaber motors have to be configured correctly to work with this library. To (re)configure the motors to work
@@ -188,7 +184,7 @@ the data expected by this library:
 1. **User Data 0**: Device CRC Code. This variable should store the CRC32-XFER checksum of the device's name
    (user-defined name). During runtime, the library generates the CRC32-XFER checksum of each device's name and compares
    it against the value stored inside the User Data 0 variable to ensure that each device is configured appropriately to
-   work with the sl-experiment library. **Hint!** Use the `sl-get checksum` console command to generate the CRC32-XFER
+   work with the sollertia-experiment library. **Hint!** Use the `sle get checksum` console command to generate the CRC32-XFER
    checksum for each device during manual configuration, as it uses the same code as used during runtime and, therefore,
    guarantees that the checksums match.
 2. **User Data 1**: Device ShutDown Flag. This variable tracks whether the device was properly shut down during
@@ -238,12 +234,12 @@ uses three isolated microcontroller subsystems: **Actor**, **Sensor**, and **Enc
 
 For instructions on assembling and wiring the electronic components used in each microcontroller system, as well as the
 code running on each microcontroller, see the
-[microcontroller repository](https://github.com/Sun-Lab-NBB/sl-micro-controllers).
+[microcontroller repository](https://github.com/Sun-Lab-NBB/sollertia-micro-controllers).
 
 ### Virtual Reality Task Environment (Unity)
 The task environment used in all Mesoscope-VR experiments is rendered and controlled by the Unity game engine. To make
 Unity work with this library, each project-specific Unity task must use the bindings and assets released as part of the
-[Unity-tasks repository](https://github.com/Sun-Lab-NBB/Unity-tasks). Follow the instructions from that repository to
+[sollertia-unity-tasks repository](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks). Follow the instructions from that repository to
 set up Unity Game engine to interface with this library and to create new virtual task environments.
 
 **Note!** This library does not contain tools to initialize Unity Game engine. The desired Virtual Reality task
@@ -252,26 +248,26 @@ Unity repository contains more details about starting the virtual reality tasks 
 CLI-driven experiment runtimes, the library instructs the user when to 'arm' the Unity game engine.
 
 #### Configuration Sharing via MQTT
-The sl-experiment library and Unity communicate bidirectionally using the MQTT protocol. This communication is used to:
-- **Verify scene configuration**: At startup, sl-experiment requests the active Unity scene name and validates it
+The sollertia-experiment library and Unity communicate bidirectionally using the MQTT protocol. This communication is used to:
+- **Verify scene configuration**: At startup, sollertia-experiment requests the active Unity scene name and validates it
   against the expected scene from the experiment configuration file.
-- **Exchange cue sequences**: Unity sends the VR environment's wall cue sequence to sl-experiment, which decomposes
+- **Exchange cue sequences**: Unity sends the VR environment's wall cue sequence to sollertia-experiment, which decomposes
   it into individual trials using the trial structures defined in the experiment configuration.
-- **Synchronize runtime state**: sl-experiment sends encoder data (animal motion) to Unity and receives stimulus
+- **Synchronize runtime state**: sollertia-experiment sends encoder data (animal motion) to Unity and receives stimulus
   triggers (reward delivery, gas puffs) and task guidance state updates.
-- **Control task guidance**: sl-experiment can adjust task guidance modes based on animal performance.
+- **Control task guidance**: sollertia-experiment can adjust task guidance modes based on animal performance.
 
 Experiment configurations are stored as YAML files in the project's configuration directory and are shared between
-Unity and sl-experiment. A copy of the experiment configuration is preserved with each session's raw data for
+Unity and sollertia-experiment. A copy of the experiment configuration is preserved with each session's raw data for
 reproducibility.
 
 ### Google Sheets API Integration
 
-This library interacts with the shared Google Sheet files used in the Sun lab to track and communicate certain
-information about the animals that participate in all projects. Currently, this includes two files: the **surgery log**
-and the **water restriction log**. Primarily, this integration is used to ensure that all information about each
-experiment subject (animal) is stored in the same location (on the long-term storage machine(s)). Additionally, it is
-used in the lab to automate certain data logging tasks.
+This library interacts with the shared Google Sheet files used by the Sollertia platform to track and communicate
+certain information about the animals that participate in all projects. Currently, this includes two files: the
+**surgery log** and the **water restriction log**. Primarily, this integration is used to ensure that all information
+about each experiment subject (animal) is stored in the same location (on the long-term storage machine(s)).
+Additionally, it is used to automate certain data logging tasks.
 
 #### Setting up Google Sheets API Access
 
@@ -292,25 +288,25 @@ To access the **surgery log** and the **water restriction log** Google Sheets as
 and share these log files with the email of the service account created above. The service account requires **Editor**
 access to both files.
 
-**Note!** This feature requires that both log files are formatted according to the available Sun lab templates.
-Otherwise, the parsing algorithm does not behave as expected, leading to runtime failures. Additionally, both log files
+**Note!** This feature requires that both log files are formatted according to the available Sollertia platform
+templates. Otherwise, the parsing algorithm does not behave as expected, leading to runtime failures. Additionally, both log files
 have to be pre-filled in advance, as the processing code is not allowed to automatically generate new table (log) rows.
 **Hint!** Currently, it is advised to pre-fill the data a month in advance. Since most experiments last for at most a
 month, this usually covers the entire experiment period for any animal.
 
 ### ScanImage PC Assets
 As mentioned above, the ScanImagePC is largely assembled and configured by external contractors. However, the PC
-requires additional assets and configuration post-assembly to make it compatible with sl-experiment-managed runtimes.
+requires additional assets and configuration post-assembly to make it compatible with sollertia-experiment-managed runtimes.
 
 #### File System Access
-To support the sl-experiment runtime, the ScanImagePC's filesystem must be accessible to the **VRPC** via the Server
+To support the sollertia-experiment runtime, the ScanImagePC's filesystem must be accessible to the **VRPC** via the Server
 Message Block version 3 (SMB3) or equivalent protocol. Since ScanImagePC uses Windows, it is advised to use the SMB3
 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC must be
 configured to share the root Mesoscope output directory with the VRPC over the local network. This is required to both
 fetch the data acquired by the Mesoscope during preprocessing and to control the Mesoscope during runtime.
 
 #### Default Screenshot Directory
-During runtime, the sl-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop and
+During runtime, the sollertia-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop and
 place it in the network-shared mesoscope data directory (see above). The screenshot is used to store the information 
 about the red-dot alignment, the acquisition parameters, and the state of the imaging plane at the beginning of each 
 session. The library is statically configured to fetch the screenshot from the shared directory and does not look in 
@@ -320,8 +316,8 @@ command on the ScanImagePC to save the screenshots into the shared Mesoscope out
 #### MATLAB Assets
 ScanImage software is written in MATLAB and controls all aspects of Mesoscope data acquisition. While each runtime
 requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation, all data
-acquisition runtimes using the sl-experiment library require the user to call the **setupAcquisition** MATLAB function
-available from [mesoscope assets repository](https://github.com/Sun-Lab-NBB/sl-mesoscope-assets). This function carries
+acquisition runtimes using the sollertia-experiment library require the user to call the **setupAcquisition** MATLAB function
+available from [mesoscope assets repository](https://github.com/Sun-Lab-NBB/sollertia-mesoscope-assets). This function carries
 out multiple runtime-critical tasks, including setting up the acquisition, generating and applying the online motion
 correction algorithm, and allowing the VRPC to control the Mesoscope via creating or removing binary marker files.
 
@@ -352,12 +348,12 @@ it is maintained across all long-term storage destinations. After each data acqu
 raw data is stored under the **root/project/animal/session/raw_data** directory stored on one or more machines mentioned
 below.
 
-Currently, each data acquisition system in the lab uses at least three machines:
+Currently, each Sollertia platform data acquisition system uses at least three machines:
 1. The **main data acquisition PC** is used to acquire and preprocess the data. For example, the *VRPC* of the
    *Mesoscope-VR* system is the main data acquisition PC for that system. This PC is used to both **acquire** the data
    and, critically, to **preprocess** the data before it is moved to the long-term storage destinations.
 2. The **BioHPC compute server** is the main long-term storage destination. This is a high-performance computing
-   server owned by the lab that stores all raw data acquired by Sun lab acquisition systems.
+   server that stores all raw data acquired by Sollertia platform acquisition systems.
 3. The **Synology NAS** is the back-up 'cold' long-term storage destination. It only stores the raw data and is
    located in a different physical location from the main BioHPC compute server to provide data storage redundancy. It
    is only used to back up raw data and is generally not intended to be accessed unless the main data storage becomes
@@ -373,9 +369,9 @@ other on the BioHPC server. It is configured to purge redundant data from the da
 the data has been moved to the long-term storage destinations.
 
 ### Root Directory (Volume)
-All data acquisition systems, the Synology NAS, and the BioHPC server keep **ALL** Sun lab projects in the same **root**
-directory. The exact location and name of the root directory on each machine is arbitrary but should generally remain
-fixed (unchanging) over the entire lifetime of that specific machine.
+All data acquisition systems, the Synology NAS, and the BioHPC server keep **ALL** Sollertia platform projects under
+the same **root** directory. The exact location and name of the root directory on each machine is arbitrary but should
+generally remain fixed (unchanging) over the entire lifetime of that specific machine.
 
 ### Project Directory
 When a new project is created, a **project** directory **named after the project** is created under the **root**
@@ -383,7 +379,7 @@ directory of the main data acquisition machine. Whe the data is moved to the Syn
 as part of preprocessing, the project directory is also created on these destinations, if it does ot already exist.
 
 All data acquisition systems also create a **configuration** subdirectory under the root project directory. This
-directory stores all supported experiment configurations for the project. The `sl-run session` command searches the
+directory stores all supported experiment configurations for the project. The `sle run session` command searches the
 configuration directory for the .yaml file with the name of the target experiment to load the experiment data.
 
 ### Animal Directory
@@ -393,7 +389,7 @@ and **project** directory combination. The directory uses the ID of the animal a
 All data acquisition systems also create a **persistent_data** subdirectory under the root animal directory, which is
 used to store data that is reused between data acquisition sessions.
 
-***Critical!*** The current Sun lab convention stipulates that all animal IDs should be numeric. While some library
+***Critical!*** The current Sollertia platform convention stipulates that all animal IDs should be numeric. While some library
 components do accept strings as inputs, it is expected that all animal IDs only consist of positive integers. Failure to
 adhere to this naming convention can lead to runtime errors and unexpected behavior of all library components!
 
@@ -415,12 +411,12 @@ package the data for transmission and can at any time be converted back to the o
 
 ### Shared Raw Data
 
-The section below briefly lists the data acquired by **all** Sun lab data acquisition systems. Note, each acquisition
+The section below briefly lists the data acquired by **all** Sollertia platform data acquisition systems. Note, each acquisition
 system also generates **system-specific** data, which is listed under acquisition-system-specific sections available
 after this section.
 
 **Note!** For information about the **processed** data, see the
-[main data processing library](https://github.com/Sun-Lab-NBB/sl-forgery).
+[main data processing library](https://github.com/Sun-Lab-NBB/sollertia-forgery).
 
 After acquisition and preprocessing, the **raw_data** directory of each acquisition system contains, as a minimum, the
 following files and subdirectories:
@@ -433,10 +429,10 @@ following files and subdirectories:
    point rounding errors. This file is also used to determine which modules were used during runtime and, consequently,
    which data can be parsed from the .npz log files generated at runtime (see below).
 3. **session_data.yaml**: Stores information necessary to maintain the same session data structure across all machines
-   used during data acquisition and long-term storage. This file is used by all Sun lab libraries as an entry point for
-   working with session's data. The file also includes all available information about the identity and purpose of the
-   session and can be used by human experimenters to identify the session. Since version 3.0.0, the file also stores
-   the version of the sl-experiment and Python that were used to acquire the data.
+   used during data acquisition and long-term storage. This file is used by all Sollertia platform libraries as an
+   entry point for working with session's data. The file also includes all available information about the identity and
+   purpose of the session and can be used by human experimenters to identify the session. Since version 3.0.0, the file
+   also stores the version of the sollertia-experiment and Python that were used to acquire the data.
 4. **session_descriptor.yaml**: Stores session-type-specific information, such as the task parameters and experimenter
    notes. The contents of the file are different for each session type, although some fields are reused by all
    sessions. The contents for this file are partially written by the library (automatically) and, partially, by the
@@ -448,7 +444,7 @@ following files and subdirectories:
    same across all sessions.
 6. **system_configuration.yaml**: Stores the configuration parameters of the data acquisition system that generated the
    session data. This is a snapshot of **all** dynamically addressable configuration parameters used by the system.
-   When combined with the assembly instructions and the appropriate sl-experiment library version, it allows completely
+   When combined with the assembly instructions and the appropriate sollertia-experiment library version, it allows completely
    replicating the data acquisition system used to acquire the session's data.
 7. **behavior_data**: Stores compressed .npz log files that contain all non-video behavior data acquired by the system.
    This includes all messages sent or received by each microcontroller, the timestamps for the frames acquired by
@@ -465,10 +461,10 @@ following files and subdirectories:
    fully replicate the experiment runtime on the same acquisition system and to process and analyze the acquired data.
    Since version 4.0.0, the experiment configuration include the necessary data to fully replace the Virtual Reality 
    environment used during the experiments using Unity game engine and the assets available from the 
-   [sl-unity-tasks](https://github.com/Sun-Lab-NBB/sl-unity-tasks) library.
+   [sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) library.
 
 ### Shared Temporary Data
-The sl-experiment library additionally uses the following temporary marker files and directories which are cleared
+The sollertia-experiment library additionally uses the following temporary marker files and directories which are cleared
 before the raw data is transmitted to the long-term storage destinations:
 1. **nk.bin**: This marker is automatically cached to disk as part of creating a new session data hierarchy. Each
    runtime removes this marker file when it successfully completes its runtime preparation. If this marker exists when 
@@ -541,7 +537,7 @@ following directories and files:
    that session. This step is crucial for data preprocessing, which identifies the session data directory and pulls it 
    over to the VRPC based on the session name (id).
 3. **persistent_data**. This directory is created for each unique **project** and **animal** combination,
-   similar to the data structure created by sl-experiment on the main acquisition system PC. This directory contains
+   similar to the data structure created by sollertia-experiment on the main acquisition system PC. This directory contains
    the **first experiment day's** MotionEstimator.me and fov.roi files. These files are typically reused by all 
    following data acquisition sessions to restore the imaging field to the same location as used on the first day. The 
    full path to the persistent_data directory would typically look like **root/project/animal/persistent_data**.
@@ -568,11 +564,11 @@ The Mesoscope-VR system also generates the following temporary files and directo
 
 ___
 
-## Acquiring Data in the Sun Lab
+## Acquiring Data
 
 All user-facing library functionality is realized through a set of Command Line Interface (CLI) commands automatically
 exposed when the library is pip-installed into a python environment. The library exposes three main CLI command groups:
-`sl-get`, `sl-manage`, and `sl-run`. Each group contains subcommands that allow further configuring their runtime.
+`sle get`, `sle manage`, and `sle run`. Each group contains subcommands that allow further configuring their runtime.
 Use `--help` argument when calling any of the commands described below to see the list of supported arguments together
 with their descriptions and default values.
 
@@ -585,13 +581,13 @@ Failure to do so may damage the equipment or harm the animal!
 
 ### CLI Command Overview
 
-The sl-experiment library exposes three main CLI command groups:
+The sollertia-experiment library exposes three main CLI command groups:
 
 | Command Group | Purpose                                                  |
 |---------------|----------------------------------------------------------|
-| `sl-get`      | Discover and evaluate data acquisition system components |
-| `sl-manage`   | Manage session data (preprocessing, deletion, migration) |
-| `sl-run`      | Execute data acquisition and maintenance sessions        |
+| `sle get`      | Discover and evaluate data acquisition system components |
+| `sle manage`   | Manage session data (preprocessing, deletion, migration) |
+| `sle run`      | Execute data acquisition and maintenance sessions        |
 
 ### Step 0: Configuring the Data Acquisition System
 
@@ -599,26 +595,26 @@ Before acquiring data, each acquisition system has to be configured. This step i
 the system and installing the required hardware components. Typically, this only needs to be done when the acquisition
 system configuration or hardware changes, so most lab members can safely skip this step.
 
-Use `sl-configure system` command (from the
-[sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library) to generate the system configuration file.
+Use `sle configure system` command (from the
+[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library) to generate the system configuration file.
 As part of its runtime, the command configures the host machine to remember the path to the generated configuration
-file, so all future sl-experiment runtimes on that machine automatically load and use the appropriate
+file, so all future sollertia-experiment runtimes on that machine automatically load and use the appropriate
 acquisition-system configuration parameters.
 
-***Note!*** Each acquisition system uses unique configuration parameters. Additionally, the sl-experiment library always
+***Note!*** Each acquisition system uses unique configuration parameters. Additionally, the sollertia-experiment library always
 assumes that any machine (PC) can only be used by a single data-acquisition system (is permanently a part of that
 acquisition system). Only the **main** PC of the data acquisition system (e.g.: the VRPC of the Mesoscope-VR system)
-that runs the sl-experiment library should be configured via this command.
+that runs the sollertia-experiment library should be configured via this command.
 
 For information about the available system configuration parameters, read the *API documentation* of the appropriate
-data-acquisition system available from the [sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library.
+data-acquisition system available from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library.
 Specifically, all data acquisition system configuration parameters are defined in the *SystemConfiguration* class named
 after that system.
 
 ### Step 1: Creating a Project
 
-All data acquisition sessions require a valid project to run. To create a new project, use the `sl-configure project`
-command (from the [sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library). This command can only
+All data acquisition sessions require a valid project to run. To create a new project, use the `sle configure project`
+command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This command can only
 be called on the main PC of a properly configured data-acquisition system (see Step 0 above). As part of its runtime,
 this command generates the root project directory on all machines that make up the data acquisition system.
 
@@ -626,35 +622,35 @@ this command generates the root project directory on all machines that make up t
 
 All projects that involve scientific experiments also need to define at least one **experiment configuration**.
 Experiment configurations are unique for each data acquisition system and are stored inside .yaml files named after the
-experiment. To generate a new experiment configuration file, use the `sl-configure experiment` command (from the
-[sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library). This command generates a **precursor**
+experiment. To generate a new experiment configuration file, use the `sle configure experiment` command (from the
+[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This command generates a **precursor**
 experiment configuration file inside the **configuration** subdirectory, stored under the root project directory on the
 main PC of the data acquisition system.
 
 For information about the available experiment configuration parameters in the precursor file, read the
 *API documentation* of the appropriate data-acquisition system available from the
-[sl-shared-assets](https://github.com/Sun-Lab-NBB/sl-shared-assets) library.
+[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library.
 
 **Mesoscope-VR Note:** Mesoscope-VR experiments also require a valid Virtual Reality environment generated through the
-[sl-unity-tasks](https://github.com/Sun-Lab-NBB/sl-unity-tasks) package. The same experiment configuration file is used
-by both sl-experiment and Unity to define the VR environment (cues, segments, and trials). After creating the
+[sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) package. The same experiment configuration file is used
+by both sollertia-experiment and Unity to define the VR environment (cues, segments, and trials). After creating the
 experiment configuration, use the Unity package to generate the corresponding VR scene before running experiment
 sessions.
 
 ### Step 3: Discovering System Components
 
-Before running sessions, use `sl-get` subcommands to discover and verify the components accessible to the data
+Before running sessions, use `sle get` subcommands to discover and verify the components accessible to the data
 acquisition system:
 
-| Command                         | Description                                                                   |
-|---------------------------------|-------------------------------------------------------------------------------|
-| `sl-get zaber`                  | Discovers Zaber motor devices connected to the system                         |
-| `sl-get projects`               | Lists projects configured for the data acquisition system                     |
-| `sl-get experiments -p PROJECT` | Lists experiment configurations for the specified project                     |
-| `sl-get cameras`                | Discovers cameras accessible to the system (OpenCV and Harvesters interfaces) |
-| `sl-get controllers`            | Discovers microcontrollers accessible to the system                           |
-| `sl-get ports`                  | Lists available serial communication ports                                    |
-| `sl-get checksum -i STRING`     | Calculates the CRC32-XFER checksum for the input string                       |
+| Command                          | Description                                                                   |
+|----------------------------------|-------------------------------------------------------------------------------|
+| `sle get zaber`                  | Discovers Zaber motor devices connected to the system                         |
+| `sle get projects`               | Lists projects configured for the data acquisition system                     |
+| `sle get experiments -p PROJECT` | Lists experiment configurations for the specified project                     |
+| `sle get cameras`                | Discovers cameras accessible to the system (OpenCV and Harvesters interfaces) |
+| `sle get controllers`            | Discovers microcontrollers accessible to the system                           |
+| `sle get ports`                  | Lists available serial communication ports                                    |
+| `sle get checksum -i STRING`     | Calculates the CRC32-XFER checksum for the input string                       |
 
 ### Step 4: Maintaining the Acquisition System
 
@@ -664,8 +660,8 @@ acquisition system. Therefore, this section is further broken into acquisition-s
 #### Mesoscope-VR
 
 The Mesoscope-VR system contains two modules that require frequent maintenance: the **water delivery system** and the
-**running wheel**. To facilitate the maintenance of these modules, the sl-experiment library exposes the
-`sl-run maintenance` command.
+**running wheel**. To facilitate the maintenance of these modules, the sollertia-experiment library exposes the
+`sle run maintenance` command.
 
 This command is typically called at least twice during each day the system is used to acquire data. First, it is used
 at the beginning of the day to prepare the Mesoscope-VR system for runtime by filling the water delivery system. Second,
@@ -688,7 +684,7 @@ systems may also support one or more training session types, which often do not 
 otherwise behave similar to experiment sessions.
 
 All session commands require common parameters: user ID, project name, animal ID, and animal weight. These are provided
-to the parent `sl-run session` command before specifying the session type.
+to the parent `sle run session` command before specifying the session type.
 
 #### Mesoscope-VR Session Commands
 
@@ -696,7 +692,7 @@ The Mesoscope-VR system supports four types of runtime sessions:
 
 **1. Window Checking Session**
 ```bash
-sl-run session -u USER -p PROJECT -a ANIMAL -w WEIGHT check-window
+sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT check-window
 ```
 
 This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
@@ -706,7 +702,7 @@ the animal in experiment cohorts.
 
 **2. Lick Training Session**
 ```bash
-sl-run session -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]
+sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]
 ```
 
 All animals that participate in Mesoscope-VR experiments undergo a two-stage training protocol, with lick training
@@ -720,7 +716,7 @@ tracking threshold.
 
 **3. Run Training Session**
 ```bash
-sl-run session -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]
+sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]
 ```
 
 This is the second stage of the mandatory two-stage Mesoscope-VR training protocol. During this runtime, the animals
@@ -734,7 +730,7 @@ water volume, idle time allowance, and unconsumed reward tracking threshold.
 
 **4. Experiment Session**
 ```bash
-sl-run session -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]
+sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]
 ```
 
 This session type is designed to execute the experiment specified in the target *experiment_configuration.yaml* file
@@ -755,7 +751,7 @@ CLI command.
 The most commonly used operation is to **preprocess** the acquired data. This can be done manually by calling:
 
 ```bash
-sl-manage preprocess -sp SESSION_PATH
+sle manage preprocess -sp SESSION_PATH
 ```
 
 Preprocessing consists of two major steps. The first step pulls all available data to the main data acquisition system
@@ -778,7 +774,7 @@ long-term storage destinations. This runtime is extremely dangerous and, if not 
 ***permanently delete valid data***. This mode can be triggered using:
 
 ```bash
-sl-manage delete -sp SESSION_PATH
+sle manage delete -sp SESSION_PATH
 ```
 
 **Warning!** This command is not recommended for most users.
@@ -788,7 +784,7 @@ sl-manage delete -sp SESSION_PATH
 To transfer all sessions for an animal from one project to another, use:
 
 ```bash
-sl-manage migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
+sle manage migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
 ```
 
 This moves the animal's data across all accessible storage destinations.
@@ -802,11 +798,11 @@ This library provides two MCP servers that expose CLI functionality for AI agent
 Start the MCP servers using the CLI:
 
 ```bash
-sl-get mcp      # Discovery and evaluation tools
-sl-manage mcp   # Data management tools
+sle get mcp      # Discovery and evaluation tools
+sle manage mcp   # Data management tools
 ```
 
-#### Available Tools (sl-get MCP)
+#### Available Tools (sle get MCP)
 
 | Tool                                | Description                                                      |
 |-------------------------------------|------------------------------------------------------------------|
@@ -821,7 +817,7 @@ sl-manage mcp   # Data management tools
 | `check_mount_accessibility_tool`    | Verifies a filesystem path is accessible and writable            |
 | `check_system_mounts_tool`          | Verifies all configured filesystem paths are accessible          |
 
-#### Available Tools (sl-manage MCP)
+#### Available Tools (sle manage MCP)
 
 | Tool                            | Description                                              |
 |---------------------------------|----------------------------------------------------------|
@@ -838,13 +834,13 @@ Add the following to the Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "sl-experiment-get": {
-      "command": "sl-get",
-      "args": ["mcp"]
+    "sollertia-experiment-get": {
+      "command": "sle",
+      "args": ["get", "mcp"]
     },
-    "sl-experiment-manage": {
-      "command": "sl-manage",
-      "args": ["mcp"]
+    "sollertia-experiment-manage": {
+      "command": "sle",
+      "args": ["manage", "mcp"]
     }
   }
 }
@@ -854,7 +850,7 @@ ___
 
 ## API Documentation
 
-See the [API documentation](https://sl-experiment-api-docs.netlify.app/) for the
+See the [API documentation](https://sollertia-experiment-api-docs.netlify.app/) for the
 detailed description of the methods and classes exposed by components of this library, as well as all available
 CLI commands with their arguments.
 
@@ -873,7 +869,7 @@ the ScanImagePC unexpectedly shuts down during Mesoscope-VR system runtime. In t
 instructs the user to troubleshoot the issue and then resume the runtime. This type of *soft* interruption is handled
 gracefully during runtime to exclude the data collected during the interruption from the output dataset. Generally,
 soft interruptions are supported for most external assets, which includes anything not managed directly by the
-sl-experiment library and the main data acquisition system PC. While inconvenient, these
+sollertia-experiment library and the main data acquisition system PC. While inconvenient, these
 interruptions do not typically require specialized handling other than recovering and restoring the failed asset.
 
 **Note!** While most soft interruptions typically entail resuming the interrupted runtime, it is also possible to
@@ -881,7 +877,7 @@ instead terminate the runtime. To do so, execute the `terminate` command via the
 the runtime. In this case, the system attempts to execute a graceful shutdown procedure, saving all valid data in the
 process.
 
-The second way involves interruption due to sl-experiment runtime failures or unexpected shut-downs of the main
+The second way involves interruption due to sollertia-experiment runtime failures or unexpected shut-downs of the main
 acquisition system PC. In these cases, manual user intervention is typically required to recover the useful data and
 reset the system before the acquisition can be restarted. The handling of such cases often consists of specific steps
 for each supported acquisition system. Typically, these *hard* interruptions are related to major issues, such as
@@ -906,12 +902,12 @@ instructions:
    For example, from mesoscope_data → 2025-11-11-05-03-234123. **Critical!** if this is not done, the library may
    **delete** any leftover Mesoscope files during the next runtime and cannot properly preprocess the frames for the
    interrupted session during the next step.
-6. Call `sl-manage preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
+6. Call `sle manage preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
    session. This preprocesses and transfers all collected data to the long-term storage destinations. This preserves
    any data acquired before the interruption and prepares the system for running the next session.
 
 ### Data preprocessing interruption
-To recover from an error encountered during preprocessing, call `sl-manage preprocess -sp SESSION_PATH` and provide
+To recover from an error encountered during preprocessing, call `sle manage preprocess -sp SESSION_PATH` and provide
 the path to the session directory of the interrupted session. The preprocessing pipeline automatically resumes an
 interrupted runtime from the nearest checkpoint.
 
@@ -920,7 +916,7 @@ ___
 ## Versioning
 
 This project uses [semantic versioning](https://semver.org/). See the
-[tags on this repository](https://github.com/Sun-Lab-NBB/sl-experiment/tags) for the available project releases.
+[tags on this repository](https://github.com/Sun-Lab-NBB/sollertia-experiment/tags) for the available project releases.
 
 ___
 
@@ -942,8 +938,8 @@ ___
 
 ## Acknowledgments
 
-- All Sun lab [members](https://neuroai.github.io/sunlab/people) for providing the inspiration and comments during the
-  development of this library.
+- All Sun (NeuroAI) lab [members](https://neuroai.github.io/sunlab/people) for providing the inspiration and comments
+  during the development of this library.
 - The creators of all other dependencies and projects listed in the [pyproject.toml](pyproject.toml) file.
 
 ___

@@ -17,7 +17,7 @@ from numba import njit  # type: ignore[import-untyped]
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
-from sl_shared_assets import (
+from sollertia_shared_assets import (
     SessionData,
     GasPuffTrial,
     SessionTypes,
@@ -898,7 +898,7 @@ class _MesoscopeVRSystem:
         # animal.
         if self._mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
             # Loading and re-dumping the data updates the contents of the position's file to dynamically integrate any
-            # upstream changes in the sl-shared-assets into the file structure.
+            # upstream changes in the sollertia-shared-assets into the file structure.
             previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
                 file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
             )
@@ -2621,7 +2621,7 @@ def window_checking_logic(
         message = (
             f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
             f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sl-configure project' command to configure the project before running "
+            f"data for this project. Use the 'sle configure project' command to configure the project before running "
             f"data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -2640,7 +2640,7 @@ def window_checking_logic(
         message = (
             f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
             f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sl-manage migrate' "
+            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
             f"CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
@@ -2655,7 +2655,7 @@ def window_checking_logic(
         animal_id=animal_id,
         session_type=SessionTypes.WINDOW_CHECKING,
         python_version=python_version,
-        sl_experiment_version=library_version,
+        sollertia_experiment_version=library_version,
         acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
@@ -2823,7 +2823,7 @@ def lick_training_logic(
         message = (
             f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
             f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sl-configure project' command to configure the project before running "
+            f"data for this project. Use the 'sle configure project' command to configure the project before running "
             f"data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -2842,7 +2842,7 @@ def lick_training_logic(
         message = (
             f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
             f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sl-manage migrate' "
+            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
             f"CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
@@ -2857,7 +2857,7 @@ def lick_training_logic(
         animal_id=animal_id,
         session_type=SessionTypes.LICK_TRAINING,
         python_version=python_version,
-        sl_experiment_version=library_version,
+        sollertia_experiment_version=library_version,
         acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
@@ -3137,7 +3137,7 @@ def run_training_logic(
         message = (
             f"Unable to execute the run training session for the animal {animal_id} participating in the project "
             f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sl-configure project' command to configure the project before running "
+            f"data for this project. Use the 'sle configure project' command to configure the project before running "
             f"data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -3156,7 +3156,7 @@ def run_training_logic(
         message = (
             f"Unable to execute the run training session for the animal {animal_id} participating in the project "
             f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sl-manage migrate' "
+            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
             f"CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
@@ -3171,7 +3171,7 @@ def run_training_logic(
         animal_id=animal_id,
         session_type=SessionTypes.RUN_TRAINING,
         python_version=python_version,
-        sl_experiment_version=library_version,
+        sollertia_experiment_version=library_version,
         acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
@@ -3333,7 +3333,9 @@ def run_training_logic(
         console.echo(message=message, level=LogLevel.SUCCESS)
 
         # Creates a tqdm progress bar that tracks the overall training progress by communicating the total volume of
-        # water delivered to the animal
+        # water delivered to the animal. Uses tqdm directly (instead of console.progress) because the bar relies on
+        # set_postfix_str() and a custom bar_format to display the running training time alongside the volume readout,
+        # neither of which the ataraxis-base-utilities ProgressBar wrapper currently exposes.
         progress_bar = tqdm(
             total=round(descriptor.maximum_water_volume_ml, ndigits=3),
             desc="Delivered water volume",
@@ -3548,7 +3550,7 @@ def experiment_logic(
         message = (
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
             f"the project {project_name}. The {system_configuration.name} data acquisition system is not configured to "
-            f"acquire data for this project. Use the 'sl-configure project' command to configure the project before "
+            f"acquire data for this project. Use the 'sle configure project' command to configure the project before "
             f"running data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -3561,7 +3563,7 @@ def experiment_logic(
         message = (
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
             f"the project {project_name}. The target project does not have an experiment configuration file named "
-            f"after the target experiment. Use the 'sl-configure experiment' command to configure the experiment "
+            f"after the target experiment. Use the 'sle configure experiment' command to configure the experiment "
             f"before running experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -3581,7 +3583,7 @@ def experiment_logic(
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
             f"the project {project_name}. The animal is already associated with a different project "
             f"'{animal_projects[0]}' managed by the {system_configuration.name} data acquisition system. If necessary, "
-            f"use the 'sl-manage migrate' CLI command to transfer the animal to the desired project."
+            f"use the 'sle manage migrate' CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
 
@@ -3596,7 +3598,7 @@ def experiment_logic(
         session_type=SessionTypes.MESOSCOPE_EXPERIMENT,
         experiment_name=experiment_name,
         python_version=python_version,
-        sl_experiment_version=library_version,
+        sollertia_experiment_version=library_version,
         acquisition_system=system_configuration,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
@@ -3714,7 +3716,9 @@ def experiment_logic(
                 recovery_guided_trials=state.aversive_recovery_guided_trials,
             )
 
-            # Creates a tqdm progress bar for the current experiment state
+            # Creates a tqdm progress bar for the current experiment state. Uses tqdm directly because the bar relies on
+            # a custom bar_format to display the percentage and elapsed seconds, which the ataraxis-base-utilities
+            # ProgressBar wrapper currently does not expose.
             with tqdm(
                 total=state.state_duration_s,
                 desc=f"Executing experiment state {state.experiment_state_code}",
@@ -3824,6 +3828,7 @@ def maintenance_logic() -> None:
                 controller_id=np.uint8(101),
                 buffer_size=8192,
                 port=system_configuration.microcontrollers.actor_port,
+                name="actor",
                 data_logger=logger,
                 module_interfaces=(valve, gas_puff_valve, wheel),
             )

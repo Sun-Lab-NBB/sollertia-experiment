@@ -12,25 +12,28 @@ This ensures you:
 
 ## Style Guide Requirements
 
-You MUST invoke `/sun-lab-style` and read the appropriate guide before performing ANY of the following tasks:
+You MUST invoke the appropriate `automation:*` style skill before performing ANY of the following tasks:
 
-| Task                              | Guide to Read      |
-|-----------------------------------|--------------------|
-| Writing or modifying Python code  | PYTHON_STYLE.md    |
-| Writing or modifying README files | README_STYLE.md    |
-| Writing git commit messages       | COMMIT_STYLE.md    |
-| Writing or modifying skill files  | SKILL_STYLE.md     |
+| Task                              | Skill to Invoke              |
+|-----------------------------------|------------------------------|
+| Writing or modifying Python code  | `automation:python-style`    |
+| Writing or modifying README files | `automation:readme-style`    |
+| Writing git commit messages       | `automation:commit`          |
+| Writing or modifying skill files  | `automation:skill-design`    |
+| Modifying pyproject.toml          | `automation:pyproject-style` |
+| Modifying tox.ini                 | `automation:tox-config`      |
+| Modifying Sphinx documentation    | `automation:api-docs`        |
 
-This is non-negotiable. The skill contains verification checklists that you MUST complete before submitting any work.
-Failure to read the appropriate guide results in style violations.
+This is non-negotiable. Each skill contains verification checklists that you MUST complete before submitting any work.
+Failure to invoke the appropriate skill results in style violations.
 
 ## Acquisition System Configuration
 
-When users want to interact with the acquisition system hardware or configuration, you MUST invoke the
-`/acquisition-system-setup` skill. This skill provides MCP tools for hardware discovery and guides configuration file
-editing.
+When users want to interact with the acquisition system hardware or configuration, you MUST invoke the appropriate
+`assets:*` skill from the sollertia-shared-assets plugin. The plugin exposes MCP tools for hardware discovery and
+configuration management.
 
-**Invoke this skill when users want to:**
+**Invoke the appropriate assets skill when users want to:**
 - Discover hardware (cameras, microcontrollers, Zaber motors, MQTT broker)
 - Set up or configure an acquisition system
 - Change system parameters (ports, calibration values, thresholds)
@@ -46,13 +49,13 @@ editing.
 
 ## Cross-Referenced Library Verification
 
-Sun Lab projects often depend on other `ataraxis-*` or `sl-*` libraries. These libraries may be stored locally in the
-same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
+Sollertia platform projects often depend on other `ataraxis-*` or `sollertia-*` libraries. These libraries may be stored
+locally in the same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
 
 1. **Check for local version**: Look for the library in the parent directory (e.g., `../ataraxis-video-system/`,
-   `../sl-shared-assets/`).
+   `../sollertia-shared-assets/`).
 
 2. **Compare versions**: If a local copy exists, compare its version against the latest release or main branch on
    GitHub:
@@ -71,38 +74,25 @@ same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`
 **Why this matters**: Skills and documentation may reference outdated APIs. Always verify against the actual library
 state to prevent integration errors.
 
-## Available Skills
-
-| Skill                            | Description                                                                  |
-|----------------------------------|------------------------------------------------------------------------------|
-| `/explore-codebase`              | Perform in-depth codebase exploration at session start                       |
-| `/sun-lab-style`                 | Apply Sun Lab coding conventions (REQUIRED for all code changes)             |
-| `/camera-interface`              | Guide for using ataraxis-video-system to implement camera hardware           |
-| `/microcontroller-interface`     | Guide for implementing microcontroller modules and PC interfaces             |
-| `/zaber-interface`               | Guide for implementing Zaber motor interfaces and binding classes            |
-| `/acquisition-system-setup`      | Configure data acquisition systems (uses MCP tools from sl-shared-assets)    |
-| `/experiment-design`             | Interactive guidance for building experiment configurations (uses MCP tools) |
-| `/modifying-mesoscope-vr-system` | Guide for extending mesoscope-vr with new hardware components                |
-| `/data-management`               | Manage session data: preprocessing, animal migration, and deletion           |
-
 ## Project Context
 
-This is **sl-experiment**, a Python library for scientific data acquisition in the Sun Lab at Cornell University. The
-library is designed to manage any combination of acquisition systems and can be extended to support new systems or
-modified to remove existing ones. Currently, sl-experiment manages the **Mesoscope-VR** two-photon imaging system,
-which combines brain imaging with virtual reality behavioral tasks.
+This is **sollertia-experiment**, the data acquisition and preprocessing runtime of the Sollertia platform. The
+library is designed to manage any combination of Sollertia platform data acquisition systems and can be extended to
+support new systems or modified to remove existing ones. Currently, sollertia-experiment manages the **Mesoscope-VR**
+two-photon imaging system, which combines brain imaging with virtual reality behavioral tasks.
 
 ### Key Areas
 
-| Directory                                    | Purpose                                                  |
-|----------------------------------------------|----------------------------------------------------------|
-| `src/sl_experiment/command_line_interfaces/` | CLI entry points (sl-get, sl-manage, sl-run)             |
-| `src/sl_experiment/mesoscope_vr/`            | Mesoscope-VR system implementation (current system)      |
-| `src/sl_experiment/shared_components/`       | Cross-system utilities shared by all acquisition systems |
+| Directory                                           | Purpose                                                  |
+|-----------------------------------------------------|----------------------------------------------------------|
+| `src/sollertia_experiment/command_line_interfaces/` | CLI entry points (consolidated under the `sle` command)  |
+| `src/sollertia_experiment/mesoscope_vr/`            | Mesoscope-VR system implementation (current system)      |
+| `src/sollertia_experiment/shared_components/`       | Cross-system utilities shared by all acquisition systems |
 
 ### Architecture
 
-- Three CLI commands delegate to specialized subsystems
+- A single `sle` CLI entry point delegates to specialized subgroups (`sle get`, `sle manage`, `sle run`,
+  `sle configure`)
 - Hardware abstraction via binding classes (Zaber motors, cameras, microcontrollers)
 - Shared memory IPC for GUI-runtime communication
 - Session-based data management with distributed storage
@@ -112,49 +102,46 @@ which combines brain imaging with virtual reality behavioral tasks.
 - MyPy strict mode with full type annotations
 - Google-style docstrings
 - 120 character line limit
-- See `/sun-lab-style` for complete conventions
+- See `automation:python-style` for complete conventions
 
 ### Workflow Guidance
 
 **Adding hardware to mesoscope-vr:**
 
-Use the `/modifying-mesoscope-vr-system` skill for comprehensive guidance on:
-1. Adding configuration dataclasses in sl-shared-assets
-2. Implementing binding classes in sl-experiment
-3. Integrating with data_acquisition.py lifecycle
+1. Add configuration dataclasses in `sollertia-shared-assets`
+2. Implement binding classes in `sollertia-experiment`
+3. Integrate with `data_acquisition.py` lifecycle
 
-For low-level camera hardware implementation, use the `/camera-interface` skill.
+For low-level camera hardware implementation, use the `video:camera-interface` skill.
 
-For low-level microcontroller hardware implementation, use the `/microcontroller-interface` skill.
+For low-level microcontroller hardware implementation, use the `communication:microcontroller-interface` skill.
 
-For low-level Zaber motor hardware implementation, use the `/zaber-interface` skill.
+For Zaber motor configuration, follow the existing patterns in `mesoscope_vr/zaber_bindings.py`.
 
 **Adding hardware bindings (general):**
 
-1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `shared_components/module_interfaces.py`
+1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to
+   `shared_components/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
-4. Use configuration dataclasses from `sl-shared-assets` for hardware parameters
+4. Use configuration dataclasses from `sollertia-shared-assets` for hardware parameters
 
 **Modifying CLI commands:**
 
-1. Identify the appropriate CLI module: `execute.py` (sl-run), `manage.py` (sl-manage), or `get.py` (sl-get)
+1. Identify the appropriate CLI module: `execute.py` (`sle run`), `manage.py` (`sle manage`), `get.py` (`sle get`),
+   or `configure.py` (`sle configure`)
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
-4. Register commands with the appropriate Click group
+4. Register commands with the appropriate Click group (subgroups are auto-registered on the top-level `sle` group via
+   `entry_points.py`)
 
-**Modifying sl-shared-assets (configuration dataclasses):**
+**Modifying sollertia-shared-assets (configuration dataclasses):**
 
-Changes to system configuration require updates in `sl-shared-assets` (`../sl-shared-assets/`). For mesoscope-vr
-hardware modifications, see the `/modifying-mesoscope-vr-system` skill which covers adding configuration dataclasses.
+Changes to system configuration require updates in `sollertia-shared-assets` (`../sollertia-shared-assets/`). Use the
+`assets:*` skills from the sollertia-shared-assets plugin for guidance.
 
-**Modifying sl-micro-controllers (hardware modules):**
+**Modifying sollertia-micro-controllers (hardware modules):**
 
-Use the `/microcontroller-interface` skill for comprehensive guidance on adding microcontroller hardware. The skill
-covers:
-1. Firmware module implementation in sl-micro-controllers (C++ templates, command handlers)
-2. PC interface implementation in sl-experiment (ModuleInterface subclasses)
-3. Integration with MicroControllerInterfaces binding class
-
-Changes require updates in `sl-micro-controllers` (`../sl-micro-controllers/`) for firmware and `sl-experiment` for the
-PC interface.
+Changes require updates in `sollertia-micro-controllers` (`../sollertia-micro-controllers/`) for firmware and
+`sollertia-experiment` for the PC interface. Use the `communication:microcontroller-interface` and
+`microcontroller:firmware-module` skills for guidance.

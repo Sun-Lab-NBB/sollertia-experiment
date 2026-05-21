@@ -1,5 +1,5 @@
-"""Provides the 'sl-get' Command Line Interface (CLI) for evaluating the composition of the data acquisition system
-managed by the host-machine.
+"""Provides the 'sle get' subcommand for evaluating the composition of the data acquisition system managed by the
+host-machine.
 """
 
 import click
@@ -7,7 +7,7 @@ from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
-from ataraxis_communication_interface import print_microcontroller_ids
+from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
 from .mcp_servers import run_get_server
 from ..mesoscope_vr import (
@@ -52,7 +52,7 @@ def get_projects() -> None:
         console.echo(
             f"The {system_configuration.name} data acquisition system is currently not configured to acquire data for "
             f"any projects. To configure the system to support acquiring data for a new project, use the "
-            f"'sl-configure project' CLI command."
+            f"'sle configure project' subcommand."
         )
 
 
@@ -77,7 +77,7 @@ def get_experiments(project: str) -> None:
         console.echo(
             f"The {system_configuration.name} data acquisition system is currently not configured to execute any "
             f"experiments for the {project} project. To configure the system to support a new experiment "
-            f"configuration, use the 'sl-configure experiment' CLI command."
+            f"configuration, use the 'sle configure experiment' subcommand."
         )
 
 
@@ -134,7 +134,7 @@ def get_cameras() -> None:
 @get.command("controllers")
 def get_microcontrollers() -> None:
     """Identifies the microcontrollers accessible to the data acquisition system."""
-    print_microcontroller_ids(baudrate=115200)
+    _identify_microcontrollers.callback(baudrate=115200)  # type: ignore[misc]
 
 
 @get.command("ports")
@@ -167,5 +167,5 @@ def calculate_crc(input_string: str) -> None:
     help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
 )
 def start_get_mcp_server(transport: str) -> None:  # pragma: no cover
-    """Starts the MCP server for agentic access to sl-get tools."""
+    """Starts the MCP server for agentic access to 'sle get' tools."""
     run_get_server(transport=transport)  # type: ignore[arg-type]

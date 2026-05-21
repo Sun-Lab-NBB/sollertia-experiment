@@ -5,11 +5,12 @@ build-backend = "hatchling.build"
 
 # Project metadata section. Provides the general ID information about the project.
 [project]
-name = "sl-experiment"
-version = "4.0.0"
-description = "Provides the assets for acquiring and preprocessing scientific data in the Sun (NeuroAI) lab."
+name = "sollertia-experiment"
+version = "5.0.0rc1"
+description = "Provides data acquisition and preprocessing runtimes for Sollertia platform data acquisition systems."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.14,<3.15"
 authors = [
     { name = "Ivan Kondratyev" },
@@ -22,7 +23,7 @@ maintainers = [
     { name = "Ivan Kondratyev", email = "ik278@cornell.edu" },
 ]
 
-keywords = ["sunlab", "data", "acquisition", "ataraxis", "interface", "experiment", "mesoscope"]
+keywords = ["sollertia", "ataraxis", "data-acquisition", "mesoscope", "experiment"]
 
 classifiers = [
     # Development status
@@ -30,8 +31,6 @@ classifiers = [
     # Intended audience and project topic
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
-    # License
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     # Supported Python Versions
     "Programming Language :: Python :: 3.14",
     # Supported OS systems
@@ -42,42 +41,43 @@ classifiers = [
 
 # Runtime project dependencies.
 dependencies = [
-    "zaber-motion==8.0.3",
+    "zaber-motion==9.3.0",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "click==8.3.1",
-    "numpy==2.3.5",
-    "numba==0.63.1",
-    "intel-cmplr-lib-rt==2025.3.2; platform_system != 'Darwin'",
-    "scipy==1.17.0",
-    "matplotlib==3.10.8",
-    "ataraxis-time==5.0.0",
-    "ataraxis-base-utilities==5.0.0",
-    "ataraxis-data-structures==5.0.0",
-    "ataraxis-transport-layer-pc==3.1.1",
-    "ataraxis-communication-interface==4.2.0",
-    "ataraxis-video-system==2.3.0",
-    "tifffile==2026.1.14",
-    "imagecodecs==2026.1.14",
-    "tqdm==4.67.1",
-    "google-api-python-client==2.188.0",
-    "appdirs==1.4.4",
-    "pyqt6==6.10.2",
-    "importlib_metadata==8.7.1",
-    "natsort-rs==0.1.17",
-    "sl-shared-assets==7.0.0",
+    "click==8.4.0",
+    "numpy==2.4.6",
+    "numba==0.65.1",
+    "scipy==1.17.1",
+    "matplotlib==3.10.9",
+    "ataraxis-time==6.0.1",
+    "ataraxis-base-utilities==6.0.0",
+    "ataraxis-data-structures==6.0.0",
+    "ataraxis-transport-layer-pc==4.0.0",
+    "ataraxis-communication-interface==5.0.0",
+    "ataraxis-video-system==3.0.0",
+    "tifffile==2026.5.15",
+    "imagecodecs==2026.5.10",  # Required by tifffile to (de)compress LERC-encoded TIFFs.
+    "tqdm==4.67.3",
+    "google-api-python-client==2.196.0",
+    "google-auth==2.53.0",
+    "pyside6==6.11.1",
+    "natsort-rs==0.1.22",
+    "pyyaml==6.0.3",
+    "sollertia-shared-assets==8.0.0",
     "mcp>=1,<2",
-    "httpx>=0.27,<1",
+    "httpx>=0.27,<1",  # Pinned to pre-1.0 to avoid an MCP-side crash with httpx beta releases.
 ]
 
 [project.urls]
-Homepage = "https://github.com/Sun-Lab-NBB/sl-experiment"
-Documentation = "https://sl-experiment-api-docs.netlify.app/"
+Homepage = "https://github.com/Sun-Lab-NBB/sollertia-experiment"
+Documentation = "https://sollertia-experiment-api-docs.netlify.app/"
 
-# Specifies additional dependencies that can be installed alongside the main library.
-[project.optional-dependencies]
+# Currently, the library is interfaced with through the consolidated 'sle' CLI exposed below.
+[project.scripts]
+sle = "sollertia_experiment.command_line_interfaces.entry_points:sle_cli"
 
-# Dependencies that support developing this project.
+# Development dependencies (PEP 735). Not published to PyPI.
+[dependency-groups]
 dev = [
     # Tox
     "tox>=4,<5",
@@ -85,23 +85,14 @@ dev = [
     "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation>=7,<8",
+    "ataraxis-automation>=8,<9",
 
-    # Types
-    "types-appdirs>=1,<2",
+    # Type stubs
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
     "types-tabulate>=0,<1",
     "types-tqdm>=4,<5",
 ]
-
-# Currently, the library is intended to be interfaced with more or less exclusively through the CLI commands exported
-# below.
-[project.scripts]
-sl-get = "sl_experiment.command_line_interfaces.entry_points:get_cli"
-sl-manage = "sl_experiment.command_line_interfaces.entry_points:manage_cli"
-sl-run = "sl_experiment.command_line_interfaces.entry_points:run_cli"
-sl-configure = "sl_experiment.command_line_interfaces.entry_points:configure_cli"
 
 # Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
 [tool.hatch.build.targets.sdist]
@@ -109,7 +100,7 @@ exclude = [".github", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
-packages = ["src/sl_experiment"]
+packages = ["src/sollertia_experiment"]
 
 # Ruff Configuration.
 [tool.ruff]
@@ -126,24 +117,24 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
-    "W291",  # Conflicts with docstring formatting.
-    "W293",  # Conflicts with UI style formatting.
-    "BLE001",  # Catching blind exceptions is necessary for the functioning of this library.
-    "T201",  # Print is necessary to work with some external formatters used in this library.
+    "W291",    # Conflicts with docstring formatting
+    "W293",    # Conflicts with UI style formatting
+    "BLE001",  # Catching blind exceptions is necessary for the functioning of this library
+    "T201",    # Print is necessary to work with some external formatters used in this library
     "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
-    "C901",  # Sometimes complex functions are necessary
-    "PLR0913",  # Sometimes complex functions are necessary
-    "PLR0912",  # Sometimes complex functions are necessary
-    "PLR0915",  # Sometimes complex type defenitions are necessary
+    "C901",    # Sometimes complex functions are necessary
+    "PLR0913", # Sometimes complex functions are necessary
+    "PLR0912", # Sometimes complex functions are necessary
+    "PLR0915", # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
-    "TID252", # Conflicts with the project's import management strategy
-    "COM812", # Conflicts with the formatter
-    "ISC001", # Conflicts with the formatter
-    "PT001", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
-    "PT023", # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
-    "D107", # Project-specific, __init__ is documented inside the main class docstring where applicable
-    "D205", # Bugs out for file descriptions
-    "PLW0603", # While global statement usage is not ideal, it greatly streamlines certain development patterns
+    "TID252",  # Conflicts with the project's import management strategy
+    "COM812",  # Conflicts with the formatter
+    "ISC001",  # Conflicts with the formatter
+    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
+    "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
+    "D107",    # __init__ is documented inside the main class docstring where applicable
+    "D205",    # Bugs out for file descriptions
+    "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
 ]
 
 # Additional formatting configurations
@@ -180,34 +171,12 @@ length-sort = true                 # Places shorter imports first
 disallow_untyped_defs = true # Enforces function annotation
 warn_unused_ignores = true   # Warns against using 'type: ignore' for packages that have type stubs available.
 exclude = [
-    "sl-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
+    "sollertia-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
     "venv.*/",            # Ignores virtual environments
     "build/",             # Ignores the sdist directory
     "dist/",              # Ignores the wheel directory
     "docs/",              # Ignores the sphinx / doxygen directory
     "stubs/",             # Ignores stubs directory (stubgen output target)
     "recipe/",            # Ignores recipe directory (grayskull output target)
-    "tests/",             # Ignores the test directory.
-]
-
-# This is used by the 'test' tox tasks to aggregate coverage data produced during pytest runtimes.
-[tool.coverage.paths]
-
-# Maps coverage measured in site-packages to source files in src
-source = ["src/", ".tox/*/lib/python*/site-packages/"]
-
-# Same as above, specifies the output directory for the coverage .html report
-[tool.coverage.html]
-directory = "reports/coverage_html"
-
-# Specifies additional ignore directives
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "def __del__",
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "pass",
+    "tests/",             # Ignores the test directory
 ]

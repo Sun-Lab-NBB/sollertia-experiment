@@ -205,10 +205,10 @@ def discover_zaber_devices() -> None:
     port_info_list = _scan_active_ports()  # Scans all active ports
     formatted_info = _format_device_info(port_info_list)  # Formats the information so that it displays nicely
 
-    # Prints the formatted table. Since the data uses external formatting (tabulate), it does not need to be printed
-    # with the console.
-    print("Device and Axis Information:")
-    print(formatted_info)
+    # Prints the formatted table. Uses console.echo with raw=True to bypass the console's line-wrapping and log
+    # prefixing since the table is already formatted by tabulate.
+    console.echo(message="Device and Axis Information:", raw=True)
+    console.echo(message=formatted_info, raw=True)
 
 
 def get_zaber_devices_info() -> str:
