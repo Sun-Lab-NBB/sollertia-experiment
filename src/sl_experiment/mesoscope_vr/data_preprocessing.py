@@ -17,7 +17,7 @@ from tqdm import tqdm
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from sl_shared_assets import (
+from sollertia_shared_assets import (
     SessionData,
     SurgeryData,
     SessionTypes,
@@ -25,15 +25,17 @@ from sl_shared_assets import (
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
-    delete_directory,
-    transfer_directory,
     get_google_credentials_path,
-    calculate_directory_checksum,
 )
 
 from .configuration import MesoscopeGoogleSheets
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from ataraxis_data_structures import assemble_log_archives
+from ataraxis_data_structures import (
+    delete_directory,
+    transfer_directory,
+    assemble_log_archives,
+    calculate_directory_checksum,
+)
 
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
 from ..shared_components import WaterLog, SurgeryLog

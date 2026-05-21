@@ -17,7 +17,7 @@ from numba import njit  # type: ignore[import-untyped]
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
-from sl_shared_assets import (
+from sollertia_shared_assets import (
     SessionData,
     GasPuffTrial,
     SessionTypes,
@@ -898,7 +898,7 @@ class _MesoscopeVRSystem:
         # animal.
         if self._mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
             # Loading and re-dumping the data updates the contents of the position's file to dynamically integrate any
-            # upstream changes in the sl-shared-assets into the file structure.
+            # upstream changes in the sollertia-shared-assets into the file structure.
             previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
                 file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
             )
@@ -3824,6 +3824,7 @@ def maintenance_logic() -> None:
                 controller_id=np.uint8(101),
                 buffer_size=8192,
                 port=system_configuration.microcontrollers.actor_port,
+                name="actor",
                 data_logger=logger,
                 module_interfaces=(valve, gas_puff_valve, wheel),
             )

@@ -11,7 +11,7 @@ from dataclasses import field, dataclass
 
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from ataraxis_data_structures import YamlConfig
-from sl_shared_assets import AcquisitionSystems, get_working_directory
+from sollertia_shared_assets import AcquisitionSystems, get_working_directory
 
 _CONFIGURATION_DIR: str = "configuration"
 """Subdirectory under the working directory that stores the Mesoscope-VR system configuration YAML."""

@@ -5,7 +5,7 @@ from dataclasses import field, dataclass
 
 import numpy as np
 from numpy.typing import NDArray  # noqa: TC002
-from sl_shared_assets import SessionData, SessionTypes
+from sollertia_shared_assets import SessionData, SessionTypes
 from ataraxis_base_utilities import console, ensure_directory_exists
 
 from .configuration import MesoscopeSystemConfiguration, get_system_configuration_data

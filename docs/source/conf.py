@@ -6,17 +6,15 @@ project = 'sl-experiment'
 # noinspection PyShadowingBuiltins
 copyright = '2026, Sun (NeuroAI) lab'
 authors = ['Ivan Kondratyev (Inkaros)', 'Kushaan Gupta', 'Natalie Yeung', 'Katlynn Ryu', 'Jasmine Si']
-# Extracts the project version from the .toml file.
+# Extracts the project version from the metadata .toml file.
 release = importlib_metadata.version("sl-experiment")
 
 # -- General configuration ---------------------------------------------------
 extensions = [
     'sphinx.ext.autodoc',        # To build documentation from python source code docstrings.
     'sphinx.ext.napoleon',       # To read google-style docstrings (works with autodoc module).
+    'sphinx_click',              # Must load before sphinx_autodoc_typehints to avoid mock import shadowing.
     'sphinx_autodoc_typehints',  # To parse typehints into documentation
-    'sphinx_rtd_theme',          # To format the documentation HTML using ReadTheDocs format.
-    'sphinx_click',              # To read docstrings and command-line arguments from click-wrapped python functions.
-    'sphinx_rtd_dark_mode'       # Enables dark mode for RTD theme.
 ]
 
 templates_path = ['_templates']
@@ -46,8 +44,5 @@ typehints_formatter = None
 typehints_use_signature = False
 typehints_use_signature_return = False
 
-# Disables the dark mode by default.
-default_dark_mode = False
-
 # -- Options for HTML output -------------------------------------------------
-html_theme = 'sphinx_rtd_theme'  # Directs sphinx to use RTD theme
+html_theme = 'furo'

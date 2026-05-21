@@ -12,7 +12,7 @@ from pathlib import Path
 from dataclasses import MISSING, fields, is_dataclass
 
 import yaml  # type: ignore[import-untyped]
-from sl_shared_assets import SessionData
+from sollertia_shared_assets import SessionData
 from mcp.server.fastmcp import FastMCP
 
 from ..mesoscope_vr import (

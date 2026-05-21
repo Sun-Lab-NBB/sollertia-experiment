@@ -5,7 +5,7 @@ system managed by the host-machine.
 from pathlib import Path
 
 import click
-from sl_shared_assets import SessionData
+from sollertia_shared_assets import SessionData
 from ataraxis_base_utilities import console
 
 from .mcp_servers import run_manage_server

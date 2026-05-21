@@ -12,7 +12,7 @@ from ataraxis_video_system import (
 )
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import DataLogger  # noqa: TC002
-from ataraxis_time.time_helpers import TimeUnits, convert_time
+from ataraxis_time import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .positions import ZaberPositions
@@ -421,6 +421,7 @@ class MicroControllerInterfaces:
             controller_id=np.uint8(101),
             buffer_size=8192,
             port=self._configuration.actor_port,
+            name="actor",
             data_logger=data_logger,
             module_interfaces=(self.brake, self.valve, self.gas_puff_valve, self.screens),
             keepalive_interval=self._configuration.keepalive_interval_ms,
@@ -448,6 +449,7 @@ class MicroControllerInterfaces:
             controller_id=np.uint8(152),
             buffer_size=8192,
             port=self._configuration.sensor_port,
+            name="sensor",
             data_logger=data_logger,
             module_interfaces=(self.mesoscope_frame, self.lick, self.torque),
             keepalive_interval=self._configuration.keepalive_interval_ms,
@@ -470,6 +472,7 @@ class MicroControllerInterfaces:
             controller_id=np.uint8(203),
             buffer_size=8192,
             port=self._configuration.encoder_port,
+            name="encoder",
             data_logger=data_logger,
             module_interfaces=(self.wheel_encoder,),
             keepalive_interval=self._configuration.keepalive_interval_ms,
@@ -610,6 +613,7 @@ class VideoSystems:
         self._face_camera: VideoSystem = VideoSystem(
             system_id=np.uint8(51),
             data_logger=data_logger,
+            name="face_camera",
             output_directory=output_directory,
             camera_index=camera_configuration.face_camera_index,
             camera_interface=CameraInterfaces.HARVESTERS,
@@ -625,6 +629,7 @@ class VideoSystems:
         self._body_camera: VideoSystem = VideoSystem(
             system_id=np.uint8(62),
             data_logger=data_logger,
+            name="body_camera",
             output_directory=output_directory,
             camera_index=camera_configuration.body_camera_index,
             camera_interface=CameraInterfaces.HARVESTERS,

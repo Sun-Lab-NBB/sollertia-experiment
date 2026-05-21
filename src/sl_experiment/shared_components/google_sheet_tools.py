@@ -9,7 +9,7 @@ from datetime import (
 )
 from zoneinfo import ZoneInfo
 
-from sl_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
+from sollertia_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
 from ataraxis_base_utilities import console
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials

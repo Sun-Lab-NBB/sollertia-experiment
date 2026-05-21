@@ -1,14 +1,8 @@
- .. This file provides the instructions for how to display the API documentation generated using sphinx autodoc
-   extension. Use it to declare Python documentation sub-directories via appropriate modules (autodoc, etc.).
+.. This file provides the instructions for how to display the API documentation generated using sphinx autodoc
+   extension. Use it to declare Python documentation sub-directories via appropriate modules (automodule, etc.).
 
 Command Line Interfaces
 =======================
-
-.. automodule:: sl_experiment.command_line_interfaces
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
 .. click:: sl_experiment.command_line_interfaces.execute:run
    :prog: sl-run
    :nested: full
@@ -19,6 +13,10 @@ Command Line Interfaces
 
 .. click:: sl_experiment.command_line_interfaces.get:get
    :prog: sl-get
+   :nested: full
+
+.. click:: sl_experiment.command_line_interfaces.configure:configure_cli
+   :prog: sl-configure
    :nested: full
 
 Mesoscope-VR Acquisition System

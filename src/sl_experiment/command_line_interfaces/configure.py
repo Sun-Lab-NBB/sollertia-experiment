@@ -5,7 +5,7 @@ configuration.
 from __future__ import annotations
 
 import click
-from sl_shared_assets import AcquisitionSystems
+from sollertia_shared_assets import AcquisitionSystems
 
 from ..mesoscope_vr import create_system_configuration_file
 

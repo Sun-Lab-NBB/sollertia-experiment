@@ -79,6 +79,7 @@ class EncoderInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(2),
             module_id=np.uint8(1),
+            name="encoder",
             data_codes=data_codes,
             error_codes=None,
         )
@@ -164,8 +165,8 @@ class EncoderInterface(ModuleInterface):
 
     def set_parameters(
         self,
-        report_ccw: np.bool,
-        report_cw: np.bool,
+        report_ccw: np.bool_,
+        report_cw: np.bool_,
         delta_threshold: np.uint32,
     ) -> None:
         """Sets the module's PC-addressable runtime parameters to the input values.
@@ -250,6 +251,7 @@ class LickInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(4),
             module_id=np.uint8(1),
+            name="lick",
             data_codes=data_codes,
             error_codes=None,
         )
@@ -401,6 +403,7 @@ class TorqueInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(6),
             module_id=np.uint8(1),
+            name="torque",
             data_codes=None,
             error_codes=None,
         )
@@ -436,8 +439,8 @@ class TorqueInterface(ModuleInterface):
 
     def set_parameters(
         self,
-        report_ccw: np.bool,
-        report_cw: np.bool,
+        report_ccw: np.bool_,
+        report_cw: np.bool_,
         signal_threshold: np.uint16,
         delta_threshold: np.uint16,
         averaging_pool_size: np.uint8,
@@ -516,6 +519,7 @@ class TTLInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(1),
             module_id=np.uint8(1),
+            name="mesoscope_frame",
             data_codes=data_codes,
             error_codes=error_codes,
         )
@@ -639,6 +643,7 @@ class BrakeInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(3),
             module_id=np.uint8(1),
+            name="brake",
             data_codes=None,
             error_codes=None,
         )
@@ -759,6 +764,7 @@ class ValveInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(5),
             module_id=np.uint8(1),
+            name="valve",
             data_codes=data_codes,
             error_codes=error_codes,
         )
@@ -1033,6 +1039,7 @@ class ScreenInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(7),
             module_id=np.uint8(1),
+            name="screen",
             data_codes=None,
             error_codes=None,
         )
@@ -1109,6 +1116,7 @@ class GasPuffValveInterface(ModuleInterface):
         super().__init__(
             module_type=np.uint8(5),
             module_id=np.uint8(2),
+            name="gas_puff",
             data_codes=data_codes,
             error_codes=None,
         )
