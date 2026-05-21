@@ -27,7 +27,7 @@ def _register_subcommands() -> None:
     """Imports and registers all subcommand groups on the top-level 'sle' Click group.
 
     The imports are deferred to this helper to keep the module's import surface minimal when only metadata is
-    needed by the wheel build or by tools like importlib_metadata.
+    needed by the wheel build or by tools like importlib.metadata.
     """
     from .get import get  # noqa: PLC0415
     from .manage import manage  # noqa: PLC0415

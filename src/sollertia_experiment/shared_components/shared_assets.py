@@ -1,9 +1,9 @@
 """Provides miscellaneous assets shared by other library packages."""
 
 import sys
+from importlib.metadata import metadata as _metadata
 
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
-from importlib_metadata import metadata as _metadata
 
 from ..mesoscope_vr.configuration import MesoscopeFileSystem, get_system_configuration_data
 

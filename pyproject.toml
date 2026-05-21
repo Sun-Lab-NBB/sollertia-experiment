@@ -47,7 +47,6 @@ dependencies = [
     "click==8.4.0",
     "numpy==2.4.6",
     "numba==0.65.1",
-    "intel-cmplr-lib-rt==2025.3.3; platform_system != 'Darwin'",
     "scipy==1.17.1",
     "matplotlib==3.10.9",
     "ataraxis-time==6.0.1",
@@ -57,16 +56,16 @@ dependencies = [
     "ataraxis-communication-interface==5.0.0",
     "ataraxis-video-system==3.0.0",
     "tifffile==2026.5.15",
-    "imagecodecs==2026.5.10",
+    "imagecodecs==2026.5.10",  # Required by tifffile to (de)compress LERC-encoded TIFFs.
     "tqdm==4.67.3",
     "google-api-python-client==2.196.0",
-    "appdirs==1.4.4",
+    "google-auth==2.53.0",
     "pyqt6==6.11.0",
-    "importlib_metadata==8.9.0",
     "natsort-rs==0.1.22",
+    "pyyaml==6.0.3",
     "sollertia-shared-assets==8.0.0",
     "mcp>=1,<2",
-    "httpx>=0.27,<1",
+    "httpx>=0.27,<1",  # Pinned to pre-1.0 to avoid an MCP-side crash with httpx beta releases.
 ]
 
 [project.urls]
@@ -89,7 +88,6 @@ dev = [
     "ataraxis-automation>=8,<9",
 
     # Type stubs
-    "types-appdirs>=1,<2",
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
     "types-tabulate>=0,<1",
