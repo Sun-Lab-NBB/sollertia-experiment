@@ -2,13 +2,9 @@
 task.
 """
 
-from .state import VRTaskState
 from .driver import VRTaskDriver
-from .events import VRTaskEvent, VRTaskEventKind
-from .mqtt_topics import VRTaskMQTTTopics
-from .configuration import VRTaskConfiguration
-from .logging_hooks import LoggingHooks
-from .template_loader import load_vr_task_template
+from .events import VRTaskEvent, VRTaskState, VRTaskEventKind, VRTaskMQTTTopics
+from .configuration import LoggingHooks, VRTaskConfiguration, load_vr_task_template
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 __all__ = [

@@ -13,17 +13,14 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
-from .state import VRTaskState
-from .events import VRTaskEvent, VRTaskEventKind
-from .mqtt_topics import VRTaskMQTTTopics
+from .events import VRTaskEvent, VRTaskState, VRTaskEventKind, VRTaskMQTTTopics
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from sollertia_shared_assets import GasPuffTrial, WaterRewardTrial
 
-    from .configuration import VRTaskConfiguration
-    from .logging_hooks import LoggingHooks
+    from .configuration import LoggingHooks, VRTaskConfiguration
 
 
 class ScreenPulse(Protocol):
