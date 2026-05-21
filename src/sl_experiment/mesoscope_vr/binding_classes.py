@@ -3,7 +3,6 @@
 from pathlib import Path  # noqa: TC003
 
 import numpy as np
-from sl_shared_assets import ZaberPositions, MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 from ataraxis_video_system import (
     VideoSystem,
     VideoEncoders,
@@ -16,6 +15,8 @@ from ataraxis_data_structures import DataLogger  # noqa: TC002
 from ataraxis_time.time_helpers import TimeUnits, convert_time
 from ataraxis_communication_interface import MicroControllerInterface
 
+from .positions import ZaberPositions
+from .configuration import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 from .zaber_bindings import ZaberAxis, ZaberConnection
 from ..shared_components import (
     TTLInterface,
