@@ -1,9 +1,4 @@
-"""Provides the setup-time surface exposed by the Unity Virtual Reality task driver.
-
-Bundles the runtime configuration consumed by the driver, the LoggingHooks Protocol acquisition systems implement to
-forward driver-generated log payloads to their DataLogger, and the helper that loads the VR TaskTemplate matching a
-Unity scene name.
-"""
+"""Provides the setup-time configuration assets exposed by the Unity Virtual Reality task driver."""
 
 from __future__ import annotations
 

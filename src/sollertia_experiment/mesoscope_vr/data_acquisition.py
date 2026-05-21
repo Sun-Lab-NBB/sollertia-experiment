@@ -19,6 +19,7 @@ from sollertia_shared_assets import (
     SessionData,
     GasPuffTrial,
     SessionTypes,
+    TaskTemplate,
     ExperimentState,
     WaterRewardTrial,
     RunTrainingDescriptor,
@@ -807,6 +808,8 @@ class _MesoscopeVRSystem:
             microcontrollers used during runtime.
         _cameras: The VideoSystems instance that interfaces with the face and body cameras used during runtime.
         _zaber_motors: The ZaberMotors instance that interfaces with the HeadBar, LickPort, and Wheel motor groups.
+        _task_template: The VR TaskTemplate loaded from the task templates directory for the experiment's Unity
+            scene, or None if the managed runtime is not a Mesoscope experiment session.
         _vr_task: The VRTaskDriver instance that drives the Unity game engine that runs the Virtual Reality task or
             None, if the managed runtime is not a Mesoscope experiment session.
         _ui: The RuntimeControlUI instance that maintains a Graphical User Interface that allows the user to
@@ -956,17 +959,22 @@ class _MesoscopeVRSystem:
             zaber_positions=zaber_positions, zaber_configuration=self._system_configuration.assets
         )
 
-        # Builds the Virtual Reality task driver only for Mesoscope experiment sessions. Other session types do not
-        # drive Unity.
+        # Loads the VR task template and builds the Virtual Reality task driver only for Mesoscope experiment
+        # sessions. Other session types do not drive Unity.
+        self._task_template: TaskTemplate | None = None
         self._vr_task: VRTaskDriver | None = None
         if (
             self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
             and self._experiment_configuration is not None
         ):
+            self._task_template = load_vr_task_template(
+                unity_scene_name=self._experiment_configuration.unity_scene_name
+            )
             self._vr_task = VRTaskDriver(
                 configuration=self._system_configuration.assets.vr_task,
+                task_template=self._task_template,
+                experiment_trial_structures=self._experiment_configuration.trial_structures,
                 expected_scene_name=self._experiment_configuration.unity_scene_name,
-                trial_structures=self._experiment_configuration.trial_structures,
                 logging_hooks=_MesoscopeVRLoggingHooks(
                     logger=self._logger, source_id=self._source_id, timer=self._timestamp_timer
                 ),
@@ -1024,12 +1032,11 @@ class _MesoscopeVRSystem:
         # files during processing.
         self._generate_hardware_state_snapshot()
 
-        # If the session uses Virtual Reality, loads the VR task template, applies the Unity scale to the encoder,
-        # opens the MQTT connection, and runs the interactive Unity setup sequence.
-        if self._vr_task is not None and self._experiment_configuration is not None:
-            template = load_vr_task_template(unity_scene_name=self._experiment_configuration.unity_scene_name)
+        # If the session uses Virtual Reality, applies the Unity scale to the encoder using the value loaded with
+        # the task template, opens the MQTT connection, and runs the interactive Unity setup sequence.
+        if self._vr_task is not None and self._task_template is not None and self._experiment_configuration is not None:
             self._microcontrollers.wheel_encoder.set_unity_scale(
-                cm_per_unity_unit=template.vr_environment.cm_per_unity_unit
+                cm_per_unity_unit=self._task_template.vr_environment.cm_per_unity_unit
             )
             self._vr_task.connect()
             self._vr_task.setup(screen_pulse=self._set_vr_screens)

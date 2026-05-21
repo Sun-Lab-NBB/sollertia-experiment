@@ -1,7 +1,7 @@
 """Provides utilities for decomposing a long Virtual Reality wall cue sequence into a sequence of trials.
 
 The decomposition uses a greedy longest-match approach to identify trial motifs in the cue sequence received from
-Unity. The relocated CachedMotifDecomposer caches the flattened motif data between successive decompositions so that
+Unity. The CachedMotifDecomposer caches the flattened motif data between successive decompositions so that
 re-arming Unity does not pay the flattening cost twice.
 """
 
@@ -17,6 +17,7 @@ from sollertia_shared_assets import GasPuffTrial, WaterRewardTrial
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+    from sollertia_shared_assets import TaskTemplate
 
 
 @dataclass(slots=True)
@@ -118,17 +119,22 @@ class CachedMotifDecomposer:
 
 def decompose_cue_sequence(
     cue_sequence: NDArray[np.uint8],
-    trial_structures: dict[str, WaterRewardTrial | GasPuffTrial],
+    task_template: TaskTemplate,
+    experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial],
     motif_decomposer: CachedMotifDecomposer,
 ) -> DecomposedTrials:
     """Decomposes a Virtual Reality cue sequence into per-trial cumulative distances, rewards, and puff durations.
 
     Notes:
-        Uses a greedy longest-match approach to identify trial motifs in the cue sequence.
+        Uses a greedy longest-match approach to identify trial motifs in the cue sequence. The spatial trial layout
+        (cue sequence, segment length) is sourced from the VR TaskTemplate, while the per-trial reward and puff
+        parameters are sourced from the experiment configuration. Trials are joined by name.
 
     Args:
         cue_sequence: The Virtual Reality wall cue sequence to decompose, as a flat uint8 array.
-        trial_structures: The mapping of trial names to trial-type configuration objects defined by the experiment.
+        task_template: The VR TaskTemplate that provides the cue catalog and per-trial spatial cue sequences.
+        experiment_trial_structures: The mapping of trial names to experiment-side trial configuration objects
+            (WaterRewardTrial / GasPuffTrial) that carry the reward and puff parameters.
         motif_decomposer: The CachedMotifDecomposer instance used to flatten and cache the trial motif data.
 
     Returns:
@@ -136,26 +142,38 @@ def decompose_cue_sequence(
         and aversive puff durations.
 
     Raises:
+        ValueError: If a trial defined in the VR TaskTemplate has no matching entry in the experiment configuration.
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
     """
-    trials = list(trial_structures.values())
+    cue_name_to_code = {cue.name: int(cue.code) for cue in task_template.cues}
+    cue_name_to_length = {cue.name: float(cue.length_cm) for cue in task_template.cues}
+
     trial_motifs: list[NDArray[np.uint8]] = []
     trial_distances: list[float] = []
     reinforcing_rewards_by_type: list[tuple[float, int]] = []
     aversive_puff_durations_by_type: list[int] = []
 
-    # The trial values flowing through the runtime carry `cue_sequence` / `trial_length_cm` attributes that are not
-    # declared on WaterRewardTrial / GasPuffTrial in sollertia-shared-assets. This pre-existing schema gap is out of
-    # scope for the VR isolation refactor; the union-attr ignores acknowledge it without changing behavior.
-    for trial in trials:
-        trial_motifs.append(np.array(trial.cue_sequence, dtype=np.uint8))  # type: ignore[union-attr]
-        trial_distances.append(float(trial.trial_length_cm))  # type: ignore[union-attr]
-        if isinstance(trial, WaterRewardTrial):
-            reinforcing_rewards_by_type.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
+    for trial_name, spatial_trial in task_template.trial_structures.items():
+        if trial_name not in experiment_trial_structures:
+            message = (
+                f"Unable to decompose the Virtual Reality cue sequence. The VR TaskTemplate defines trial "
+                f"'{trial_name}' but the experiment configuration has no matching entry. Trial names must align "
+                f"between the template and the experiment configuration."
+            )
+            console.error(message=message, error=ValueError)
+
+        trial_motifs.append(np.array([cue_name_to_code[name] for name in spatial_trial.cue_sequence], dtype=np.uint8))
+        trial_distances.append(sum(cue_name_to_length[name] for name in spatial_trial.cue_sequence))
+
+        experiment_trial = experiment_trial_structures[trial_name]
+        if isinstance(experiment_trial, WaterRewardTrial):
+            reinforcing_rewards_by_type.append(
+                (float(experiment_trial.reward_size_ul), int(experiment_trial.reward_tone_duration_ms))
+            )
             aversive_puff_durations_by_type.append(0)
         else:
             reinforcing_rewards_by_type.append((0.0, 0))
-            aversive_puff_durations_by_type.append(int(trial.puff_duration_ms))
+            aversive_puff_durations_by_type.append(int(experiment_trial.puff_duration_ms))
 
     motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
         trial_motifs, trial_distances

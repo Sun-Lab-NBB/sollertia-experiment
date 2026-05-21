@@ -1,8 +1,4 @@
-"""Provides the runtime vocabulary used by the Unity Virtual Reality task driver.
-
-Bundles the MQTT topic catalog used on the wire with Unity, the mutable state tracked by the driver during a
-session, and the typed events the driver surfaces back to the acquisition system per runtime cycle.
-"""
+"""Provides the runtime vocabulary used by the Unity Virtual Reality task driver."""
 
 from __future__ import annotations
 
@@ -21,42 +17,38 @@ class VRTaskMQTTTopics(StrEnum):
     task environment.
 
     Notes:
-        The topics defined in this enumeration are used in addition to the topic defined by the hardware module
-        interfaces of the acquisition system that drives the Virtual Reality task.
+        The catalog mirrors the flat PascalCase contract published by sollertia-unity-tasks' MQTTTopics constant
+        set.
     """
 
-    UNITY_TERMINATION = "Gimbl/Session/Stop"
-    """Stops the Unity game session."""
-    UNITY_STARTUP = "Gimbl/Session/Start"
-    """Starts the Unity game session."""
-    CUE_SEQUENCE = "CueSequence/"
-    """The topic to which Unity sends the sequence of Virtual Reality cues used by the current game session."""
-    CUE_SEQUENCE_REQUEST = "CueSequenceTrigger/"
-    """Requests Unity to send the sequence of Virtual Reality cues used by the current game session."""
-    DISABLE_LICK_GUIDANCE = "RequireLick/True/"
-    """Disables lick guidance for reinforcing trials (animal must lick to trigger reward)."""
-    ENABLE_LICK_GUIDANCE = "RequireLick/False/"
-    """Enables lick guidance for reinforcing trials (reward on collision without lick)."""
-    DISABLE_OCCUPANCY_GUIDANCE = "RequireWait/True/"
-    """Disables occupancy guidance for aversive trials (animal must meet duration requirement)."""
-    ENABLE_OCCUPANCY_GUIDANCE = "RequireWait/False/"
-    """Enables occupancy guidance for aversive trials (brake pulse on early exit)."""
-    SHOW_REWARD_ZONE_BOUNDARY = "VisibleMarker/True/"
-    """Requests Unity to show the task guidance mode collision box to the animal."""
-    HIDE_REWARD_ZONE_BOUNDARY = "VisibleMarker/False/"
-    """Requests Unity to hide the task guidance mode collision box from the animal."""
-    UNITY_SCENE_REQUEST = "SceneNameTrigger/"
-    """Requests Unity to send the name of the currently used game scene."""
-    UNITY_SCENE = "SceneName/"
-    """The topic to which Unity sends the name of the currently used game scene."""
-    STIMULUS = "Gimbl/Stimulus/"
-    """The topic used by Unity to notify the runtime when the animal triggers a stimulus (water reward or gas puff)."""
-    TRIGGER_DELAY = "Gimbl/TriggerDelay/"
-    """The topic to which Unity sends the occupancy delay to enforce by briefly pulsing the brake."""
-    ENCODER_DATA = "LinearTreadmill/Data"
-    """Sends animal motion (distance) updates to Unity."""
-    LICK_EVENT = "LickPort/"
-    """Sends lick event notifications to Unity."""
+    SESSION_START = "SessionStart"
+    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload)."""
+    SESSION_STOP = "SessionStop"
+    """Lifecycle marker published by Unity on application quit (empty trigger payload)."""
+    MOTION = "Motion"
+    """Treadmill movement payload sent from the acquisition runtime to Unity (TreadmillMessage with float
+    movement)."""
+    LICK = "Lick"
+    """Lick-port event published by the acquisition runtime when the animal licks the spout (empty trigger
+    payload)."""
+    STIMULUS = "Stimulus"
+    """Stimulus delivery event published by Unity when a stimulus trigger zone fires (empty trigger payload)."""
+    DELAY = "Delay"
+    """Brake activation request published by Unity carrying the remaining occupancy duration in milliseconds
+    (TriggerDelayMessage with uint delayMilliseconds)."""
+    CUE_SEQUENCE_TRIGGER = "CueSequenceTrigger"
+    """Request for the active task's flattened cue sequence (empty trigger payload)."""
+    CUE_SEQUENCE = "CueSequence"
+    """Flattened cue sequence reply sent by Unity in response to CueSequenceTrigger (SequenceMessage with byte
+    array cueSequence)."""
+    SCENE_NAME_TRIGGER = "SceneNameTrigger"
+    """Request for the active Unity scene name (empty trigger payload)."""
+    SCENE_NAME = "SceneName"
+    """Active Unity scene name reply sent in response to SceneNameTrigger (SceneNameMessage with string name)."""
+    REQUIRE_LICK = "RequireLick"
+    """Lick-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
+    REQUIRE_WAIT = "RequireWait"
+    """Wait-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
 
 
 class VRTaskEventKind(IntEnum):
