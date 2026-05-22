@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from dataclasses import dataclass
 
 from ataraxis_base_utilities import console
 from sollertia_shared_assets import TaskTemplate, get_task_templates_directory
-
-if TYPE_CHECKING:
-    import numpy as np
-    from numpy.typing import NDArray
 
 
 @dataclass(slots=True)
@@ -27,27 +22,6 @@ class VRTaskConfiguration:
     """The IP address of the MQTT broker used to communicate with the Unity game engine."""
     port: int = 1883
     """The port number of the MQTT broker used to communicate with the Unity game engine."""
-
-
-@runtime_checkable
-class LoggingHooks(Protocol):
-    """Defines the contract used by VRTaskDriver to forward Virtual Reality task events to the acquisition system's
-    log stream.
-
-    Notes:
-        VRTaskDriver does not know the acquisition system's log message codes or DataLogger layout. Acquisition
-        systems implement this Protocol to attach their own log codes and forward the payloads to their
-        DataLogger.input_queue.
-    """
-
-    def log_cue_sequence(self, cue_sequence: NDArray[np.uint8]) -> None:
-        """Logs the Virtual Reality wall cue sequence received from Unity."""
-
-    def log_reinforcing_guidance_change(self, *, enabled: bool) -> None:
-        """Logs the change of the reinforcing trial guidance mode."""
-
-    def log_aversive_guidance_change(self, *, enabled: bool) -> None:
-        """Logs the change of the aversive trial guidance mode."""
 
 
 def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:

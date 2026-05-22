@@ -694,55 +694,6 @@ class _TrialState:
         return self.reinforcing_failed_trials
 
 
-class _MesoscopeVRLoggingHooks:
-    """Adapts the Mesoscope-VR DataLogger to the LoggingHooks contract expected by VRTaskDriver.
-
-    Attributes:
-        _logger: The DataLogger instance shared with the Mesoscope-VR system.
-        _source_id: The DataLogger source identifier used to tag the emitted payloads.
-        _timer: The PrecisionTimer used to timestamp the emitted payloads.
-    """
-
-    def __init__(self, logger: DataLogger, source_id: np.uint8, timer: PrecisionTimer) -> None:
-        self._logger: DataLogger = logger
-        self._source_id: np.uint8 = source_id
-        self._timer: PrecisionTimer = timer
-
-    def log_cue_sequence(self, cue_sequence: NDArray[np.uint8]) -> None:
-        """Logs the wall cue sequence received from Unity."""
-        self._logger.input_queue.put(
-            LogPackage(
-                source_id=self._source_id,
-                acquisition_time=np.uint64(self._timer.elapsed),
-                serialized_data=cue_sequence,
-            )
-        )
-
-    def log_reinforcing_guidance_change(self, *, enabled: bool) -> None:
-        """Logs the change of the reinforcing trial guidance mode."""
-        self._logger.input_queue.put(
-            LogPackage(
-                source_id=self._source_id,
-                acquisition_time=np.uint64(self._timer.elapsed),
-                serialized_data=np.array(
-                    [_MesoscopeVRLogMessageCodes.REINFORCING_GUIDANCE_STATE, enabled], dtype=np.uint8
-                ),
-            )
-        )
-
-    def log_aversive_guidance_change(self, *, enabled: bool) -> None:
-        """Logs the change of the aversive trial guidance mode."""
-        self._logger.input_queue.put(
-            LogPackage(
-                source_id=self._source_id,
-                acquisition_time=np.uint64(self._timer.elapsed),
-                serialized_data=np.array(
-                    [_MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enabled], dtype=np.uint8
-                ),
-            )
-        )
-
-
 class _MesoscopeVRSystem:
     """Provides methods for conducting data acquisition sessions using the Mesoscope-VR system.
 
@@ -975,9 +926,6 @@ class _MesoscopeVRSystem:
                 task_template=self._task_template,
                 experiment_trial_structures=self._experiment_configuration.trial_structures,
                 expected_scene_name=self._experiment_configuration.unity_scene_name,
-                logging_hooks=_MesoscopeVRLoggingHooks(
-                    logger=self._logger, source_id=self._source_id, timer=self._timestamp_timer
-                ),
             )
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
@@ -1040,6 +988,7 @@ class _MesoscopeVRSystem:
             )
             self._vr_task.connect()
             self._vr_task.setup(screen_pulse=self._set_vr_screens)
+            self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
             # Copies the decomposed trial arrays into the trial state tracker.
             self._trial_state.distances = self._vr_task.cue_sequence_distances
             self._trial_state.reinforcing_rewards = self._vr_task.reinforcing_rewards
@@ -1099,7 +1048,9 @@ class _MesoscopeVRSystem:
         # entering the checkpoint loop.
         if self._vr_task is not None:
             self._vr_task.set_reinforcing_guidance(enabled=self._ui.enable_reinforcing_guidance)
+            self._log_reinforcing_guidance_change(enabled=self._ui.enable_reinforcing_guidance)
             self._vr_task.set_aversive_guidance(enabled=self._ui.enable_aversive_guidance)
+            self._log_aversive_guidance_change(enabled=self._ui.enable_aversive_guidance)
 
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
         # in the QT backend, which is used by all three assets.
@@ -1507,8 +1458,10 @@ class _MesoscopeVRSystem:
             if self._vr_task is not None:
                 if self._ui.enable_reinforcing_guidance != self._vr_task.state.reinforcing_guidance_enabled:
                     self._vr_task.set_reinforcing_guidance(enabled=self._ui.enable_reinforcing_guidance)
+                    self._log_reinforcing_guidance_change(enabled=self._ui.enable_reinforcing_guidance)
                 if self._ui.enable_aversive_guidance != self._vr_task.state.aversive_guidance_enabled:
                     self._vr_task.set_aversive_guidance(enabled=self._ui.enable_aversive_guidance)
+                    self._log_aversive_guidance_change(enabled=self._ui.enable_aversive_guidance)
 
             if self._ui.exit_signal:
                 self._terminate_runtime()
@@ -1561,6 +1514,40 @@ class _MesoscopeVRSystem:
             serialized_data=np.array([_MesoscopeVRLogMessageCodes.RUNTIME_STATE, new_state], dtype=np.uint8),
         )
         self._logger.input_queue.put(log_package)
+
+    def _log_cue_sequence(self, cue_sequence: NDArray[np.uint8]) -> None:
+        """Logs the Virtual Reality wall cue sequence most recently received from Unity."""
+        self._logger.input_queue.put(
+            LogPackage(
+                source_id=self._source_id,
+                acquisition_time=np.uint64(self._timestamp_timer.elapsed),
+                serialized_data=cue_sequence,
+            )
+        )
+
+    def _log_reinforcing_guidance_change(self, *, enabled: bool) -> None:
+        """Logs the change of the reinforcing trial guidance mode."""
+        self._logger.input_queue.put(
+            LogPackage(
+                source_id=self._source_id,
+                acquisition_time=np.uint64(self._timestamp_timer.elapsed),
+                serialized_data=np.array(
+                    [_MesoscopeVRLogMessageCodes.REINFORCING_GUIDANCE_STATE, enabled], dtype=np.uint8
+                ),
+            )
+        )
+
+    def _log_aversive_guidance_change(self, *, enabled: bool) -> None:
+        """Logs the change of the aversive trial guidance mode."""
+        self._logger.input_queue.put(
+            LogPackage(
+                source_id=self._source_id,
+                acquisition_time=np.uint64(self._timestamp_timer.elapsed),
+                serialized_data=np.array(
+                    [_MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enabled], dtype=np.uint8
+                ),
+            )
+        )
 
     def idle(self) -> None:
         """Switches the Mesoscope-VR system to the idle state.
@@ -1969,8 +1956,10 @@ class _MesoscopeVRSystem:
             # Synchronizes guidance state with UI.
             if self._ui.enable_reinforcing_guidance != self._vr_task.state.reinforcing_guidance_enabled:
                 self._vr_task.set_reinforcing_guidance(enabled=self._ui.enable_reinforcing_guidance)
+                self._log_reinforcing_guidance_change(enabled=self._ui.enable_reinforcing_guidance)
             if self._ui.enable_aversive_guidance != self._vr_task.state.aversive_guidance_enabled:
                 self._vr_task.set_aversive_guidance(enabled=self._ui.enable_aversive_guidance)
+                self._log_aversive_guidance_change(enabled=self._ui.enable_aversive_guidance)
 
     def _mesoscope_cycle(self) -> None:
         """Checks whether mesoscope frame acquisition is active and, if not, emergency pauses the runtime."""
@@ -2044,6 +2033,7 @@ class _MesoscopeVRSystem:
             # sequence to enable accurate tracking of the animal's position in VR after reset, and resets the
             # termination flag once the new sequence has been received.
             self._vr_task.resume_after_unity_restart()
+            self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
             # Resets the runtime distance trackers to align with the fresh Unity position origin.
             self._microcontrollers.wheel_encoder.reset_distance_tracker()
             self._distance = np.float64(0.0)

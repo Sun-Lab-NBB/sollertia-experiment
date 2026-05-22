@@ -5,22 +5,23 @@ Virtual Reality task.
 from __future__ import annotations
 
 import json
+from enum import IntEnum, StrEnum
 from json import dumps
 from typing import TYPE_CHECKING, Protocol
+from dataclasses import field, dataclass
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
-from .events import VRTaskEvent, VRTaskState, VRTaskEventKind, VRTaskMQTTTopics
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from sollertia_shared_assets import GasPuffTrial, TaskTemplate, WaterRewardTrial
 
-    from .configuration import LoggingHooks, VRTaskConfiguration
+    from .configuration import VRTaskConfiguration
 
 
 class ScreenPulse(Protocol):
@@ -48,12 +49,98 @@ _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for Unity to respond to a cue sequence request before retrying."""
 
 
+class VRTaskEventKind(IntEnum):
+    """Defines the kinds of Virtual Reality task events produced by the VRTaskDriver per runtime cycle."""
+
+    NONE = 0
+    """No Unity message was available in the MQTT buffer during this cycle."""
+    STIMULUS_TRIGGERED = 1
+    """The animal triggered the current trial's stimulus (water reward or gas puff)."""
+    TRIGGER_DELAY_REQUESTED = 2
+    """Unity requested the acquisition system to apply a brake pulse for the specified duration."""
+    UNITY_TERMINATED = 3
+    """Unity reported that its runtime has been terminated; the acquisition system must enter an emergency pause."""
+
+
+class _VRTaskMQTTTopics(StrEnum):
+    """Defines the set of MQTT topics used to communicate with the Unity game engine that runs the Virtual Reality
+    task environment.
+
+    Notes:
+        The catalog mirrors the flat PascalCase contract published by sollertia-unity-tasks' MQTTTopics constant
+        set.
+    """
+
+    SESSION_START = "SessionStart"
+    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload)."""
+    SESSION_STOP = "SessionStop"
+    """Lifecycle marker published by Unity on application quit (empty trigger payload)."""
+    MOTION = "Motion"
+    """Treadmill movement payload sent from the acquisition runtime to Unity (TreadmillMessage with float
+    movement)."""
+    LICK = "Lick"
+    """Lick-port event published by the acquisition runtime when the animal licks the spout (empty trigger
+    payload)."""
+    STIMULUS = "Stimulus"
+    """Stimulus delivery event published by Unity when a stimulus trigger zone fires (empty trigger payload)."""
+    DELAY = "Delay"
+    """Brake activation request published by Unity carrying the remaining occupancy duration in milliseconds
+    (TriggerDelayMessage with uint delayMilliseconds)."""
+    CUE_SEQUENCE_TRIGGER = "CueSequenceTrigger"
+    """Request for the active task's flattened cue sequence (empty trigger payload)."""
+    CUE_SEQUENCE = "CueSequence"
+    """Flattened cue sequence reply sent by Unity in response to CueSequenceTrigger (SequenceMessage with byte
+    array cueSequence)."""
+    SCENE_NAME_TRIGGER = "SceneNameTrigger"
+    """Request for the active Unity scene name (empty trigger payload)."""
+    SCENE_NAME = "SceneName"
+    """Active Unity scene name reply sent in response to SceneNameTrigger (SceneNameMessage with string name)."""
+    REQUIRE_LICK = "RequireLick"
+    """Lick-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
+    REQUIRE_WAIT = "RequireWait"
+    """Wait-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
+
+
+@dataclass
+class _VRTaskState:
+    """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
+
+    This dataclass consolidates all Unity-related state tracking attributes used by the VRTaskDriver to monitor the
+    Virtual Reality environment state, manage task guidance modes, and facilitate communication between the
+    acquisition system and the Unity game engine over MQTT.
+    """
+
+    position: np.float64 = field(default_factory=lambda: np.float64(0.0))
+    """The current absolute position of the animal, in Unity units, relative to the origin of the Virtual Reality task
+    environment's track."""
+    cue_sequence: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=0, dtype=np.uint8))
+    """The sequence of Virtual Reality environment wall cues used by the session's task environment. This array defines
+    the visual cues displayed to the animal as it progresses through the virtual track."""
+    terminated: bool = False
+    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When
+    True, the runtime enters an emergency pause state to allow the user to restart Unity."""
+    reinforcing_guidance_enabled: bool = False
+    """Tracks the state of the reinforcing trial guidance mode."""
+    aversive_guidance_enabled: bool = False
+    """Tracks the state of the aversive trial guidance mode."""
+
+
+@dataclass(frozen=True, slots=True)
+class _VRTaskEvent:
+    """Stores the parsed Unity message produced by VRTaskDriver.cycle() during a single runtime cycle."""
+
+    kind: VRTaskEventKind
+    """The kind of Virtual Reality task event that occurred during the cycle."""
+    delay_ms: int = 0
+    """The brake pulse duration in milliseconds. Populated only for the TRIGGER_DELAY_REQUESTED event."""
+
+
 class VRTaskDriver:
     """Drives the Unity game engine that runs the Virtual Reality task.
 
     Encapsulates the MQTT contract with Unity: connection lifecycle, scene handshake, VR display verification, wall
     cue sequence retrieval, per-cycle stimulus pump, guidance toggling, and resume-after-Unity-restart. The driver
-    is hardware-agnostic; per-cycle Unity events are surfaced as typed VRTaskEvent values that the caller dispatches
+    is hardware-agnostic; per-cycle Unity events are surfaced as typed _VRTaskEvent values that the caller dispatches
     to acquisition system hardware.
 
     Args:
@@ -64,17 +151,14 @@ class VRTaskDriver:
             carry the reward and puff parameters. Trial names must match the keys of
             ``task_template.trial_structures``.
         expected_scene_name: The Unity scene name the driver enforces during the setup handshake.
-        logging_hooks: An optional adapter that forwards driver-generated log payloads to the acquisition system's
-            DataLogger. When omitted, the driver does not emit any log payloads.
 
     Attributes:
         _configuration: The VRTaskConfiguration instance that defines the MQTT broker discovery fields.
         _task_template: The VR TaskTemplate consumed during cue sequence decomposition.
         _experiment_trial_structures: The mapping of trial names to experiment-side trial configuration objects.
         _expected_scene_name: The Unity scene name enforced during the setup handshake.
-        _logging_hooks: The optional LoggingHooks adapter that forwards log payloads to the acquisition system.
         _mqtt: The MQTTCommunication instance that bidirectionally transfers data between this driver and Unity.
-        _state: The VRTaskState instance that tracks the Virtual Reality task environment state.
+        _state: The _VRTaskState instance that tracks the Virtual Reality task environment state.
         _motif_decomposer: The CachedMotifDecomposer used to flatten and cache trial motif data between decomposition
             runs.
         _decomposed_trials: The DecomposedTrials produced by the most recent cue sequence decomposition.
@@ -89,21 +173,19 @@ class VRTaskDriver:
         task_template: TaskTemplate,
         experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial],
         expected_scene_name: str,
-        logging_hooks: LoggingHooks | None = None,
     ) -> None:
         self._configuration: VRTaskConfiguration = configuration
         self._task_template: TaskTemplate = task_template
         self._experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = experiment_trial_structures
         self._expected_scene_name: str = expected_scene_name
-        self._logging_hooks: LoggingHooks | None = logging_hooks
 
-        monitored_topics: tuple[VRTaskMQTTTopics, ...] = (
-            VRTaskMQTTTopics.CUE_SEQUENCE,
-            VRTaskMQTTTopics.SESSION_STOP,
-            VRTaskMQTTTopics.SESSION_START,
-            VRTaskMQTTTopics.SCENE_NAME,
-            VRTaskMQTTTopics.STIMULUS,
-            VRTaskMQTTTopics.DELAY,
+        monitored_topics: tuple[_VRTaskMQTTTopics, ...] = (
+            _VRTaskMQTTTopics.CUE_SEQUENCE,
+            _VRTaskMQTTTopics.SESSION_STOP,
+            _VRTaskMQTTTopics.SESSION_START,
+            _VRTaskMQTTTopics.SCENE_NAME,
+            _VRTaskMQTTTopics.STIMULUS,
+            _VRTaskMQTTTopics.DELAY,
         )
         self._mqtt: MQTTCommunication = MQTTCommunication(
             ip=configuration.ip,
@@ -111,7 +193,7 @@ class VRTaskDriver:
             monitored_topics=monitored_topics,
         )
 
-        self._state: VRTaskState = VRTaskState()
+        self._state: _VRTaskState = _VRTaskState()
         self._motif_decomposer: CachedMotifDecomposer = CachedMotifDecomposer()
         self._decomposed_trials: DecomposedTrials = DecomposedTrials(
             cumulative_distances=np.zeros(0, dtype=np.float64),
@@ -121,7 +203,7 @@ class VRTaskDriver:
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     @property
-    def state(self) -> VRTaskState:
+    def state(self) -> _VRTaskState:
         """Returns the current Virtual Reality task state tracked by the driver."""
         return self._state
 
@@ -194,7 +276,7 @@ class VRTaskDriver:
         console.echo(message=message, level=LogLevel.INFO)
 
         while True:
-            self._mqtt.send_data(topic=VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER)
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER)
             self._polling_timer.reset()
 
             received = False
@@ -203,16 +285,13 @@ class VRTaskDriver:
                 data = self._mqtt.get_data()
                 if data is None:
                     continue
-                if data[0] != VRTaskMQTTTopics.CUE_SEQUENCE:
+                if data[0] != _VRTaskMQTTTopics.CUE_SEQUENCE:
                     continue
 
                 cue_sequence: NDArray[np.uint8] = np.array(
                     json.loads(data[1].decode("utf-8"))["cueSequence"], dtype=np.uint8
                 )
                 self._state.cue_sequence = cue_sequence
-
-                if self._logging_hooks is not None:
-                    self._logging_hooks.log_cue_sequence(cue_sequence=cue_sequence)
 
                 self._decomposed_trials = decompose_cue_sequence(
                     cue_sequence=cue_sequence,
@@ -233,7 +312,7 @@ class VRTaskDriver:
 
             message = (
                 f"The Virtual Reality task driver sent a cue sequence request to Unity via the "
-                f"'{VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER}' topic but received no response within "
+                f"'{_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER}' topic but received no response within "
                 f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
             )
             console.echo(message=message, level=LogLevel.ERROR)
@@ -254,11 +333,11 @@ class VRTaskDriver:
         if delta != 0:
             self._state.position = absolute_position
             payload = dumps(obj={"movement": float(delta)}).encode("utf-8")
-            self._mqtt.send_data(topic=VRTaskMQTTTopics.MOTION, payload=payload)
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
 
     def push_lick_event(self) -> None:
         """Notifies Unity that the animal performed a lick."""
-        self._mqtt.send_data(topic=VRTaskMQTTTopics.LICK, payload=None)
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.LICK, payload=None)
 
     def set_reinforcing_guidance(self, *, enabled: bool) -> None:
         """Sets the reinforcing trial guidance mode.
@@ -267,11 +346,7 @@ class VRTaskDriver:
             enabled: Determines whether to enable or disable reinforcing guidance.
         """
         payload = dumps(obj={"value": enabled}).encode("utf-8")
-        self._mqtt.send_data(topic=VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
-
-        if self._logging_hooks is not None:
-            self._logging_hooks.log_reinforcing_guidance_change(enabled=enabled)
-
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
         self._state.reinforcing_guidance_enabled = enabled
 
     def set_aversive_guidance(self, *, enabled: bool) -> None:
@@ -281,14 +356,10 @@ class VRTaskDriver:
             enabled: Determines whether to enable or disable aversive guidance.
         """
         payload = dumps(obj={"value": enabled}).encode("utf-8")
-        self._mqtt.send_data(topic=VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
-
-        if self._logging_hooks is not None:
-            self._logging_hooks.log_aversive_guidance_change(enabled=enabled)
-
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
         self._state.aversive_guidance_enabled = enabled
 
-    def cycle(self) -> VRTaskEvent:
+    def cycle(self) -> _VRTaskEvent:
         """Consumes the next pending Unity message and returns it as a typed event.
 
         Notes:
@@ -297,28 +368,28 @@ class VRTaskDriver:
             runtime state (trial advancement, emergency pause).
 
         Returns:
-            The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
+            The _VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
             event kind is NONE.
         """
         data = self._mqtt.get_data()
         if data is None:
-            return VRTaskEvent(kind=VRTaskEventKind.NONE)
+            return _VRTaskEvent(kind=VRTaskEventKind.NONE)
 
         topic, payload = data
 
-        if topic == VRTaskMQTTTopics.STIMULUS:
-            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
+        if topic == _VRTaskMQTTTopics.STIMULUS:
+            return _VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
 
-        if topic == VRTaskMQTTTopics.DELAY:
+        if topic == _VRTaskMQTTTopics.DELAY:
             delay_payload = json.loads(payload.decode("utf-8"))
             delay_ms = int(delay_payload.get("delayMilliseconds", 0))
-            return VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
+            return _VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
 
-        if topic == VRTaskMQTTTopics.SESSION_STOP:
+        if topic == _VRTaskMQTTTopics.SESSION_STOP:
             self._state.terminated = True
-            return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
+            return _VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
 
-        return VRTaskEvent(kind=VRTaskEventKind.NONE)
+        return _VRTaskEvent(kind=VRTaskEventKind.NONE)
 
     def resume_after_unity_restart(self) -> None:
         """Re-fetches the cue sequence after Unity has been restarted and resets the termination flag.
@@ -337,15 +408,15 @@ class VRTaskDriver:
             message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
             console.echo(message=message, level=LogLevel.INFO)
 
-            self._wait_for_topic(expected_topic=VRTaskMQTTTopics.SESSION_START)
+            self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
             message = "Unity state transition: Confirmed. Unity is now armed."
             console.echo(message=message, level=LogLevel.SUCCESS)
 
             message = "Verifying that the Unity game engine is configured to display the correct scene..."
             console.echo(message=message, level=LogLevel.INFO)
 
-            self._mqtt.send_data(topic=VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
-            payload = self._wait_for_topic(expected_topic=VRTaskMQTTTopics.SCENE_NAME)
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
+            payload = self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SCENE_NAME)
             scene_name: str = json.loads(payload.decode("utf-8"))["name"]
 
             if scene_name == self._expected_scene_name:
@@ -395,7 +466,7 @@ class VRTaskDriver:
             self._clear_buffer()
             message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
             console.echo(message=message, level=LogLevel.INFO)
-            self._wait_for_topic(expected_topic=VRTaskMQTTTopics.SESSION_START)
+            self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
             message = "Unity state transition: Confirmed. Unity is now armed."
             console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -405,13 +476,13 @@ class VRTaskDriver:
             self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
 
             payload = dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
-            self._mqtt.send_data(topic=VRTaskMQTTTopics.MOTION, payload=payload)
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
 
             data = self._mqtt.get_data()
             if data is None:
                 continue
 
-            if data[0] == VRTaskMQTTTopics.SESSION_STOP:
+            if data[0] == _VRTaskMQTTTopics.SESSION_STOP:
                 message = "Unity termination: Detected."
                 console.echo(message=message, level=LogLevel.INFO)
                 return
@@ -421,7 +492,7 @@ class VRTaskDriver:
         self._clear_buffer()
         message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
         console.echo(message=message, level=LogLevel.INFO)
-        self._wait_for_topic(expected_topic=VRTaskMQTTTopics.SESSION_START)
+        self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
         message = "Unity state transition: Confirmed. Unity is now armed."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
