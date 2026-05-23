@@ -45,7 +45,7 @@ def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:
     templates_directory = get_task_templates_directory()
     template_path = templates_directory.joinpath(f"{unity_scene_name}.yaml")
     if not template_path.exists():
-        available_templates = sorted([candidate.stem for candidate in templates_directory.glob("*.yaml")])
+        available_templates = sorted(candidate.stem for candidate in templates_directory.glob("*.yaml"))
         message = (
             f"Unable to load the Virtual Reality task template for the Unity scene '{unity_scene_name}'. The expected "
             f"template file does not exist at {template_path}. Available templates: {', '.join(available_templates)}."

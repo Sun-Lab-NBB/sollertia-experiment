@@ -4,9 +4,8 @@ Virtual Reality task.
 
 from __future__ import annotations
 
-import json
 from enum import IntEnum, StrEnum
-from json import dumps
+import json
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
@@ -19,7 +18,7 @@ from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decomp
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-    from sollertia_shared_assets import TaskTemplate, TriggerType
+    from sollertia_shared_assets import TriggerType, TaskTemplate
 
     from .configuration import VRTaskConfiguration
 
@@ -75,9 +74,9 @@ class VRTaskEvent:
 class VRTaskState:
     """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
 
-    This dataclass consolidates all Unity-related state tracking attributes used by the VRTaskDriver to monitor the
-    Virtual Reality environment state, manage task guidance modes, and facilitate communication between the
-    acquisition system and the Unity game engine over MQTT.
+    Notes:
+        This is the single source of truth shared between the per-cycle Unity events surfaced by cycle() and the
+        interactive setup handshake.
     """
 
     position: np.float64 = field(default_factory=lambda: np.float64(0.0))
@@ -195,6 +194,13 @@ class VRTaskDriver:
         )
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the VRTaskDriver instance."""
+        return (
+            f"VRTaskDriver(expected_scene_name={self._expected_scene_name}, "
+            f"ip={self._configuration.ip}, port={self._configuration.port})"
+        )
+
     @property
     def state(self) -> VRTaskState:
         """Returns the current Virtual Reality task state tracked by the driver."""
@@ -273,11 +279,12 @@ class VRTaskDriver:
                 data = self._mqtt.get_data()
                 if data is None:
                     continue
-                if data[0] != _VRTaskMQTTTopics.CUE_SEQUENCE:
+                topic, payload = data
+                if topic != _VRTaskMQTTTopics.CUE_SEQUENCE:
                     continue
 
                 cue_sequence: NDArray[np.uint8] = np.array(
-                    json.loads(data[1].decode("utf-8"))["cueSequence"], dtype=np.uint8
+                    json.loads(payload.decode("utf-8"))["cueSequence"], dtype=np.uint8
                 )
                 self._state.cue_sequence = cue_sequence
 
@@ -312,13 +319,13 @@ class VRTaskDriver:
             position has changed.
 
         Args:
-            absolute_position: The current absolute position of the animal, in Unity units, relative to the runtime
-                onset.
+            absolute_position: The current absolute position of the animal, in Unity units, relative to the origin of
+                the Virtual Reality task environment's track.
         """
         delta = absolute_position - self._state.position
-        if delta != 0:
+        if delta:
             self._state.position = absolute_position
-            payload = dumps(obj={"movement": float(delta)}).encode("utf-8")
+            payload = json.dumps(obj={"movement": float(delta)}).encode("utf-8")
             self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
 
     def push_lick_event(self) -> None:
@@ -333,7 +340,7 @@ class VRTaskDriver:
         """
         # Unity's RequireLick flag is the inverse of guidance: a True value forces the animal to lick to trigger the
         # reward, which is the unguided behavior. Enabling guidance therefore clears the lick requirement.
-        payload = dumps(obj={"value": not enabled}).encode("utf-8")
+        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
         self._state.reinforcing_guidance_enabled = enabled
 
@@ -345,7 +352,7 @@ class VRTaskDriver:
         """
         # Unity's RequireWait flag is the inverse of guidance: a True value forces the animal to satisfy the occupancy
         # duration on its own, while the occupancy guidance zone only pulses the brake when the requirement is cleared.
-        payload = dumps(obj={"value": not enabled}).encode("utf-8")
+        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
         self._state.aversive_guidance_enabled = enabled
 
@@ -464,14 +471,15 @@ class VRTaskDriver:
         while True:
             self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
 
-            payload = dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
+            payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
             self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
 
             data = self._mqtt.get_data()
             if data is None:
                 continue
 
-            if data[0] == _VRTaskMQTTTopics.SESSION_STOP:
+            topic, _ = data
+            if topic == _VRTaskMQTTTopics.SESSION_STOP:
                 message = "Unity termination: Detected."
                 console.echo(message=message, level=LogLevel.INFO)
                 return

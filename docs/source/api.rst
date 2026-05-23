@@ -14,6 +14,13 @@ Mesoscope-VR Acquisition System
    :undoc-members:
    :show-inheritance:
 
+Virtual Reality Task Interface
+==============================
+.. automodule:: sollertia_experiment.vr_task
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
 Shared Acquisition Tools And Assets
 ===================================
 .. automodule:: sollertia_experiment.shared_components

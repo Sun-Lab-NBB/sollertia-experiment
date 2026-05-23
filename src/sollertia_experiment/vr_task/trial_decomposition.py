@@ -21,10 +21,10 @@ _UNMATCHED_CUE_PREVIEW_COUNT: int = 20
 
 @dataclass(slots=True)
 class DecomposedTrials:
-    """Stores the per-trial arrays derived from a decomposed Virtual Reality wall cue sequence.
+    """Stores the per-trial sequences derived from a decomposed Virtual Reality wall cue sequence.
 
     Notes:
-        All arrays are aligned: index `i` describes the i-th trial in the decomposed sequence. The trial_names field
+        All sequences are aligned: index `i` describes the i-th trial in the decomposed sequence. The trial_names field
         is the join key the acquisition system uses to look up per-trial parameters from its experiment configuration.
     """
 
@@ -137,7 +137,8 @@ def decompose_cue_sequence(
         motif_decomposer: The CachedMotifDecomposer instance used to flatten and cache the trial motif data.
 
     Returns:
-        The DecomposedTrials instance with three aligned arrays: cumulative distances, trial names, and trigger types.
+        The DecomposedTrials instance with three aligned per-trial sequences: cumulative distances, trial names, and
+        trigger types.
 
     Raises:
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
@@ -175,7 +176,7 @@ def decompose_cue_sequence(
     )
 
     if trial_count == -1:
-        failed_position = sum(len(trial_motifs[index]) for index in trial_indices_array[:max_trials] if index != 0)
+        failed_position = sum(len(trial_motifs[index]) for index in trial_indices_array[:max_trials] if index)
         remaining_cues = cue_sequence[failed_position : failed_position + _UNMATCHED_CUE_PREVIEW_COUNT]
         message = (
             f"Unable to decompose the acquired session's Virtual Reality environment's cue sequence into a sequence "
@@ -196,7 +197,7 @@ def decompose_cue_sequence(
     )
 
 
-@njit(cache=True)
+@njit(cache=True)  # type: ignore[untyped-decorator]
 def _decompose_sequence_numba_flat(
     cue_sequence: NDArray[np.uint8],
     motifs_flat: NDArray[np.uint8],
