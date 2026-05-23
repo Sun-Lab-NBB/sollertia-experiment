@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from enum import IntEnum, StrEnum
 from json import dumps
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -24,13 +24,6 @@ if TYPE_CHECKING:
     from .configuration import VRTaskConfiguration
 
 
-class ScreenPulse(Protocol):
-    """Defines the callable signature used by VRTaskDriver to toggle the VR screens during the setup sequence."""
-
-    def __call__(self, *, state: bool) -> None:
-        """Toggles the VR screen state."""
-
-
 _SETUP_POLLING_DELAY_MS: int = 10
 """The delay, in milliseconds, between consecutive Unity buffer polls during the interactive setup sequence."""
 
@@ -42,24 +35,64 @@ _DISPLAY_ANIMATION_STEP_UNITS: float = 0.1
 """The size, in Unity units, of each position update sent during the VR display verification animation."""
 
 _DISPLAY_SCREENS_WARMUP_DELAY_MS: int = 2000
-"""The delay, in milliseconds, applied after enabling the VR screens before driving the display verification
-animation."""
+"""The delay, in milliseconds, applied before driving the display verification animation, allowing the
+caller-enabled VR screens to settle before they are required to render."""
 
 _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for Unity to respond to a cue sequence request before retrying."""
 
 
 class VRTaskEventKind(IntEnum):
-    """Defines the kinds of Virtual Reality task events produced by the VRTaskDriver per runtime cycle."""
+    """Defines the kinds of Virtual Reality task events produced by the VRTaskDriver per runtime cycle.
+
+    Notes:
+        This enumeration intentionally covers only the asynchronous Unity messages surfaced by cycle() for the
+        caller to dispatch. Messages that arrive as synchronous handshake replies are resolved internally by the
+        driver and are deliberately excluded.
+    """
 
     NONE = 0
     """No Unity message was available in the MQTT buffer during this cycle."""
     STIMULUS_TRIGGERED = 1
-    """The animal triggered the current trial's stimulus (water reward or gas puff)."""
+    """The animal triggered the current trial's stimulus delivery."""
     TRIGGER_DELAY_REQUESTED = 2
     """Unity requested the acquisition system to apply a brake pulse for the specified duration."""
     UNITY_TERMINATED = 3
     """Unity reported that its runtime has been terminated; the acquisition system must enter an emergency pause."""
+
+
+@dataclass(frozen=True, slots=True)
+class VRTaskEvent:
+    """Stores the parsed Unity message produced by VRTaskDriver.cycle() during a single runtime cycle."""
+
+    kind: VRTaskEventKind
+    """The kind of Virtual Reality task event that occurred during the cycle."""
+    delay_ms: int = 0
+    """The brake pulse duration in milliseconds. Populated only for the TRIGGER_DELAY_REQUESTED event."""
+
+
+@dataclass(slots=True)
+class VRTaskState:
+    """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
+
+    This dataclass consolidates all Unity-related state tracking attributes used by the VRTaskDriver to monitor the
+    Virtual Reality environment state, manage task guidance modes, and facilitate communication between the
+    acquisition system and the Unity game engine over MQTT.
+    """
+
+    position: np.float64 = field(default_factory=lambda: np.float64(0.0))
+    """The current absolute position of the animal, in Unity units, relative to the origin of the Virtual Reality task
+    environment's track."""
+    cue_sequence: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(0, dtype=np.uint8))
+    """The sequence of Virtual Reality environment wall cues used by the session's task environment. This array defines
+    the visual cues displayed to the animal as it progresses through the virtual track."""
+    terminated: bool = False
+    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When
+    True, the runtime enters an emergency pause state to allow the user to restart Unity."""
+    reinforcing_guidance_enabled: bool = False
+    """Tracks the state of the reinforcing trial guidance mode."""
+    aversive_guidance_enabled: bool = False
+    """Tracks the state of the aversive trial guidance mode."""
 
 
 class _VRTaskMQTTTopics(StrEnum):
@@ -101,46 +134,12 @@ class _VRTaskMQTTTopics(StrEnum):
     """Wait-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
 
 
-@dataclass
-class _VRTaskState:
-    """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
-
-    This dataclass consolidates all Unity-related state tracking attributes used by the VRTaskDriver to monitor the
-    Virtual Reality environment state, manage task guidance modes, and facilitate communication between the
-    acquisition system and the Unity game engine over MQTT.
-    """
-
-    position: np.float64 = field(default_factory=lambda: np.float64(0.0))
-    """The current absolute position of the animal, in Unity units, relative to the origin of the Virtual Reality task
-    environment's track."""
-    cue_sequence: NDArray[np.uint8] = field(default_factory=lambda: np.zeros(shape=0, dtype=np.uint8))
-    """The sequence of Virtual Reality environment wall cues used by the session's task environment. This array defines
-    the visual cues displayed to the animal as it progresses through the virtual track."""
-    terminated: bool = False
-    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When
-    True, the runtime enters an emergency pause state to allow the user to restart Unity."""
-    reinforcing_guidance_enabled: bool = False
-    """Tracks the state of the reinforcing trial guidance mode."""
-    aversive_guidance_enabled: bool = False
-    """Tracks the state of the aversive trial guidance mode."""
-
-
-@dataclass(frozen=True, slots=True)
-class _VRTaskEvent:
-    """Stores the parsed Unity message produced by VRTaskDriver.cycle() during a single runtime cycle."""
-
-    kind: VRTaskEventKind
-    """The kind of Virtual Reality task event that occurred during the cycle."""
-    delay_ms: int = 0
-    """The brake pulse duration in milliseconds. Populated only for the TRIGGER_DELAY_REQUESTED event."""
-
-
 class VRTaskDriver:
-    """Drives the Unity game engine that runs the Virtual Reality task.
+    """Drives the Unity game engine that runs the Virtual Reality task implemented in sollertia-unity-tasks.
 
     Encapsulates the MQTT contract with Unity: connection lifecycle, scene handshake, VR display verification, wall
     cue sequence retrieval, per-cycle stimulus pump, guidance toggling, and resume-after-Unity-restart. The driver
-    is hardware-agnostic; per-cycle Unity events are surfaced as typed _VRTaskEvent values that the caller dispatches
+    is hardware-agnostic; per-cycle Unity events are surfaced as typed VRTaskEvent values that the caller dispatches
     to acquisition system hardware.
 
     Args:
@@ -154,7 +153,7 @@ class VRTaskDriver:
         _task_template: The VR TaskTemplate consumed during cue sequence decomposition.
         _expected_scene_name: The Unity scene name enforced during the setup handshake.
         _mqtt: The MQTTCommunication instance that bidirectionally transfers data between this driver and Unity.
-        _state: The _VRTaskState instance that tracks the Virtual Reality task environment state.
+        _state: The VRTaskState instance that tracks the Virtual Reality task environment state.
         _motif_decomposer: The CachedMotifDecomposer used to flatten and cache trial motif data between decomposition
             runs.
         _decomposed_trials: The DecomposedTrials produced by the most recent cue sequence decomposition.
@@ -187,7 +186,7 @@ class VRTaskDriver:
             monitored_topics=monitored_topics,
         )
 
-        self._state: _VRTaskState = _VRTaskState()
+        self._state: VRTaskState = VRTaskState()
         self._motif_decomposer: CachedMotifDecomposer = CachedMotifDecomposer()
         self._decomposed_trials: DecomposedTrials = DecomposedTrials(
             cumulative_distances=np.zeros(0, dtype=np.float64),
@@ -197,7 +196,7 @@ class VRTaskDriver:
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     @property
-    def state(self) -> _VRTaskState:
+    def state(self) -> VRTaskState:
         """Returns the current Virtual Reality task state tracked by the driver."""
         return self._state
 
@@ -231,7 +230,7 @@ class VRTaskDriver:
         """Closes the MQTT connection to the Unity game engine."""
         self._mqtt.disconnect()
 
-    def setup(self, *, screen_pulse: ScreenPulse) -> None:
+    def setup(self) -> None:
         """Carries out the interactive Unity setup sequence used at the start of a session.
 
         Notes:
@@ -239,26 +238,21 @@ class VRTaskDriver:
             VR screens, re-arms Unity, and requests the wall cue sequence used by the task. The setup sequence is
             interactive and prompts the user via console messages when a step requires confirmation or retry.
 
-        Args:
-            screen_pulse: The callable used to enable and disable the VR screens during the display verification
-                stage. Invoked with True when the driver needs the screens to render the verification animation, and
-                with False once verification is complete.
+            The caller must enable the VR screens before invoking this method and disable them once it returns, as
+            the display verification stage relies on the screens rendering the verification animation.
         """
         self._verify_scene_name()
-        self._verify_vr_display(screen_pulse=screen_pulse)
+        self._verify_vr_display()
         self._rearm_unity()
-        screen_pulse(state=False)
         self.refresh_cue_sequence()
-        message = "Unity setup: Complete."
-        console.echo(message=message, level=LogLevel.SUCCESS)
+        console.echo(message="Unity setup: Complete.", level=LogLevel.SUCCESS)
 
     def refresh_cue_sequence(self) -> None:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
 
         Notes:
             Re-fetches the cue sequence from Unity, decomposes it into per-trial cumulative distances and stimulus
-            parameters, forwards the raw cue sequence to the logging hook if configured, and resets the driver's
-            tracked Unity position to the origin.
+            parameters, and resets the driver's tracked Unity position to the origin.
 
         Raises:
             RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
@@ -295,8 +289,7 @@ class VRTaskDriver:
 
                 self._state.position = np.float64(0.0)
 
-                message = "VR cue sequence: Received."
-                console.echo(message=message, level=LogLevel.SUCCESS)
+                console.echo(message="VR cue sequence: Received.", level=LogLevel.SUCCESS)
                 received = True
                 break
 
@@ -352,7 +345,7 @@ class VRTaskDriver:
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
         self._state.aversive_guidance_enabled = enabled
 
-    def cycle(self) -> _VRTaskEvent:
+    def cycle(self) -> VRTaskEvent:
         """Consumes the next pending Unity message and returns it as a typed event.
 
         Notes:
@@ -361,28 +354,28 @@ class VRTaskDriver:
             runtime state (trial advancement, emergency pause).
 
         Returns:
-            The _VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
+            The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
             event kind is NONE.
         """
         data = self._mqtt.get_data()
         if data is None:
-            return _VRTaskEvent(kind=VRTaskEventKind.NONE)
+            return VRTaskEvent(kind=VRTaskEventKind.NONE)
 
         topic, payload = data
 
         if topic == _VRTaskMQTTTopics.STIMULUS:
-            return _VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
+            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
 
         if topic == _VRTaskMQTTTopics.DELAY:
             delay_payload = json.loads(payload.decode("utf-8"))
             delay_ms = int(delay_payload.get("delayMilliseconds", 0))
-            return _VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
+            return VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
 
         if topic == _VRTaskMQTTTopics.SESSION_STOP:
             self._state.terminated = True
-            return _VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
+            return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
 
-        return _VRTaskEvent(kind=VRTaskEventKind.NONE)
+        return VRTaskEvent(kind=VRTaskEventKind.NONE)
 
     def resume_after_unity_restart(self) -> None:
         """Re-fetches the cue sequence after Unity has been restarted and resets the termination flag.
@@ -425,9 +418,8 @@ class VRTaskDriver:
             console.echo(message=message, level=LogLevel.ERROR)
             input("Enter anything to retry: ")
 
-    def _verify_vr_display(self, *, screen_pulse: ScreenPulse) -> None:
+    def _verify_vr_display(self) -> None:
         """Drives the VR display verification loop until the user confirms the scene renders correctly."""
-        screen_pulse(state=True)
         self._polling_timer.delay(delay=_DISPLAY_SCREENS_WARMUP_DELAY_MS, block=False)
 
         message = (

@@ -986,7 +986,11 @@ class _MesoscopeVRSystem:
                 cm_per_unity_unit=self._task_template.vr_environment.cm_per_unity_unit
             )
             self._vr_task.connect()
-            self._vr_task.setup(screen_pulse=self._set_vr_screens)
+            # Enables the VR screens for the duration of the interactive setup sequence so the user can verify the
+            # display, then blackens them once setup completes.
+            self._microcontrollers.screens.set_state(state=True)
+            self._vr_task.setup()
+            self._microcontrollers.screens.set_state(state=False)
             self._trial_state.trial_structures = self._experiment_configuration.trial_structures
             self._refresh_trial_state_from_vr_decomposition()
             # Resets the encoder and runtime distance trackers so that subsequent encoder messages produce position
@@ -1289,14 +1293,6 @@ class _MesoscopeVRSystem:
         _verify_descriptor_update(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
         )
-
-    def _set_vr_screens(self, *, state: bool) -> None:
-        """Toggles the VR screen state during the interactive Unity setup sequence.
-
-        Args:
-            state: Determines whether to enable or disable the VR screens.
-        """
-        self._microcontrollers.screens.set_state(state=state)
 
     def _start_mesoscope(self) -> None:
         """Generates the mesoscope acquisition start marker file on the ScanImagePC and waits for the frame acquisition
