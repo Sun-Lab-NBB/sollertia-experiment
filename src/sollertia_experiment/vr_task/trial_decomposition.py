@@ -1,9 +1,4 @@
-"""Provides utilities for decomposing a long Virtual Reality wall cue sequence into a sequence of trials.
-
-The decomposition uses a greedy longest-match approach to identify trial motifs in the cue sequence received from
-Unity. The CachedMotifDecomposer caches the flattened motif data between successive decompositions so that
-re-arming Unity does not pay the flattening cost twice.
-"""
+"""Provides utilities for decomposing a long Virtual Reality wall cue sequence into a sequence of trials."""
 
 from __future__ import annotations
 
@@ -18,6 +13,10 @@ from sollertia_shared_assets import TriggerType
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from sollertia_shared_assets import TaskTemplate
+
+
+_UNMATCHED_CUE_PREVIEW_COUNT: int = 20
+"""The number of unmatched cues reported in the decomposition failure message to aid diagnosis."""
 
 
 @dataclass(slots=True)
@@ -83,30 +82,30 @@ class CachedMotifDecomposer:
 
         # Sorts motifs by length (longest first) so the greedy decomposer matches longer motifs before shorter ones.
         motif_data: list[tuple[int, NDArray[np.uint8], int]] = [
-            (i, motif, len(motif)) for i, motif in enumerate(trial_motifs)
+            (original_index, motif, len(motif)) for original_index, motif in enumerate(trial_motifs)
         ]
         motif_data.sort(key=lambda entry: entry[2], reverse=True)
 
         total_size: int = sum(len(motif) for motif in trial_motifs)
-        num_motifs: int = len(trial_motifs)
+        motif_count: int = len(trial_motifs)
 
         # noinspection PyTypeChecker
         motifs_flat: NDArray[np.uint8] = np.zeros(total_size, dtype=np.uint8)
         # noinspection PyTypeChecker
-        motif_starts: NDArray[np.int32] = np.zeros(num_motifs, dtype=np.int32)
+        motif_starts: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
         # noinspection PyTypeChecker
-        motif_lengths: NDArray[np.int32] = np.zeros(num_motifs, dtype=np.int32)
+        motif_lengths: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
         # noinspection PyTypeChecker
-        motif_indices: NDArray[np.int32] = np.zeros(num_motifs, dtype=np.int32)
+        motif_indices: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
 
-        current_pos: int = 0
-        for i, (orig_idx, motif, length) in enumerate(motif_data):
+        current_position: int = 0
+        for sorted_index, (original_index, motif, length) in enumerate(motif_data):
             motif_uint8 = motif.astype(np.uint8) if motif.dtype != np.uint8 else motif
-            motifs_flat[current_pos : current_pos + length] = motif_uint8
-            motif_starts[i] = current_pos
-            motif_lengths[i] = length
-            motif_indices[i] = orig_idx
-            current_pos += length
+            motifs_flat[current_position : current_position + length] = motif_uint8
+            motif_starts[sorted_index] = current_position
+            motif_lengths[sorted_index] = length
+            motif_indices[sorted_index] = original_index
+            current_position += length
 
         distances_array: NDArray[np.float32] = np.array(trial_distances, dtype=np.float32)
 
@@ -162,28 +161,33 @@ def decompose_cue_sequence(
         )
 
     motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
-        trial_motifs, trial_distances
+        trial_motifs=trial_motifs, trial_distances=trial_distances
     )
 
     max_trials = len(cue_sequence) // min(len(motif) for motif in trial_motifs) + 1
     trial_indices_array, trial_count = _decompose_sequence_numba_flat(
-        cue_sequence, motifs_flat, motif_starts, motif_lengths, motif_indices, max_trials
+        cue_sequence=cue_sequence,
+        motifs_flat=motifs_flat,
+        motif_starts=motif_starts,
+        motif_lengths=motif_lengths,
+        motif_indices=motif_indices,
+        max_trials=max_trials,
     )
 
     if trial_count == -1:
         failed_position = sum(len(trial_motifs[index]) for index in trial_indices_array[:max_trials] if index != 0)
-        remaining_cues = cue_sequence[failed_position : failed_position + 20]
+        remaining_cues = cue_sequence[failed_position : failed_position + _UNMATCHED_CUE_PREVIEW_COUNT]
         message = (
             f"Unable to decompose the acquired session's Virtual Reality environment's cue sequence into a sequence "
-            f"of trials. No trial motif matched the processed sequence at position {failed_position}. The next 20 "
-            f"unmatched cues: {remaining_cues.tolist()}."
+            f"of trials. No trial motif matched the processed sequence at position {failed_position}. The next "
+            f"{_UNMATCHED_CUE_PREVIEW_COUNT} unmatched cues: {remaining_cues.tolist()}."
         )
         console.error(message=message, error=RuntimeError)
 
     sequence_indices = trial_indices_array[:trial_count]
     cumulative_distances = np.cumsum(distances_array[sequence_indices].astype(np.float64))
-    trial_names = tuple(trial_names_by_type[index] for index in sequence_indices)
-    trigger_types = tuple(trigger_types_by_type[index] for index in sequence_indices)
+    trial_names = tuple(trial_names_by_type[int(index)] for index in sequence_indices)
+    trigger_types = tuple(trigger_types_by_type[int(index)] for index in sequence_indices)
 
     return DecomposedTrials(
         cumulative_distances=cumulative_distances,
@@ -204,7 +208,8 @@ def _decompose_sequence_numba_flat(
     """Decomposes a long sequence of Virtual Reality wall cues into individual trial motifs.
 
     Notes:
-        This worker function is used to speed up decomposition via numba acceleration.
+        Scans the cue sequence from left to right, consuming the longest motif that matches at each position. The
+        caller pre-sorts the motifs by descending length, so the first motif that matches is always the longest.
 
     Args:
         cue_sequence: The full Virtual Reality environment cue sequence to decompose.
@@ -219,31 +224,32 @@ def _decompose_sequence_numba_flat(
         A tuple of two elements. The first element is the array of trials (trial-type indices) decoded from the cue
         sequence. The second element is the total number of trials extracted from the cue sequence.
     """
-    trial_indices = np.zeros(max_trials, dtype=np.int32)
+    # noinspection PyTypeChecker
+    trial_indices: NDArray[np.int32] = np.zeros(max_trials, dtype=np.int32)
     trial_count = 0
-    sequence_pos = 0
+    sequence_position = 0
     sequence_length = len(cue_sequence)
-    num_motifs = len(motif_lengths)
+    motif_count = len(motif_lengths)
 
-    while sequence_pos < sequence_length and trial_count < max_trials:
+    while sequence_position < sequence_length and trial_count < max_trials:
         motif_found = False
 
-        for i in range(num_motifs):
-            motif_length = motif_lengths[i]
+        for motif_index in range(motif_count):
+            motif_length = motif_lengths[motif_index]
 
-            if sequence_pos + motif_length <= sequence_length:
-                motif_start = motif_starts[i]
+            if sequence_position + motif_length <= sequence_length:
+                motif_start = motif_starts[motif_index]
 
                 match = True
-                for j in range(motif_length):
-                    if cue_sequence[sequence_pos + j] != motifs_flat[motif_start + j]:
+                for offset in range(motif_length):
+                    if cue_sequence[sequence_position + offset] != motifs_flat[motif_start + offset]:
                         match = False
                         break
 
                 if match:
-                    trial_indices[trial_count] = motif_indices[i]
+                    trial_indices[trial_count] = motif_indices[motif_index]
                     trial_count += 1
-                    sequence_pos += motif_length
+                    sequence_position += motif_length
                     motif_found = True
                     break
 
