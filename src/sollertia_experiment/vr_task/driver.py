@@ -331,7 +331,9 @@ class VRTaskDriver:
         Args:
             enabled: Determines whether to enable or disable reinforcing guidance.
         """
-        payload = dumps(obj={"value": enabled}).encode("utf-8")
+        # Unity's RequireLick flag is the inverse of guidance: a True value forces the animal to lick to trigger the
+        # reward, which is the unguided behavior. Enabling guidance therefore clears the lick requirement.
+        payload = dumps(obj={"value": not enabled}).encode("utf-8")
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
         self._state.reinforcing_guidance_enabled = enabled
 
@@ -341,7 +343,9 @@ class VRTaskDriver:
         Args:
             enabled: Determines whether to enable or disable aversive guidance.
         """
-        payload = dumps(obj={"value": enabled}).encode("utf-8")
+        # Unity's RequireWait flag is the inverse of guidance: a True value forces the animal to satisfy the occupancy
+        # duration on its own, while the occupancy guidance zone only pulses the brake when the requirement is cleared.
+        payload = dumps(obj={"value": not enabled}).encode("utf-8")
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
         self._state.aversive_guidance_enabled = enabled
 
