@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from numba import njit  # type: ignore[import-untyped]
 import numpy as np
 from ataraxis_base_utilities import console
-from sollertia_shared_assets import GasPuffTrial, WaterRewardTrial
+from sollertia_shared_assets import TriggerType
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -25,17 +25,18 @@ class DecomposedTrials:
     """Stores the per-trial arrays derived from a decomposed Virtual Reality wall cue sequence.
 
     Notes:
-        The three arrays are aligned: index `i` describes the i-th trial in the decomposed sequence. Reward and puff
-        entries are zero-valued placeholders for trials of the opposite type.
+        All arrays are aligned: index `i` describes the i-th trial in the decomposed sequence. The trial_names field
+        is the join key the acquisition system uses to look up per-trial parameters from its experiment configuration.
     """
 
     cumulative_distances: NDArray[np.float64]
     """The cumulative distance, in centimeters, the animal must travel to reach the end of each decomposed trial."""
-    reinforcing_rewards: tuple[tuple[float, int], ...]
-    """The reward size (microliters) and tone duration (milliseconds) for each decomposed trial. Aversive trials use
-    (0.0, 0) placeholders."""
-    aversive_puff_durations: tuple[int, ...]
-    """The gas puff duration, in milliseconds, for each decomposed trial. Reinforcing trials use 0 placeholders."""
+    trial_names: tuple[str, ...]
+    """Name of each decomposed trial. Acquisition systems use these names to join the decomposed sequence with their
+    own per-trial hardware parameters."""
+    trigger_types: tuple[TriggerType, ...]
+    """Stimulus trigger type for each decomposed trial. LICK indicates a positive (reward-zone) trial; OCCUPANCY
+    indicates an aversive (occupancy-zone) trial."""
 
 
 class CachedMotifDecomposer:
@@ -120,29 +121,26 @@ class CachedMotifDecomposer:
 def decompose_cue_sequence(
     cue_sequence: NDArray[np.uint8],
     task_template: TaskTemplate,
-    experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial],
     motif_decomposer: CachedMotifDecomposer,
 ) -> DecomposedTrials:
-    """Decomposes a Virtual Reality cue sequence into per-trial cumulative distances, rewards, and puff durations.
+    """Decomposes a Virtual Reality cue sequence into per-trial distances, names, and trigger types.
 
     Notes:
         Uses a greedy longest-match approach to identify trial motifs in the cue sequence. The spatial trial layout
-        (cue sequence, segment length) is sourced from the VR TaskTemplate, while the per-trial reward and puff
-        parameters are sourced from the experiment configuration. Trials are joined by name.
+        (cue sequence, segment length) and the trigger type of each trial are sourced from the VR TaskTemplate.
+        Acquisition-system-specific parameters (reward size, puff duration, etc.) are joined back by trial name on
+        the acquisition system side.
 
     Args:
         cue_sequence: The Virtual Reality wall cue sequence to decompose, as a flat uint8 array.
-        task_template: The VR TaskTemplate that provides the cue catalog and per-trial spatial cue sequences.
-        experiment_trial_structures: The mapping of trial names to experiment-side trial configuration objects
-            (WaterRewardTrial / GasPuffTrial) that carry the reward and puff parameters.
+        task_template: The VR TaskTemplate that provides the cue catalog, per-trial spatial cue sequences, and
+            per-trial trigger types.
         motif_decomposer: The CachedMotifDecomposer instance used to flatten and cache the trial motif data.
 
     Returns:
-        The DecomposedTrials instance with three aligned arrays: cumulative distances, reinforcing reward parameters,
-        and aversive puff durations.
+        The DecomposedTrials instance with three aligned arrays: cumulative distances, trial names, and trigger types.
 
     Raises:
-        ValueError: If a trial defined in the VR TaskTemplate has no matching entry in the experiment configuration.
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
     """
     cue_name_to_code = {cue.name: int(cue.code) for cue in task_template.cues}
@@ -150,30 +148,18 @@ def decompose_cue_sequence(
 
     trial_motifs: list[NDArray[np.uint8]] = []
     trial_distances: list[float] = []
-    reinforcing_rewards_by_type: list[tuple[float, int]] = []
-    aversive_puff_durations_by_type: list[int] = []
+    trial_names_by_type: list[str] = []
+    trigger_types_by_type: list[TriggerType] = []
 
     for trial_name, spatial_trial in task_template.trial_structures.items():
-        if trial_name not in experiment_trial_structures:
-            message = (
-                f"Unable to decompose the Virtual Reality cue sequence. The VR TaskTemplate defines trial "
-                f"'{trial_name}' but the experiment configuration has no matching entry. Trial names must align "
-                f"between the template and the experiment configuration."
-            )
-            console.error(message=message, error=ValueError)
-
         trial_motifs.append(np.array([cue_name_to_code[name] for name in spatial_trial.cue_sequence], dtype=np.uint8))
         trial_distances.append(sum(cue_name_to_length[name] for name in spatial_trial.cue_sequence))
-
-        experiment_trial = experiment_trial_structures[trial_name]
-        if isinstance(experiment_trial, WaterRewardTrial):
-            reinforcing_rewards_by_type.append(
-                (float(experiment_trial.reward_size_ul), int(experiment_trial.reward_tone_duration_ms))
-            )
-            aversive_puff_durations_by_type.append(0)
-        else:
-            reinforcing_rewards_by_type.append((0.0, 0))
-            aversive_puff_durations_by_type.append(int(experiment_trial.puff_duration_ms))
+        trial_names_by_type.append(trial_name)
+        trigger_types_by_type.append(
+            spatial_trial.trigger_type
+            if isinstance(spatial_trial.trigger_type, TriggerType)
+            else TriggerType(spatial_trial.trigger_type)
+        )
 
     motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
         trial_motifs, trial_distances
@@ -196,13 +182,13 @@ def decompose_cue_sequence(
 
     sequence_indices = trial_indices_array[:trial_count]
     cumulative_distances = np.cumsum(distances_array[sequence_indices].astype(np.float64))
-    reinforcing_rewards = tuple(reinforcing_rewards_by_type[index] for index in sequence_indices)
-    aversive_puff_durations = tuple(aversive_puff_durations_by_type[index] for index in sequence_indices)
+    trial_names = tuple(trial_names_by_type[index] for index in sequence_indices)
+    trigger_types = tuple(trigger_types_by_type[index] for index in sequence_indices)
 
     return DecomposedTrials(
         cumulative_distances=cumulative_distances,
-        reinforcing_rewards=reinforcing_rewards,
-        aversive_puff_durations=aversive_puff_durations,
+        trial_names=trial_names,
+        trigger_types=trigger_types,
     )
 
 

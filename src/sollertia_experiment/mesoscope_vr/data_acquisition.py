@@ -924,7 +924,6 @@ class _MesoscopeVRSystem:
             self._vr_task = VRTaskDriver(
                 configuration=self._system_configuration.assets.vr_task,
                 task_template=self._task_template,
-                experiment_trial_structures=self._experiment_configuration.trial_structures,
                 expected_scene_name=self._experiment_configuration.unity_scene_name,
             )
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
@@ -988,12 +987,8 @@ class _MesoscopeVRSystem:
             )
             self._vr_task.connect()
             self._vr_task.setup(screen_pulse=self._set_vr_screens)
-            self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
-            # Copies the decomposed trial arrays into the trial state tracker.
-            self._trial_state.distances = self._vr_task.cue_sequence_distances
-            self._trial_state.reinforcing_rewards = self._vr_task.reinforcing_rewards
-            self._trial_state.aversive_puff_durations = self._vr_task.aversive_puff_durations
             self._trial_state.trial_structures = self._experiment_configuration.trial_structures
+            self._refresh_trial_state_from_vr_decomposition()
             # Resets the encoder and runtime distance trackers so that subsequent encoder messages produce position
             # deltas relative to the start of the experiment.
             self._microcontrollers.wheel_encoder.reset_distance_tracker()
@@ -1549,6 +1544,74 @@ class _MesoscopeVRSystem:
             )
         )
 
+    def _refresh_trial_state_from_vr_decomposition(self) -> None:
+        """Logs the active Unity cue sequence and refreshes the cue-sequence-derived trial-state arrays.
+
+        Notes:
+            Bundles the work that must follow every cue-sequence retrieval from Unity (cold-start and resume after
+            Unity restart): write the cue-sequence log packet, then copy the VR driver's freshly-decomposed per-trial
+            distances and join the new trial-name sequence with mesoscope-vr-specific reward and puff parameters.
+
+            Does not touch the session-level trial counters (reinforcing_failed_trials, aversive_failed_trials,
+            reinforcing_guided_trials, aversive_guided_trials) or the running trial position (_trial_state.completed).
+            Callers handle sequence-local resets (encoder distance tracker, _distance, _trial_state.completed)
+            independently around this refresh.
+        """
+        assert self._vr_task is not None  # noqa: S101  # guarded by caller
+        self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
+        self._trial_state.distances = self._vr_task.cue_sequence_distances
+        self._trial_state.reinforcing_rewards, self._trial_state.aversive_puff_durations = (
+            self._build_trial_parameter_arrays(trial_names=self._vr_task.trial_names)
+        )
+
+    def _build_trial_parameter_arrays(
+        self, *, trial_names: tuple[str, ...]
+    ) -> tuple[tuple[tuple[float, int], ...], tuple[int, ...]]:
+        """Joins the VR-decomposed trial sequence with mesoscope-vr-specific reward and puff parameters.
+
+        Notes:
+            The VRTaskDriver returns the ordered sequence of trial names produced by decomposing the active Unity
+            cue sequence. This method looks each name up in the experiment configuration's trial-structures mapping
+            and builds two parallel tuples: per-trial reward parameters (zero placeholders on aversive trials) and
+            per-trial puff durations (zero placeholders on reinforcing trials). It also validates that every trial
+            name produced by the decomposer has a matching entry in the experiment configuration; this check
+            previously lived inside vr_task and was moved out as part of the aq-side / vr-side separation.
+
+        Args:
+            trial_names: The ordered sequence of trial names produced by the VRTaskDriver's cue-sequence decomposition.
+
+        Returns:
+            A tuple of two parallel tuples: per-trial reinforcing reward parameters (volume, tone_duration) and
+            per-trial aversive puff durations in milliseconds.
+
+        Raises:
+            ValueError: If a trial name produced by the decomposer has no matching entry in the experiment
+                configuration's trial structures.
+        """
+        assert self._experiment_configuration is not None  # noqa: S101  # guarded by caller
+        trial_structures = self._experiment_configuration.trial_structures
+
+        reinforcing_rewards: list[tuple[float, int]] = []
+        aversive_puff_durations: list[int] = []
+        for trial_name in trial_names:
+            if trial_name not in trial_structures:
+                message = (
+                    f"Unable to build the trial parameter arrays for the Mesoscope-VR system. The VR cue sequence "
+                    f"decomposer produced trial '{trial_name}', but the experiment configuration has no matching "
+                    f"entry. Trial names must align between the VR TaskTemplate and the experiment configuration."
+                )
+                console.error(message=message, error=ValueError)
+
+            trial = trial_structures[trial_name]
+            if isinstance(trial, WaterRewardTrial):
+                reinforcing_rewards.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
+                aversive_puff_durations.append(0)
+            else:
+                reinforcing_rewards.append((0.0, 0))
+                aversive_puff_durations.append(int(trial.puff_duration_ms))
+
+        return tuple(reinforcing_rewards), tuple(aversive_puff_durations)
+
     def idle(self) -> None:
         """Switches the Mesoscope-VR system to the idle state.
 
@@ -2033,7 +2096,7 @@ class _MesoscopeVRSystem:
             # sequence to enable accurate tracking of the animal's position in VR after reset, and resets the
             # termination flag once the new sequence has been received.
             self._vr_task.resume_after_unity_restart()
-            self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
+            self._refresh_trial_state_from_vr_decomposition()
             # Resets the runtime distance trackers to align with the fresh Unity position origin.
             self._microcontrollers.wheel_encoder.reset_distance_tracker()
             self._distance = np.float64(0.0)

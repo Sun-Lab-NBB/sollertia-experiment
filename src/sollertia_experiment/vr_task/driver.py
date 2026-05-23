@@ -19,7 +19,7 @@ from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decomp
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-    from sollertia_shared_assets import GasPuffTrial, TaskTemplate, WaterRewardTrial
+    from sollertia_shared_assets import TaskTemplate, TriggerType
 
     from .configuration import VRTaskConfiguration
 
@@ -145,17 +145,13 @@ class VRTaskDriver:
 
     Args:
         configuration: The runtime configuration that defines the MQTT broker discovery fields.
-        task_template: The VR TaskTemplate that defines the cue catalog, corridor geometry, and per-trial spatial
-            cue sequences for the active Unity scene.
-        experiment_trial_structures: The mapping of trial names to experiment-side trial configuration objects that
-            carry the reward and puff parameters. Trial names must match the keys of
-            ``task_template.trial_structures``.
+        task_template: The VR TaskTemplate that defines the cue catalog, corridor geometry, per-trial spatial cue
+            sequences, and per-trial trigger types for the active Unity scene.
         expected_scene_name: The Unity scene name the driver enforces during the setup handshake.
 
     Attributes:
         _configuration: The VRTaskConfiguration instance that defines the MQTT broker discovery fields.
         _task_template: The VR TaskTemplate consumed during cue sequence decomposition.
-        _experiment_trial_structures: The mapping of trial names to experiment-side trial configuration objects.
         _expected_scene_name: The Unity scene name enforced during the setup handshake.
         _mqtt: The MQTTCommunication instance that bidirectionally transfers data between this driver and Unity.
         _state: The _VRTaskState instance that tracks the Virtual Reality task environment state.
@@ -171,12 +167,10 @@ class VRTaskDriver:
         configuration: VRTaskConfiguration,
         *,
         task_template: TaskTemplate,
-        experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial],
         expected_scene_name: str,
     ) -> None:
         self._configuration: VRTaskConfiguration = configuration
         self._task_template: TaskTemplate = task_template
-        self._experiment_trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = experiment_trial_structures
         self._expected_scene_name: str = expected_scene_name
 
         monitored_topics: tuple[_VRTaskMQTTTopics, ...] = (
@@ -197,8 +191,8 @@ class VRTaskDriver:
         self._motif_decomposer: CachedMotifDecomposer = CachedMotifDecomposer()
         self._decomposed_trials: DecomposedTrials = DecomposedTrials(
             cumulative_distances=np.zeros(0, dtype=np.float64),
-            reinforcing_rewards=(),
-            aversive_puff_durations=(),
+            trial_names=(),
+            trigger_types=(),
         )
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
@@ -220,14 +214,14 @@ class VRTaskDriver:
         return self._decomposed_trials.cumulative_distances
 
     @property
-    def reinforcing_rewards(self) -> tuple[tuple[float, int], ...]:
-        """Returns the reward size and tone duration for each decomposed trial."""
-        return self._decomposed_trials.reinforcing_rewards
+    def trial_names(self) -> tuple[str, ...]:
+        """Returns the name of each decomposed trial, in sequence order."""
+        return self._decomposed_trials.trial_names
 
     @property
-    def aversive_puff_durations(self) -> tuple[int, ...]:
-        """Returns the gas puff duration for each decomposed trial."""
-        return self._decomposed_trials.aversive_puff_durations
+    def trigger_types(self) -> tuple[TriggerType, ...]:
+        """Returns the stimulus trigger type of each decomposed trial, in sequence order."""
+        return self._decomposed_trials.trigger_types
 
     def connect(self) -> None:
         """Establishes the MQTT connection to the Unity game engine."""
@@ -296,7 +290,6 @@ class VRTaskDriver:
                 self._decomposed_trials = decompose_cue_sequence(
                     cue_sequence=cue_sequence,
                     task_template=self._task_template,
-                    experiment_trial_structures=self._experiment_trial_structures,
                     motif_decomposer=self._motif_decomposer,
                 )
 
