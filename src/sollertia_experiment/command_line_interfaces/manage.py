@@ -5,15 +5,15 @@ the host-machine.
 from pathlib import Path
 
 import click
-from sollertia_shared_assets import SessionData
 from ataraxis_base_utilities import console
+from sollertia_shared_assets import SessionData
 
 from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
     purge_session,
     preprocess_session_data,
-    migrate_animal_between_projects,
     get_system_configuration_data,
+    migrate_animal_between_projects,
 )
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.

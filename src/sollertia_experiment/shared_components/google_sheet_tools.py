@@ -9,8 +9,8 @@ from datetime import (
 )
 from zoneinfo import ZoneInfo
 
-from sollertia_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
 from ataraxis_base_utilities import console
+from sollertia_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials
 
@@ -100,8 +100,6 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
             f"(%H:%M), but encountered {time}."
         )
         console.error(message=message, error=ValueError)
-        # Fallback to appease mypy, should not be reachable
-        raise ValueError(message) from None  # pragma: no cover
 
     # Parses the date object
     for date_format in _supported_date_formats:
@@ -116,8 +114,6 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
             f"({sorted(_supported_date_formats)}), but encountered {date}."
         )
         console.error(message=message, error=ValueError)
-        # Fallback to appease mypy, should not be reachable
-        raise ValueError(message) from None  # pragma: no cover
 
     # Constructs the full DT object and converts it into the UTC timestamp in microseconds.
     full_datetime = datetime.combine(date=date_obj, time=time_obj, tzinfo=UTC)
@@ -146,8 +142,8 @@ def _extract_coordinate_value(substring: str) -> float:
     # Otherwise, raises an error
     message = f"Unable to extract the anatomical coordinate value from the input substring {substring}."
     console.error(message=message, error=ValueError)
-
-    # This should not be reachable, it is a fall-back to appease mypy
+    # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
+    # noinspection PyUnreachableCode
     raise ValueError(message)  # pragma: no cover
 
 
@@ -611,7 +607,8 @@ class WaterLog:
         _session_row_index: The index of the log's row that stores the processed session's data.
 
     Raises:
-        ValueError: If the target Google Sheet is not a valid Sollertia platform water restriction and animal interaction log.
+        ValueError: If the target Google Sheet is not a valid Sollertia platform water restriction and animal
+            interaction log.
     """
 
     def __init__(
@@ -808,7 +805,9 @@ class WaterLog:
             f"specified date and rerun the command that caused this error."
         )
         console.error(message, error=ValueError)  # Aborts with an error
-        raise ValueError(message)  # Fallback to appease mypy, should not be reachable.
+        # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
+        # noinspection PyUnreachableCode
+        raise ValueError(message)  # pragma: no cover
 
     def _write_value(self, column_name: str, row_index: int, value: float | str) -> None:
         """Writes the input value to the target log's cell based on the column name and row index.

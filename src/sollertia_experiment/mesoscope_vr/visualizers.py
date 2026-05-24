@@ -82,8 +82,6 @@ def _plt_palette(color: str) -> tuple[float, float, float]:
             f"Provide one of the supported color arguments: {', '.join(_palette_dict.keys())}."
         )
         console.error(message=message, error=KeyError)
-        # Fallback to appease mypy. Should not be reachable.
-        raise KeyError(message) from None  # pragma: no cover
 
 
 def _plt_line_styles(line_style: str) -> str:
@@ -108,8 +106,6 @@ def _plt_line_styles(line_style: str) -> str:
             f"{', '.join(_line_style_dict.keys())}."
         )
         console.error(message=message, error=KeyError)
-        # Fallback to appease mypy. Should not be reachable.
-        raise KeyError(message) from None  # pragma: no cover
 
 
 class BehaviorVisualizer:
@@ -180,7 +176,7 @@ class BehaviorVisualizer:
 
         # Pre-creates the structures used to store the displayed data during visualization runtime.
         self._timestamps: NDArray[np.float32] = np.arange(
-            start=0 - self._time_window, stop=self._time_step / 1000, step=self._time_step / 1000, dtype=np.float32
+            0 - self._time_window, self._time_step / 1000, self._time_step / 1000, dtype=np.float32
         )
         self._lick_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
         self._valve_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)

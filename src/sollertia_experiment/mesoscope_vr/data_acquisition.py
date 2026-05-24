@@ -2,17 +2,19 @@
 acquisition system.
 """
 
+from __future__ import annotations
+
 import os
 import copy
 from enum import IntEnum
 import shutil as sh
+from typing import TYPE_CHECKING
 from pathlib import Path
 import tempfile
 from dataclasses import field, dataclass
 
 from tqdm import tqdm
 import numpy as np
-from numpy.typing import NDArray  # noqa: TC002
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
@@ -22,6 +24,7 @@ from sollertia_shared_assets import (
     TaskTemplate,
     ExperimentState,
     WaterRewardTrial,
+    AcquisitionSystems,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     MesoscopeHardwareState,
@@ -41,7 +44,6 @@ from ..vr_task import (
 from .positions import ZaberPositions, MesoscopePositions
 from .runtime_ui import RuntimeControlUI
 from .visualizers import VisualizerMode, BehaviorVisualizer
-from .configuration import MesoscopeSystemConfiguration
 from .maintenance_ui import MaintenanceControlUI
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from ..shared_components import (
@@ -53,6 +55,11 @@ from ..shared_components import (
     get_project_experiments,
 )
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from .configuration import MesoscopeSystemConfiguration
 
 _RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires 
@@ -116,7 +123,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
         # noinspection PyBroadException
         try:
             mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-                file_path=session_data.raw_data.mesoscope_positions_path,
+                file_path=session_data.system_raw_data.mesoscope_positions_path,
             )
         except Exception:
             console.echo(message=io_error_message, level=LogLevel.ERROR)
@@ -143,7 +150,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
 
     # Copies the updated mesoscope positions data into the animal's persistent directory.
     sh.copy2(
-        src=session_data.raw_data.mesoscope_positions_path,
+        src=session_data.system_raw_data.mesoscope_positions_path,
         dst=mesoscope_data.vrpc_data.mesoscope_positions_path,
     )
 
@@ -170,7 +177,7 @@ def _generate_zaber_snapshot(
     # Saves the newly generated file both to the persistent directory and to the session directory. Note, saving to the
     # persistent data directory automatically overwrites any existing position file.
     zaber_positions.to_yaml(file_path=mesoscope_data.vrpc_data.zaber_positions_path)
-    zaber_positions.to_yaml(file_path=session_data.raw_data.zaber_positions_path)
+    zaber_positions.to_yaml(file_path=session_data.system_raw_data.zaber_positions_path)
 
     message = "Zaber motor positions: Saved."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -392,7 +399,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         input("Enter anything to continue: ")
 
     # Transfers the screenshot to the session's mesoscope_frames directory
-    screenshot_path = session_data.raw_data.window_screenshot_path
+    screenshot_path = session_data.system_raw_data.window_screenshot_path
     sh.move(screenshots.pop(), screenshot_path)  # Moves the screenshot from the ScanImagePC to the VRPC
 
     # Copies the screenshot to the animal's persistent data directory so that it can be reused during the next
@@ -835,14 +842,14 @@ class _MesoscopeVRSystem:
             previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
                 file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
             )
-            previous_mesoscope_positions.to_yaml(file_path=session_data.raw_data.mesoscope_positions_path)
+            previous_mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
 
         # If previous position data is not available, creates a new MesoscopePositions instance with default position
         # values.
         else:
             # Caches the precursor file to the raw_data session directory and to the persistent data directory.
             precursor = MesoscopePositions()
-            precursor.to_yaml(file_path=session_data.raw_data.mesoscope_positions_path)
+            precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
             precursor.to_yaml(file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path)
 
         # Defines the asset used to set and maintain combinations of system and runtime (task) states.
@@ -869,7 +876,7 @@ class _MesoscopeVRSystem:
         # Initializes the DataLogger instance used to log data from all microcontrollers, camera frame savers, and this
         # class instance.
         self._logger: DataLogger = DataLogger(
-            output_directory=session_data.raw_data.raw_data_path,
+            output_directory=session_data.raw_data_path,
             instance_name="behavior",
             thread_count=10,
         )
@@ -1247,8 +1254,6 @@ class _MesoscopeVRSystem:
                 f"the snapshot of the Mesoscope-VR system's hardware configuration."
             )
             console.error(message=message, error=ValueError)
-            # A fall-back to appease mypy, should not be reachable
-            raise ValueError(message)  # pragma: no cover
 
         # Caches the resolved hardware state to disk
         hardware_state.to_yaml(self._session_data.raw_data.hardware_state_path)
@@ -2296,7 +2301,8 @@ def window_checking_logic(
         session_type=SessionTypes.WINDOW_CHECKING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
-        acquisition_system=system_configuration,
+        acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
+        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -2309,7 +2315,7 @@ def window_checking_logic(
 
     # Generates and caches the MesoscopePositions precursor file to the persistent and raw_data directories.
     precursor = MesoscopePositions()
-    precursor.to_yaml(file_path=session_data.raw_data.mesoscope_positions_path)
+    precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
     precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
     zaber_motors: ZaberMotors | None = None
@@ -2324,7 +2330,7 @@ def window_checking_logic(
 
         # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class
         logger: DataLogger = DataLogger(
-            output_directory=session_data.raw_data.raw_data_path,
+            output_directory=session_data.raw_data_path,
             instance_name="behavior",  # Creates behavior_log subdirectory under raw_data
             thread_count=10,
         )
@@ -2358,7 +2364,7 @@ def window_checking_logic(
         zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
 
         # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
-        session_data.runtime_initialized()
+        session_data.mark_runtime_initialized()
 
         # Prepares Zaber motors for data acquisition.
         _setup_zaber_motors(zaber_motors=zaber_motors)
@@ -2498,7 +2504,8 @@ def lick_training_logic(
         session_type=SessionTypes.LICK_TRAINING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
-        acquisition_system=system_configuration,
+        acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
+        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -2632,7 +2639,7 @@ def lick_training_logic(
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
-        session_data.runtime_initialized()
+        session_data.mark_runtime_initialized()
 
         # Switches the system into lick-training mode
         system.lick_train()
@@ -2812,7 +2819,8 @@ def run_training_logic(
         session_type=SessionTypes.RUN_TRAINING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
-        acquisition_system=system_configuration,
+        acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
+        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -2964,7 +2972,7 @@ def run_training_logic(
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
-        session_data.runtime_initialized()
+        session_data.mark_runtime_initialized()
 
         # Switches the system into the run-training mode
         system.run_train()
@@ -3239,7 +3247,8 @@ def experiment_logic(
         experiment_name=experiment_name,
         python_version=python_version,
         sollertia_experiment_version=library_version,
-        acquisition_system=system_configuration,
+        acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
+        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -3316,7 +3325,7 @@ def experiment_logic(
 
         # Marks the session as fully initialized. This prevents session data from being automatically removed by
         # 'purge' runtimes.
-        session_data.runtime_initialized()
+        session_data.mark_runtime_initialized()
 
         # Main session loop. It loops over all submitted experiment states and ends the session after executing the
         # last state

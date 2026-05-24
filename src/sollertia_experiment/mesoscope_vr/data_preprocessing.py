@@ -2,6 +2,8 @@
 session's runtime and moving it to the long-term storage destinations.
 """
 
+from __future__ import annotations
+
 import os
 import json
 import shutil as sh
@@ -35,11 +37,12 @@ from ataraxis_data_structures import (
 )
 
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
-from .configuration import MesoscopeGoogleSheets
 from ..shared_components import WaterLog, SurgeryLog
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from .configuration import MesoscopeGoogleSheets
 
 _METADATA_SCHEMA = {
     "frameNumbers": (np.int32, int),
@@ -339,7 +342,7 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
         return
 
     # Ensures that the VRPC's destination directory exists.
-    destination = session_data.raw_data.raw_data_path.joinpath("raw_mesoscope_frames")
+    destination = session_data.raw_data_path.joinpath("raw_mesoscope_frames")
     ensure_directory_exists(destination)
 
     # Defines the set of extensions and filenames to look for when verifying source directory contents.
@@ -411,7 +414,7 @@ def _preprocess_mesoscope_directory(
     """
     # Resolves the path to the temporary directory that stores unprocessed mesoscope-acquired data pulled to the
     # VRPC.
-    image_directory = session_data.raw_data.raw_data_path.joinpath("raw_mesoscope_frames")
+    image_directory = session_data.raw_data_path.joinpath("raw_mesoscope_frames")
 
     # If the raw_mesoscope_frames directory does not exist, aborts processing early.
     if not image_directory.exists():
@@ -430,7 +433,7 @@ def _preprocess_mesoscope_directory(
         sh.copy2(motion_estimator_file, mesoscope_data.scanimagepc_data.motion_estimator_path)
 
     # Copies all files to the session's mesoscope_data (preprocessed) directory.
-    output_directory = session_data.raw_data.mesoscope_data_path
+    output_directory = session_data.system_raw_data.mesoscope_data_path
     ensure_directory_exists(output_directory)
     sh.copy2(motion_estimator_file, output_directory.joinpath("MotionEstimator.me"))
     sh.copy2(fov_roi_file, output_directory.joinpath("fov.roi"))
@@ -504,7 +507,7 @@ def _preprocess_mesoscope_directory(
 
     # Saves concatenated metadata as an uncompressed numpy archive.
     metadata_dict = {key: np.concatenate(value) for key, value in all_metadata.items()}
-    np.savez(frame_variant_metadata_path, **metadata_dict)
+    np.savez(frame_variant_metadata_path, **metadata_dict)  # type: ignore[arg-type]
 
     # Removes the now-redundant directory that stores unprocessed files.
     delete_directory(directory_path=image_directory)
@@ -522,7 +525,7 @@ def _preprocess_log_directory(session_data: SessionData, processes: int) -> None
         RuntimeError: If the target log directory contains both unprocessed and processed log entries.
     """
     # Resolves the path to the temporary log directory generated during runtime.
-    log_directory = session_data.raw_data.raw_data_path.joinpath("behavior_data_log")
+    log_directory = session_data.raw_data_path.joinpath("behavior_data_log")
 
     # Aborts early if the log directory does not exist.
     if not log_directory.exists():
@@ -608,8 +611,6 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             f"{', '.join(mesoscope_vr_sessions)}."
         )
         console.error(message, error=ValueError)
-        # Fallback to appease mypy, should not be reachable.
-        raise ValueError(message)  # pragma: no cover
 
     # Loads the session's descriptor data.
     descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
@@ -680,7 +681,7 @@ def _push_data(
         threads: Determines the number of worker threads used by each transfer process to parallelize data processing.
     """
     # Resolves the source and destination directories.
-    source = session_data.raw_data.raw_data_path
+    source = session_data.raw_data_path
     destinations = (
         mesoscope_data.destinations.nas_data_path.joinpath("raw_data"),
         mesoscope_data.destinations.server_data_path.joinpath("raw_data"),
@@ -838,7 +839,7 @@ def purge_session(session_data: SessionData) -> None:
     # Uses MesoscopeData to query the paths to all known session data directories. This includes the directories on the
     # NAS and the BioHPC server.
     deletion_candidates = [
-        session_data.raw_data.raw_data_path.parent,
+        session_data.raw_data_path.parent,
         mesoscope_data.destinations.nas_data_path,
         mesoscope_data.destinations.server_data_path,
         mesoscope_data.scanimagepc_data.session_specific_path,

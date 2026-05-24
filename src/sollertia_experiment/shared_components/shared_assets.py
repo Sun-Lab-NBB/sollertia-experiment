@@ -16,7 +16,7 @@ def get_version_data() -> tuple[str, str]:
         sollertia-experiment version.
     """
     # Determines the local Python version and the version of the sollertia-experiment library.
-    sollertia_experiment_version = _metadata("sollertia-experiment")["version"]  # type: ignore[index]
+    sollertia_experiment_version = _metadata("sollertia-experiment")["version"]
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return python_version, sollertia_experiment_version
 

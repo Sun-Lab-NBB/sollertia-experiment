@@ -1,4 +1,4 @@
-"""Provides the interfaces for Zaber devices used in the Mesoscope-VR data acquisition system."""
+"""Provides interfaces for working with Zaber motor controllers and devices."""
 
 from typing import Any
 from dataclasses import field, dataclass
@@ -276,7 +276,6 @@ def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettin
             raise
         message = f"Unable to connect to Zaber device on port {port}: {exception}"
         console.error(message=message, error=ConnectionError)
-        raise  # Unreachable but satisfies type checker
 
 
 def set_zaber_device_setting(port: str, device_index: int, setting: str, value: int | str) -> str:
@@ -343,7 +342,6 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
                 if not isinstance(value, str):
                     message = f"Unable to set device_label. Expected a string value, but got {type(value).__name__}."
                     console.error(message=message, error=TypeError)
-                    raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
                 old_value = device.label or ""
                 device.set_label(label=value)
@@ -359,7 +357,6 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
                 if not isinstance(value, str):
                     message = f"Unable to set axis_label. Expected a string value, but got {type(value).__name__}."
                     console.error(message=message, error=TypeError)
-                    raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
                 old_value = axis.label or ""
                 axis.set_label(label=value)
@@ -369,7 +366,6 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
             if not isinstance(value, int):
                 message = f"Unable to set {setting}. Expected an integer value, but got {type(value).__name__}."
                 console.error(message=message, error=TypeError)
-                raise TypeError(message)  # noqa: TRY301 - Unreachable, but satisfies type checker.
 
             # Validates position values against motion limits.
             if setting in {"park_position", "maintenance_position", "mount_position"}:
@@ -412,7 +408,6 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
             raise
         message = f"Unable to connect to Zaber device on port {port}: {exception}"
         console.error(message=message, error=ConnectionError)
-        raise  # Unreachable but satisfies type checker
 
 
 def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberValidationResult:
@@ -435,12 +430,11 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
     """
     try:
         settings = get_zaber_device_settings(port=port, device_index=device_index)
-    except (ConnectionError, IndexError):
+    except ConnectionError, IndexError:
         raise
     except Exception as exception:
         message = f"Unable to validate device configuration: {exception}"
         console.error(message=message, error=ConnectionError)
-        raise  # Unreachable but satisfies type checker
 
     errors: list[str] = []
     warnings: list[str] = []

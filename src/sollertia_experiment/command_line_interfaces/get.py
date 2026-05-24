@@ -10,12 +10,12 @@ from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
 from .mcp_servers import run_get_server
-from ..mesoscope_vr import (
+from ..mesoscope_vr import get_system_configuration_data
+from ..shared_components import (
     CRCCalculator,
     discover_zaber_devices,
-    get_system_configuration_data,
+    get_project_experiments,
 )
-from ..shared_components import get_project_experiments
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover

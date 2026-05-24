@@ -1242,8 +1242,8 @@ class _ControlUIWindow(QMainWindow):
     @staticmethod
     def _refresh_button_style(button: QPushButton) -> None:
         """Refreshes button styles after object name change."""
-        button.style().unpolish(button)  # type: ignore[union-attr]
-        button.style().polish(button)  # type: ignore[union-attr]
+        button.style().unpolish(button)
+        button.style().polish(button)
         button.update()
 
     def _update_reinforcing_guidance_ui(self) -> None:

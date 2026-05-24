@@ -4,9 +4,11 @@ This module exposes tools from the 'sle get' and 'sle manage' subcommand groups 
 (MCP), enabling AI agents to programmatically interact with data acquisition system features.
 """
 
+from __future__ import annotations
+
 from enum import Enum
 import uuid
-from typing import Any, Literal, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, get_type_hints
 from pathlib import Path
 import contextlib
 from dataclasses import MISSING, fields, is_dataclass
@@ -16,19 +18,24 @@ from mcp.server.fastmcp import FastMCP
 from ataraxis_base_utilities import ensure_directory_exists
 from sollertia_shared_assets import SessionData
 
+if TYPE_CHECKING:
+    from ataraxis_data_structures import YamlConfig
+
 from ..mesoscope_vr import (
-    CRCCalculator,
     ZaberPositions,
     MesoscopePositions,
     MesoscopeSystemConfiguration,
     purge_session,
-    get_zaber_devices_info,
     preprocess_session_data,
-    set_zaber_device_setting,
-    get_zaber_device_settings,
     get_system_configuration_data,
     get_system_configuration_path,
     migrate_animal_between_projects,
+)
+from ..shared_components import (
+    CRCCalculator,
+    get_zaber_devices_info,
+    set_zaber_device_setting,
+    get_zaber_device_settings,
     validate_zaber_device_configuration,
 )
 
@@ -190,7 +197,10 @@ def check_mount_accessibility_tool(path: str) -> str:
         test_file.write_text("test")
         test_file.unlink()
     except PermissionError:
-        return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: Permission denied"
+        return (
+            f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | "
+            f"Error: Permission denied"
+        )
     except OSError as os_error:
         return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: {os_error}"
 
@@ -344,7 +354,7 @@ _RAW_DATA_DIR: str = "raw_data"
 """Subdirectory under each session root that holds the raw data and metadata files."""
 
 
-def _serialize(value: Any) -> Any:  # noqa: ANN401
+def _serialize(value: Any) -> Any:
     """Recursively converts a dataclass, Path, Enum, mapping, or sequence into JSON-friendly Python."""
     if value is None:
         return None
@@ -403,7 +413,7 @@ def _describe_dataclass(cls: type, *, seen: frozenset[type] | None = None) -> di
 def _write_yaml_validated(
     file_path: Path,
     payload: dict[str, Any],
-    validator_cls: type,
+    validator_cls: type[YamlConfig],
     *,
     overwrite: bool = False,
     use_save_method: bool = False,
@@ -439,7 +449,7 @@ def _write_yaml_validated(
     return {"file_path": str(file_path), "data": _serialize(value=instance)}
 
 
-def _read_yaml(file_path: Path, validator_cls: type) -> dict[str, Any]:
+def _read_yaml(file_path: Path, validator_cls: type[YamlConfig]) -> dict[str, Any]:
     """Loads a YAML file via ``validator_cls`` and returns its serialized form."""
     if not file_path.exists():
         return {"error": f"File not found: {file_path}"}

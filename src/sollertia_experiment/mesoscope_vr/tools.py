@@ -27,9 +27,6 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
             f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
         )
         console.error(message, error=TypeError)
-
-        # Fallback to appease mypy, should not be reachable
-        raise TypeError(message)  # pragma: no cover
     return system_configuration
 
 

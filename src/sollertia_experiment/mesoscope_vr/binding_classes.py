@@ -1,27 +1,35 @@
 """Exposes the high-level bindings for all Mesoscope-VR system components (cameras, microcontrollers, Zaber motors)."""
 
-from pathlib import Path  # noqa: TC003
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 from ataraxis_time import TimeUnits, convert_time
 from ataraxis_video_system import VideoSystem, VideoEncoders, CameraInterfaces, OutputPixelFormats
 from ataraxis_base_utilities import LogLevel, console
-from ataraxis_data_structures import DataLogger  # noqa: TC002
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .positions import ZaberPositions
-from .configuration import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
-from .zaber_bindings import ZaberAxis, ZaberConnection
 from ..shared_components import (
+    ZaberAxis,
     TTLInterface,
     LickInterface,
     BrakeInterface,
     ValveInterface,
     ScreenInterface,
     TorqueInterface,
+    ZaberConnection,
     EncoderInterface,
     GasPuffValveInterface,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ataraxis_data_structures import DataLogger
+
+    from .configuration import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 
 
 class ZaberMotors:

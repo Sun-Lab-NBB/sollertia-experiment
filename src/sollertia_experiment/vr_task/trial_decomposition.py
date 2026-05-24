@@ -197,7 +197,7 @@ def decompose_cue_sequence(
     )
 
 
-@njit(cache=True)  # type: ignore[untyped-decorator]
+@njit(cache=True)
 def _decompose_sequence_numba_flat(
     cue_sequence: NDArray[np.uint8],
     motifs_flat: NDArray[np.uint8],
