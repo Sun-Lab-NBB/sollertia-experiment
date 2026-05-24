@@ -4,7 +4,6 @@ session's runtime and moving it to the long-term storage destinations.
 
 from __future__ import annotations
 
-import os
 import json
 import shutil as sh
 from typing import TYPE_CHECKING, Any
@@ -21,7 +20,6 @@ from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
     SessionData,
-    SurgeryData,
     SessionTypes,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
@@ -30,15 +28,18 @@ from sollertia_shared_assets import (
     discover_sessions,
     get_google_credentials_path,
 )
-from ataraxis_data_structures import (
-    delete_directory,
-    transfer_directory,
-    assemble_log_archives,
-    calculate_directory_checksum,
-)
+from ataraxis_data_structures import delete_directory, transfer_directory
 
 from .system import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
-from ..cross_system import WaterLog, SurgeryLog
+from ..cross_system import (
+    WaterLog,
+    push_session_data,
+    assemble_session_logs,
+    rename_session_videos,
+    snapshot_surgery_data,
+    migrate_session_directory,
+    delete_session_directories,
+)
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -292,31 +293,6 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
         json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
-def _preprocess_video_names(session_data: SessionData) -> None:
-    """Renames the .MP4 video files generated during the processed data acquisition session's runtime to use
-    human-friendly names instead of the source ID codes.
-
-    Args:
-        session_data: The SessionData instance that defines the processed session.
-    """
-    # Resolves the path to the camera frame directory
-    camera_frame_directory = session_data.raw_data.camera_data_path
-    session_name = session_data.session_name
-
-    # Renames the video files to use human-friendly names. Assumes the standard data acquisition configuration with 2
-    # cameras and predefined camera IDs.
-    if camera_frame_directory.joinpath("051.mp4").exists():
-        os.renames(
-            old=camera_frame_directory.joinpath("051.mp4"),
-            new=camera_frame_directory.joinpath(f"{session_name}_face_camera.mp4"),
-        )
-    if camera_frame_directory.joinpath("062.mp4").exists():
-        os.renames(
-            old=camera_frame_directory.joinpath("062.mp4"),
-            new=camera_frame_directory.joinpath(f"{session_name}_body_camera.mp4"),
-        )
-
-
 def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeData, threads: int = 30) -> None:
     """Pulls the target session's data acquired by the mesoscope from the ScanImagePC to the VRPC.
 
@@ -514,68 +490,6 @@ def _preprocess_mesoscope_directory(
     delete_directory(directory_path=image_directory)
 
 
-def _preprocess_log_directory(session_data: SessionData, processes: int) -> None:
-    """Assembles all .NPY log entries stored in the behavior data directory into .NPZ archives, one for each data
-    source recorded during the session's runtime.
-
-    Args:
-        session_data: The SessionData instance that defines the processed session.
-        processes: The number of processes to use while processing the directory.
-
-    Raises:
-        RuntimeError: If the target log directory contains both unprocessed and processed log entries.
-    """
-    # Resolves the path to the temporary log directory generated during runtime.
-    log_directory = session_data.raw_data_path.joinpath("behavior_data_log")
-
-    # Aborts early if the log directory does not exist.
-    if not log_directory.exists():
-        return
-
-    # Searches for processed and unprocessed files inside the log directory.
-    archives = list(log_directory.glob("*.npz"))
-    unarchived_entries = list(log_directory.glob("*.npy"))
-
-    # If there are no unprocessed log entry files, ends the runtime early.
-    if not unarchived_entries:
-        return
-
-    # If both processed and unprocessed log files exist in the same directory, aborts with an error.
-    if archives and unarchived_entries:
-        message = (
-            f"The temporary log directory for the session {session_data.session_name} contains both unprocessed .npy "
-            f"log files and processed .npz archives. Since log archiving overwrites existing .npz archives, it is "
-            f"unsafe to proceed with unsupervised log archiving. Manually back up the existing .npz files, "
-            f"remove them from the log directory, and retry the processing."
-        )
-        console.error(message, error=RuntimeError)
-
-    # If the input directory contains unarchived .npy log entries and no archived log entries, archives all log
-    # entries in the directory.
-    assemble_log_archives(
-        log_directory=log_directory,
-        remove_sources=True,
-        memory_mapping=False,
-        verbose=True,
-        verify_integrity=False,
-        max_workers=processes,
-    )
-
-    # Renames the processed directory to behavior_data. Since behavior_data might already exist dues to SessionData
-    # directory generation, removes any existing behavior_data directories before renaming the log directory.
-    behavior_data_path = Path(session_data.raw_data.behavior_data_path)
-
-    if behavior_data_path.exists():
-        console.echo(
-            message=f"Removing existing behavior_data directory at {behavior_data_path} before renaming the processed "
-            f"log directory.",
-            level=LogLevel.WARNING,
-        )
-        sh.rmtree(behavior_data_path)
-
-    log_directory.rename(target=Path(session_data.raw_data.behavior_data_path))
-
-
 def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: MesoscopeGoogleSheets) -> None:
     """Updates the water restriction log to include the processed session's data and adds the animal's
     surgical intervention record to the session's data directory as the surgery_data.yaml file.
@@ -617,23 +531,20 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
     descriptor = descriptor_class.from_yaml(descriptor_path)  # type: ignore[attr-defined]
 
-    # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file.
-    sl_sheet = SurgeryLog(
-        project_name=session_data.project_name,
+    # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file. The
+    # returned handle reuses the established Google Sheets connection for any follow-up surgery log updates.
+    surgery_log = snapshot_surgery_data(
+        session_data=session_data,
         animal_id=animal_id,
         credentials_path=credentials_path,
-        sheet_id=sheets_data.surgery_sheet_id,
+        surgery_sheet_id=sheets_data.surgery_sheet_id,
     )
-    data: SurgeryData = sl_sheet.extract_animal_data()
-    data.to_yaml(session_data.raw_data.surgery_metadata_path)
-    message = "Surgery data snapshot: Saved."
-    console.echo(message=message, level=LogLevel.SUCCESS)
 
     # Handles window checking sessions differently - updates surgery quality instead of the water restriction log.
     if is_window_checking:
         # Ensures that the quality is always between 0 and 3 inclusive.
         quality = max(0, min(3, int(descriptor.surgery_quality)))
-        sl_sheet.update_surgery_quality(quality=quality)
+        surgery_log.update_surgery_quality(quality=quality)
         message = "Surgery quality: Updated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -659,64 +570,6 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         )
         message = "Water restriction log entry: Written."
         console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def _push_data(
-    session_data: SessionData,
-    mesoscope_data: MesoscopeData,
-    threads: int,
-) -> None:
-    """Moves the preprocessed session's data from the VRPC to the long-term storage infrastructure.
-
-    Notes:
-        Currently, the long-term storage infrastructure consists of the NAS (cold storage) and the BioHPC compute
-        server (hot storage).
-
-        This function removes the local copy of the data stored on the host-machine after transferring it to the
-        long-term storage destinations.
-
-    Args:
-        session_data: The SessionData instance that defines the processed session.
-        mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
-            Mesoscope-VR data acquisition system.
-        threads: Determines the number of worker threads used by each transfer process to parallelize data processing.
-    """
-    # Resolves the source and destination directories.
-    source = session_data.raw_data_path
-    destinations = (
-        mesoscope_data.destinations.nas_data_path.joinpath("raw_data"),
-        mesoscope_data.destinations.server_data_path.joinpath("raw_data"),
-    )
-
-    # Ensures all destination directories exist before starting transfers.
-    for destination in destinations:
-        ensure_directory_exists(destination)
-
-    # Computes the xxHash3-128 checksum for the source directory before moving it to the destination directories.
-    calculate_directory_checksum(directory=source, num_processes=None, save_checksum=True, progress=True)
-
-    # Parallelizes the data transfer to fully saturate the communication channels to the destination machines.
-    with ProcessPoolExecutor(max_workers=len(destinations)) as executor:
-        futures = {
-            executor.submit(
-                transfer_directory,
-                source=source,
-                destination=destination,
-                num_threads=threads,
-                progress=True,
-                remove_source=False,  # Does not remove the directory as part of the transfer to avoid race conditions.
-            ): destination
-            for destination in destinations
-        }
-        for future in as_completed(futures):
-            # Propagates any exceptions from the transfers.
-            future.result()
-
-        console.echo(
-            message="All transfers completed successfully. Removing the now-redundant source directory...",
-            level=LogLevel.INFO,
-        )
-        delete_directory(directory_path=source.parent)  # Removes the session's directory.
 
 
 def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
@@ -761,10 +614,10 @@ def preprocess_session_data(session_data: SessionData) -> None:
     rename_mesoscope_directory(mesoscope_data=mesoscope_data)
 
     # Assembles all log .npy entries into archive .npz files.
-    _preprocess_log_directory(session_data=session_data, processes=31)
+    assemble_session_logs(session_data=session_data, processes=31)
 
     # Renames all videos to use human-friendly names.
-    _preprocess_video_names(session_data=session_data)
+    rename_session_videos(session_data=session_data)
 
     # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
     _pull_mesoscope_data(
@@ -784,12 +637,8 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # log to reflect the processed session.
     _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
-    # Sends preprocessed data to the NAS and the BioHPC server
-    _push_data(
-        session_data=session_data,
-        mesoscope_data=mesoscope_data,
-        threads=15,
-    )
+    # Sends preprocessed data to the NAS and the BioHPC server.
+    push_session_data(session_data=session_data, destinations=mesoscope_data.destinations, threads=15)
 
     message = f"Session {session_data.session_name} data preprocessing: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -807,50 +656,28 @@ def purge_session(session_data: SessionData) -> None:
     Args:
         session_data: The SessionData instance that defines the session whose data needs to be removed.
     """
-    # If a session does not contain the nk.bin marker, this suggests that it was able to successfully initialize the
-    # runtime and likely contains valid data. In this case, asks the user to confirm they intend to proceed with the
-    # deletion. Sessions with nk.bin markers are considered safe for removal with no further confirmation.
-    if not session_data.raw_data.nk_path.exists():
-        message = (
-            f"Preparing to remove all data for the session {session_data.session_name} performed by the animal "
-            f"{session_data.animal_id}. Warning, this process is NOT reversible and removes ALL session data!"
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
-
-        # Locks and waits for user response
-        while True:
-            answer = input("Enter 'yes' (to proceed) or 'no' (to abort): ")
-
-            # Continues with the deletion
-            if answer.lower() == "yes":
-                break
-
-            # Aborts without deleting
-            if answer.lower() == "no":
-                message = f"Session {session_data.session_name} data purging: Aborted"
-                console.echo(message=message, level=LogLevel.SUCCESS)
-                return
-
     # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
     system_configuration = get_system_configuration()
 
     # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
-    # Uses MesoscopeData to query the paths to all known session data directories. This includes the directories on the
-    # NAS and the BioHPC server.
-    deletion_candidates = [
-        session_data.raw_data_path.parent,
-        mesoscope_data.destinations.nas_data_path,
-        mesoscope_data.destinations.server_data_path,
-        mesoscope_data.scanimagepc_data.session_specific_path,
-    ]
+    # Queries the paths to all known session data directories, including the long-term storage destinations.
+    deletion_candidates = [session_data.raw_data_path.parent]
+    deletion_candidates.extend(destination.session_path for destination in mesoscope_data.destinations.destinations)
+    deletion_candidates.append(mesoscope_data.scanimagepc_data.session_specific_path)
 
-    # Removes all session-specific data directories from all destinations.
-    for candidate in console.track(
-        iterable=deletion_candidates, description="Deleting session directories", unit="directory"
-    ):
-        delete_directory(directory_path=candidate)
+    # Sessions without the nk.bin marker successfully initialized their runtime and likely contain valid data, so the
+    # deletion requires explicit user confirmation. Sessions with the nk.bin marker are considered safe to remove.
+    deleted = delete_session_directories(
+        candidates=tuple(deletion_candidates),
+        session_name=session_data.session_name,
+        require_confirmation=not session_data.raw_data.nk_path.exists(),
+    )
+
+    # Aborts without further changes if the user declined the deletion.
+    if not deleted:
+        return
 
     # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
     for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
@@ -907,28 +734,16 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     for session in sessions:
         console.echo(f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
-        remote_session_path = source_server_root.joinpath(session.name)
+        old_session_data_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
 
-        # Pulls the session to the local machine. The data is pulled into the target project's directory structure.
-        ensure_directory_exists(destination_local_root)
-        transfer_directory(
-            source=remote_session_path, destination=local_session_path, num_threads=30, verify_integrity=False
+        # Pulls the session to the local machine and reassigns it to the target project.
+        session_data = migrate_session_directory(
+            remote_session_path=source_server_root.joinpath(session.name),
+            local_session_path=local_session_path,
+            old_session_data_path=old_session_data_path,
+            target_project=target_project,
+            threads=30,
         )
-
-        # Copies the session_data.yaml file from the pulled directory to the old project's session-specific VRPC
-        # directory. This is then used to remove old session data from all destinations.
-        new_sd_path = local_session_path.joinpath("raw_data", "session_data.yaml")
-        old_sd_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
-        ensure_directory_exists(old_sd_path)  # Since preprocessing removes the raw_data directory, this recreates it.
-        sh.copy2(src=new_sd_path, dst=old_sd_path)
-
-        # Modifies the SessionData instance for the pulled session to use the new project name.
-        session_data = SessionData.load(session_path=local_session_path)
-        session_data.project_name = target_project
-        session_data.save()
-
-        # Reloads session data to apply the filesystem changes resulting from changing the session's project name.
-        session_data = SessionData.load(session_path=local_session_path)
 
         # Runs preprocessing on the session's data again, which regenerates the checksum and transfers the data to
         # the long-term storage destinations (including the NAS).
@@ -936,7 +751,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
         # Removes now-obsolete server, NAS, and VRPC directories. To do so, first marks the old session for
         # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
-        old_session_data = SessionData.load(session_path=old_sd_path.parents[1])
+        old_session_data = SessionData.load(session_path=old_session_data_path.parents[1])
         old_session_data.raw_data.nk_path.touch()
         purge_session(old_session_data)
 

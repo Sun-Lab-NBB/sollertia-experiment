@@ -2,6 +2,7 @@
 acquisition system.
 """
 
+from enum import IntEnum
 from pathlib import Path
 from dataclasses import field, dataclass
 
@@ -16,6 +17,7 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import YamlConfig
 
 from ..vr_task import VRTaskConfiguration
+from ..cross_system import StorageDestination, StorageDestinations
 
 _CONFIGURATION_DIR: str = "configuration"
 """Subdirectory under the working directory that stores the Mesoscope-VR system configuration YAML."""
@@ -363,6 +365,26 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
     return system_configuration
 
 
+class MesoscopeVRStates(IntEnum):
+    """Defines the set of codes used by the Mesoscope-VR data acquisition system to communicate its runtime state."""
+
+    IDLE = 0
+    """The system is currently not conducting a data acquisition session."""
+    REST = 1
+    """The system is conducting the 'rest' period of an experiment session."""
+    RUN = 2
+    """The system is conducting the 'run' period of an experiment session."""
+    LICK_TRAINING = 3
+    """The system is conducting the lick training session."""
+    RUN_TRAINING = 4
+    """The system is conducting the run training session."""
+
+    @classmethod
+    def to_dict(cls) -> dict[str, int]:
+        """Converts the instance's data to a dictionary mapping, replacing underscores with spaces."""
+        return {member.name.lower().replace("_", " "): member.value for member in cls}
+
+
 mesoscope_vr_sessions: tuple[str, str, str, str] = (
     SessionTypes.LICK_TRAINING,
     SessionTypes.RUN_TRAINING,
@@ -409,9 +431,17 @@ class MesoscopeData:
         )
 
         # Server and NAS (data storage)
-        self.destinations = _VRPCDestinations(
-            nas_data_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session),
-            server_data_path=system_configuration.filesystem.server_directory.joinpath(project, animal, session),
+        self.destinations = StorageDestinations(
+            destinations=(
+                StorageDestination(
+                    name="NAS",
+                    session_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session),
+                ),
+                StorageDestination(
+                    name="BioHPC server",
+                    session_path=system_configuration.filesystem.server_directory.joinpath(project, animal, session),
+                ),
+            )
         )
 
 
@@ -514,15 +544,3 @@ class _ScanImagePCData:
         # Ensures that the shared data directory and the persistent data directory exist.
         ensure_directory_exists(self.mesoscope_data_path)
         ensure_directory_exists(self.persistent_data_path)
-
-
-@dataclass()
-class _VRPCDestinations:
-    """Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem via the SMB
-    protocol used to store the session's data after acquisition.
-    """
-
-    nas_data_path: Path
-    """The path to the session's data directory on the Synology NAS."""
-    server_data_path: Path
-    """The path to the session's data directory on the BioHPC server."""
