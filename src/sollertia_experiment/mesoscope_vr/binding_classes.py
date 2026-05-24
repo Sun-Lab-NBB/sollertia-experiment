@@ -10,7 +10,7 @@ from ataraxis_video_system import VideoSystem, VideoEncoders, CameraInterfaces, 
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MicroControllerInterface
 
-from .positions import ZaberPositions
+from .system import ZaberPositions
 from ..cross_system import (
     ZaberAxis,
     TTLInterface,
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from ataraxis_data_structures import DataLogger
 
-    from .configuration import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
+    from .system import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 
 
 class ZaberMotors:

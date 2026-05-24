@@ -35,13 +35,12 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import DataLogger, LogPackage
 from ataraxis_communication_interface import MicroControllerInterface
 
-from .tools import MesoscopeData, get_system_configuration
+from .system import MesoscopeData, ZaberPositions, MesoscopePositions, get_system_configuration
 from ..vr_task import (
     VRTaskDriver,
     VRTaskEventKind,
     load_vr_task_template,
 )
-from .positions import ZaberPositions, MesoscopePositions
 from .runtime_ui import RuntimeControlUI
 from .visualizers import VisualizerMode, BehaviorVisualizer
 from ..cross_system import (
@@ -59,7 +58,7 @@ from .data_preprocessing import purge_session, preprocess_session_data, rename_m
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .configuration import MesoscopeSystemConfiguration
+    from .system import MesoscopeSystemConfiguration
 
 _RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires 

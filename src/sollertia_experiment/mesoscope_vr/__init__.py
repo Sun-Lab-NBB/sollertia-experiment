@@ -2,9 +2,10 @@
 system.
 """
 
-from .positions import ZaberPositions, MesoscopePositions
-from .configuration import (
+from .system import (
+    ZaberPositions,
     MesoscopeCameras,
+    MesoscopePositions,
     MesoscopeFileSystem,
     MesoscopeGoogleSheets,
     MesoscopeExternalAssets,

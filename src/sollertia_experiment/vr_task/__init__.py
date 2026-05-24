@@ -1,5 +1,6 @@
 """Provides the acquisition-system-agnostic interface for the Unity Virtual Reality tasks in
-https://github.com/Sun-Lab-NBB/sollertia-unity-tasks."""
+https://github.com/Sun-Lab-NBB/sollertia-unity-tasks.
+"""
 
 from .driver import VRTaskEvent, VRTaskState, VRTaskDriver, VRTaskEventKind
 from .configuration import VRTaskConfiguration, load_vr_task_template

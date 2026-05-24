@@ -37,13 +37,13 @@ from ataraxis_data_structures import (
     calculate_directory_checksum,
 )
 
-from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
+from .system import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
 from ..cross_system import WaterLog, SurgeryLog
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .configuration import MesoscopeGoogleSheets
+    from .system import MesoscopeGoogleSheets
 
 _METADATA_SCHEMA = {
     "frameNumbers": (np.int32, int),

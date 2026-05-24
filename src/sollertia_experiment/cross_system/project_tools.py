@@ -40,9 +40,7 @@ def get_animal_project(animal_id: str, root_directory: Path) -> tuple[str, ...]:
         A tuple of naturally-sorted project names that include the target animal.
     """
     matching_projects = {
-        session.project_name
-        for session in iterate_sessions(root_path=root_directory)
-        if session.animal_id == animal_id
+        session.project_name for session in iterate_sessions(root_path=root_directory) if session.animal_id == animal_id
     }
     return tuple(natsorted(list(matching_projects)))
 

@@ -442,7 +442,7 @@ class SurgeryLog:
         implants = []
         for number in implant_numbers:
             base_key = f"implant{number}"  # Precomputes the 'base' implant name, based on the number
-            implant_name = animal_data.get(base_key)  # Gets the name stored in the 'main' implant column
+            implant_name: str | None = animal_data.get(base_key)  # Gets the name stored in the 'main' implant column
 
             # If the implant name is 'None', the processed subject does not have this implant, despite the
             # header being present. If the name is a string, it processes the rest of the data
@@ -452,9 +452,9 @@ class SurgeryLog:
                 ap, ml, dv = 0.0, 0.0, 0.0
 
                 # If a valid coordinate string is found, parses ap, ml, and dv coordinates from the string.
-                coordinate_string = animal_data.get(f"{base_key} coordinates")
-                if coordinate_string is not None:
-                    ap, ml, dv = _parse_stereotactic_coordinates(coordinate_string)
+                implant_coordinate_string: str | None = animal_data.get(f"{base_key} coordinates")
+                if implant_coordinate_string is not None:
+                    ap, ml, dv = _parse_stereotactic_coordinates(implant_coordinate_string)
 
                 # Packages the data into an ImplantData class and appends it to the storage list.
                 implants.append(
@@ -473,14 +473,14 @@ class SurgeryLog:
         injections = []
         for number in injection_numbers:
             base_key = f"injection{number}"
-            injection_name = animal_data.get(base_key)
+            injection_name: str | None = animal_data.get(base_key)
 
             if injection_name is not None:
                 ap, ml, dv = 0.0, 0.0, 0.0
 
-                coordinate_string = animal_data.get(f"{base_key} coordinates")
-                if coordinate_string is not None:
-                    ap, ml, dv = _parse_stereotactic_coordinates(coordinate_string)
+                injection_coordinate_string: str | None = animal_data.get(f"{base_key} coordinates")
+                if injection_coordinate_string is not None:
+                    ap, ml, dv = _parse_stereotactic_coordinates(injection_coordinate_string)
 
                 injections.append(
                     InjectionData(
