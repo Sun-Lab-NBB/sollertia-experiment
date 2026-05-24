@@ -18,7 +18,7 @@ from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decomp
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-    from sollertia_shared_assets import TriggerType, TaskTemplate
+    from sollertia_shared_assets import TaskTemplate
 
     from .configuration import VRTaskConfiguration
 
@@ -207,11 +207,6 @@ class VRTaskDriver:
         return self._state
 
     @property
-    def configuration(self) -> VRTaskConfiguration:
-        """Returns the runtime configuration used by the driver."""
-        return self._configuration
-
-    @property
     def cue_sequence_distances(self) -> NDArray[np.float64]:
         """Returns the cumulative distances, in centimeters, the animal must travel to complete each decomposed
         trial.
@@ -222,11 +217,6 @@ class VRTaskDriver:
     def trial_names(self) -> tuple[str, ...]:
         """Returns the name of each decomposed trial, in sequence order."""
         return self._decomposed_trials.trial_names
-
-    @property
-    def trigger_types(self) -> tuple[TriggerType, ...]:
-        """Returns the stimulus trigger type of each decomposed trial, in sequence order."""
-        return self._decomposed_trials.trigger_types
 
     def connect(self) -> None:
         """Establishes the MQTT connection to the Unity game engine."""
@@ -250,66 +240,8 @@ class VRTaskDriver:
         self._verify_scene_name()
         self._verify_vr_display()
         self._rearm_unity()
-        self.refresh_cue_sequence()
+        self._refresh_cue_sequence()
         console.echo(message="Unity setup: Complete.", level=LogLevel.SUCCESS)
-
-    def refresh_cue_sequence(self) -> None:
-        """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
-
-        Notes:
-            Re-fetches the cue sequence from Unity, decomposes it into per-trial cumulative distances and stimulus
-            parameters, and resets the driver's tracked Unity position to the origin.
-
-        Raises:
-            RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
-        """
-        self._clear_buffer()
-        message = (
-            "Requesting Virtual Reality wall cue sequence from Unity. Ensure Unity is armed and the task is running."
-        )
-        console.echo(message=message, level=LogLevel.INFO)
-
-        while True:
-            self._mqtt.send_data(topic=_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER)
-            self._polling_timer.reset()
-
-            received = False
-            while self._polling_timer.elapsed < _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS:
-                self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
-                data = self._mqtt.get_data()
-                if data is None:
-                    continue
-                topic, payload = data
-                if topic != _VRTaskMQTTTopics.CUE_SEQUENCE:
-                    continue
-
-                cue_sequence: NDArray[np.uint8] = np.array(
-                    json.loads(payload.decode("utf-8"))["cueSequence"], dtype=np.uint8
-                )
-                self._state.cue_sequence = cue_sequence
-
-                self._decomposed_trials = decompose_cue_sequence(
-                    cue_sequence=cue_sequence,
-                    task_template=self._task_template,
-                    motif_decomposer=self._motif_decomposer,
-                )
-
-                self._state.position = np.float64(0.0)
-
-                console.echo(message="VR cue sequence: Received.", level=LogLevel.SUCCESS)
-                received = True
-                break
-
-            if received:
-                return
-
-            message = (
-                f"The Virtual Reality task driver sent a cue sequence request to Unity via the "
-                f"'{_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER}' topic but received no response within "
-                f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
-            )
-            console.echo(message=message, level=LogLevel.ERROR)
-            input("Enter anything to retry: ")
 
     def push_position(self, absolute_position: np.float64) -> None:
         """Forwards the latest animal position to Unity as a movement delta.
@@ -395,8 +327,66 @@ class VRTaskDriver:
             When the Unity game cycles, it resets the sequence of VR wall cues. This method re-queries the new wall
             cue sequence to enable accurate tracking of the animal's position in VR after the reset.
         """
-        self.refresh_cue_sequence()
+        self._refresh_cue_sequence()
         self._state.terminated = False
+
+    def _refresh_cue_sequence(self) -> None:
+        """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
+
+        Notes:
+            Re-fetches the cue sequence from Unity, decomposes it into per-trial cumulative distances and stimulus
+            parameters, and resets the driver's tracked Unity position to the origin.
+
+        Raises:
+            RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
+        """
+        self._clear_buffer()
+        message = (
+            "Requesting Virtual Reality wall cue sequence from Unity. Ensure Unity is armed and the task is running."
+        )
+        console.echo(message=message, level=LogLevel.INFO)
+
+        while True:
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER)
+            self._polling_timer.reset()
+
+            received = False
+            while self._polling_timer.elapsed < _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS:
+                self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
+                data = self._mqtt.get_data()
+                if data is None:
+                    continue
+                topic, payload = data
+                if topic != _VRTaskMQTTTopics.CUE_SEQUENCE:
+                    continue
+
+                cue_sequence: NDArray[np.uint8] = np.array(
+                    json.loads(payload.decode("utf-8"))["cueSequence"], dtype=np.uint8
+                )
+                self._state.cue_sequence = cue_sequence
+
+                self._decomposed_trials = decompose_cue_sequence(
+                    cue_sequence=cue_sequence,
+                    task_template=self._task_template,
+                    motif_decomposer=self._motif_decomposer,
+                )
+
+                self._state.position = np.float64(0.0)
+
+                console.echo(message="VR cue sequence: Received.", level=LogLevel.SUCCESS)
+                received = True
+                break
+
+            if received:
+                return
+
+            message = (
+                f"The Virtual Reality task driver sent a cue sequence request to Unity via the "
+                f"'{_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER}' topic but received no response within "
+                f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            input("Enter anything to retry: ")
 
     def _verify_scene_name(self) -> None:
         """Verifies that the Unity scene matches the expected scene name with infinite retry on mismatch."""
