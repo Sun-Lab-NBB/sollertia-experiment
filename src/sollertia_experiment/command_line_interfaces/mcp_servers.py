@@ -492,6 +492,35 @@ def _check_path(path: Path) -> dict[str, Any]:
     return report
 
 
+def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dict[str, Any]:
+    """Builds a per-path diagnostic report for the filesystem configuration of the Mesoscope-VR system.
+
+    Notes:
+        Long-term storage destinations whose root is left unset are reported as not configured rather than as errors,
+        since configuring them is optional.
+
+    Args:
+        configuration: The Mesoscope-VR system configuration whose filesystem paths are reported on.
+
+    Returns:
+        A dictionary mapping each configuration path name to its diagnostic report.
+    """
+    filesystem = configuration.filesystem
+    paths: dict[str, Any] = {
+        "root_directory": _check_path(path=filesystem.root_directory),
+        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
+    }
+    for destination_name, destination_root in filesystem.storage_directories.items():
+        report_key = f"storage_directory:{destination_name}"
+        if destination_root == Path():
+            paths[report_key] = {"path": str(destination_root), "configured": False, "ok": True}
+            continue
+        report = _check_path(path=destination_root)
+        report["configured"] = True
+        paths[report_key] = report
+    return paths
+
+
 @get_mcp.tool()
 def read_system_configuration_tool() -> dict[str, Any]:
     """Loads the Mesoscope-VR system configuration YAML from the working directory.
@@ -549,13 +578,7 @@ def validate_system_configuration_tool() -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 
-    filesystem = configuration.filesystem
-    paths = {
-        "root_directory": _check_path(path=filesystem.root_directory),
-        "server_directory": _check_path(path=filesystem.server_directory),
-        "nas_directory": _check_path(path=filesystem.nas_directory),
-        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
-    }
+    paths = _filesystem_paths_report(configuration=configuration)
     issues = [
         f"{name}: {report.get('error', 'not ok')}" for name, report in paths.items() if not report.get("ok", False)
     ]
@@ -576,13 +599,7 @@ def check_system_mounts_tool() -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 
-    filesystem = configuration.filesystem
-    paths = {
-        "root_directory": _check_path(path=filesystem.root_directory),
-        "server_directory": _check_path(path=filesystem.server_directory),
-        "nas_directory": _check_path(path=filesystem.nas_directory),
-        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
-    }
+    paths = _filesystem_paths_report(configuration=configuration)
     summary = {
         "ok": sum(1 for report in paths.values() if report.get("ok", False)),
         "failed": sum(1 for report in paths.values() if not report.get("ok", False)),

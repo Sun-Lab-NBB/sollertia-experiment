@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .system import MesoscopeGoogleSheets
+    from ..cross_system import SurgeryLog
 
 _METADATA_SCHEMA = {
     "frameNumbers": (np.int32, int),
@@ -494,6 +495,12 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     """Updates the water restriction log to include the processed session's data and adds the animal's
     surgical intervention record to the session's data directory as the surgery_data.yaml file.
 
+    Notes:
+        Every Google Sheets interaction in this function is optional. If no Google service account credentials are
+        configured for the host-machine, the function skips all Google Sheets processing with a warning. If a specific
+        Google Sheet is not configured in the system configuration, the function skips only the processing that depends
+        on that sheet with a warning. This allows operating systems that do not use some or all of the Google Sheets.
+
     Args:
         session_data: The SessionData instance that defines the processed session.
         sheets_data: The MesoscopeGoogleSheets that stores the Google Sheets configuration parameters for the
@@ -502,12 +509,22 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     Raises:
         ValueError: If the session_type attribute of the input SessionData instance is not one of the supported options.
     """
-    # Resolves the animal's unique identifier code and common Google Sheets parameters.
-    animal_id = int(session_data.animal_id)
-    credentials_path = get_google_credentials_path()
-    descriptor_path = session_data.raw_data.session_descriptor_path
+    # Resolves the path to the Google service account credentials. If no credentials are configured for the
+    # host-machine, gracefully skips all Google Sheets processing instead of aborting the preprocessing pipeline.
+    try:
+        credentials_path = get_google_credentials_path()
+    except FileNotFoundError:
+        message = (
+            f"No Google service account credentials are configured for the host-machine. Skipping all Google Sheets "
+            f"processing (surgery data snapshot and water restriction log update) for the session "
+            f"{session_data.session_name}."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
 
-    # Loads the session's descriptor file based on the session's type.
+    # Resolves the animal's unique identifier code and loads the session's descriptor file based on the session's type.
+    animal_id = int(session_data.animal_id)
+    descriptor_path = session_data.raw_data.session_descriptor_path
     session_type = session_data.session_type
     is_window_checking = session_type == SessionTypes.WINDOW_CHECKING
 
@@ -531,45 +548,73 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
     descriptor = descriptor_class.from_yaml(descriptor_path)  # type: ignore[attr-defined]
 
-    # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file. The
-    # returned handle reuses the established Google Sheets connection for any follow-up surgery log updates.
-    surgery_log = snapshot_surgery_data(
-        session_data=session_data,
-        animal_id=animal_id,
-        credentials_path=credentials_path,
-        surgery_sheet_id=sheets_data.surgery_sheet_id,
-    )
+    # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file, if
+    # the surgery log Google Sheet is configured. The returned handle reuses the established Google Sheets connection
+    # for any follow-up surgery log updates.
+    surgery_log: SurgeryLog | None = None
+    if sheets_data.surgery_sheet_id:
+        surgery_log = snapshot_surgery_data(
+            session_data=session_data,
+            animal_id=animal_id,
+            credentials_path=credentials_path,
+            surgery_sheet_id=sheets_data.surgery_sheet_id,
+        )
+    else:
+        message = (
+            f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery data snapshot "
+            f"for the session {session_data.session_name}."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
 
     # Handles window checking sessions differently - updates surgery quality instead of the water restriction log.
     if is_window_checking:
+        # Updating the surgery quality requires the surgery log Google Sheet connection established above. Skips the
+        # update with a warning if the surgery log Google Sheet is not configured.
+        if surgery_log is None:
+            message = (
+                f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery quality "
+                f"assessment update for the session {session_data.session_name}."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            return
+
         # Ensures that the quality is always between 0 and 3 inclusive.
         quality = max(0, min(3, int(descriptor.surgery_quality)))
         surgery_log.update_surgery_quality(quality=quality)
         message = "Surgery quality: Updated."
         console.echo(message=message, level=LogLevel.SUCCESS)
+        return
 
-    # For non-window-checking sessions, updates the water restriction log.
-    else:
-        # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
-        training_water = round(descriptor.dispensed_water_volume_ml, ndigits=3)
-        experimenter_water = round(descriptor.experimenter_given_water_volume_ml, ndigits=3)
-        total_water = training_water + experimenter_water
+    # For non-window-checking sessions, updates the water restriction log, if the water restriction log Google Sheet is
+    # configured. Skips the update with a warning otherwise.
+    if not sheets_data.water_log_sheet_id:
+        message = (
+            f"The water restriction log Google Sheet is not configured for the host-machine. Skipping the water "
+            f"restriction log update for the session {session_data.session_name}."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
 
-        # Updates the Water Restriction log to reflect the processed session's data.
-        wr_sheet = WaterLog(
-            session_date=session_data.session_name,
-            animal_id=animal_id,
-            credentials_path=credentials_path,
-            sheet_id=sheets_data.water_log_sheet_id,
-        )
-        wr_sheet.update_water_log(
-            weight=descriptor.animal_weight_g,
-            water_ml=total_water,
-            experimenter_id=descriptor.experimenter,
-            session_type=session_data.session_type,
-        )
-        message = "Water restriction log entry: Written."
-        console.echo(message=message, level=LogLevel.SUCCESS)
+    # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
+    training_water = round(descriptor.dispensed_water_volume_ml, ndigits=3)
+    experimenter_water = round(descriptor.experimenter_given_water_volume_ml, ndigits=3)
+    total_water = training_water + experimenter_water
+
+    # Updates the Water Restriction log to reflect the processed session's data.
+    wr_sheet = WaterLog(
+        session_date=session_data.session_name,
+        animal_id=animal_id,
+        credentials_path=credentials_path,
+        sheet_id=sheets_data.water_log_sheet_id,
+    )
+    wr_sheet.update_water_log(
+        weight=descriptor.animal_weight_g,
+        water_ml=total_water,
+        experimenter_id=descriptor.experimenter,
+        session_type=session_data.session_type,
+    )
+    message = "Water restriction log entry: Written."
+    console.echo(message=message, level=LogLevel.SUCCESS)
 
 
 def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
@@ -595,7 +640,11 @@ def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
 
 def preprocess_session_data(session_data: SessionData) -> None:
     """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
-    the BioHPC server and the Synology NAS, and removes the local data copy from the VRPC.
+    all configured long-term storage destinations, and removes the local data copy from the VRPC.
+
+    Notes:
+        If no long-term storage destinations are configured for the host-machine, the data transfer and the local data
+        removal are skipped, and the preprocessing is limited to on-premises data conversion and aggregation steps.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -608,6 +657,15 @@ def preprocess_session_data(session_data: SessionData) -> None:
 
     # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+
+    # Warns about any long-term storage destinations that are not configured for the host-machine. The session's data
+    # is not backed up to these destinations during the data transfer step.
+    for destination_name in mesoscope_data.unconfigured_destinations:
+        message = (
+            f"The {destination_name} long-term storage destination is not configured for the host-machine. The "
+            f"session {session_data.session_name} data is not backed up to this destination."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
 
     # If necessary, ensures that the mesoscope_data ScanImagePC directory is renamed to include the processed session
     # name.
@@ -637,7 +695,7 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # log to reflect the processed session.
     _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
-    # Sends preprocessed data to the NAS and the BioHPC server.
+    # Sends preprocessed data to all configured long-term storage destinations.
     push_session_data(session_data=session_data, destinations=mesoscope_data.destinations, threads=15)
 
     message = f"Session {session_data.session_name} data preprocessing: Complete."
@@ -691,6 +749,14 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     """Transfers all sessions performed by the specified animal from the source project to the target project across
     all storage locations.
 
+    Notes:
+        The migration strategy depends on whether the host-machine is configured with any long-term storage
+        destinations. Systems with at least one configured destination treat the preferred (first configured)
+        destination as the source of truth and pull, re-preprocess, and purge each session. Systems without any
+        configured destination keep all data on the acquisition host machine, so the migration reduces to an
+        on-premises operation that relocates each locally stored session to the target project directory and reassigns
+        it. The persistent data relocation and the cleanup of redundant directories apply to both modes.
+
     Args:
         animal: The animal for which to migrate the data.
         source_project: The name of the project from which to migrate the data.
@@ -700,11 +766,11 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
     # Queries the system configuration parameters, which includes the filesystem configuration.
     system_configuration = get_system_configuration()
+    filesystem = system_configuration.filesystem
 
-    # Resolves the paths to the key root directories used in the migration process.
-    source_server_root = system_configuration.filesystem.server_directory.joinpath(source_project, animal)
-    destination_local_root = system_configuration.filesystem.root_directory.joinpath(target_project, animal)
-    source_local_root = system_configuration.filesystem.root_directory.joinpath(source_project, animal)
+    # Resolves the paths to the key local root directories used in the migration process.
+    destination_local_root = filesystem.root_directory.joinpath(target_project, animal)
+    source_local_root = filesystem.root_directory.joinpath(source_project, animal)
 
     # If the target project does not exist, aborts with an error.
     if not destination_local_root.parent.exists():
@@ -718,10 +784,98 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # Ensures that the root directory for the processed animal exists on the local machine.
     ensure_directory_exists(destination_local_root)
 
-    # Ensures that all locally stored sessions have been processed and moved to the BioHPC server for storage. This is
-    # a prerequisite to ensure that all data is properly migrated from the source project to the target project.
+    # Resolves the configured long-term storage destinations in preference order (configuration order). The first
+    # configured destination is treated as the source of truth from which the session data is pulled.
+    configured_destinations = [(name, root) for name, root in filesystem.storage_directories.items() if root != Path()]
+
+    # Systems without any configured long-term storage destination keep all data on the acquisition host machine, so
+    # the session migration reduces to a local relocation. Systems with at least one destination pull from the
+    # preferred (first configured) destination.
+    if not configured_destinations:
+        _migrate_sessions_on_premises(
+            source_local_root=source_local_root,
+            destination_local_root=destination_local_root,
+            target_project=target_project,
+        )
+    else:
+        preferred_name, preferred_root = configured_destinations[0]
+        _migrate_sessions_via_destination(
+            destination_name=preferred_name,
+            destination_root=preferred_root.joinpath(source_project, animal),
+            source_local_root=source_local_root,
+            destination_local_root=destination_local_root,
+            animal=animal,
+            source_project=source_project,
+            target_project=target_project,
+        )
+
+    console.echo("Migrating persistent data directories...")
+    # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
+    # data, if any was resolved for any processed session.
+    old = filesystem.mesoscope_directory.joinpath(source_project, animal)
+    new = filesystem.mesoscope_directory.joinpath(target_project, animal)
+    if new.exists():
+        sh.rmtree(new)
+    sh.move(src=old, dst=new)
+
+    # Also moves the VRPC persistent data for the animal between projects.
+    old = source_local_root.joinpath("persistent_data")
+    new = destination_local_root.joinpath("persistent_data")
+    if new.exists():
+        sh.rmtree(new)
+    sh.move(src=old, dst=new)
+
+    # Removes the old animal directory from the acquisition host machine and all configured long-term storage
+    # destinations. This also removes any lingering data not moved during the migration process, ensuring that each
+    # animal is found under at most a single project directory everywhere. Unconfigured destinations are skipped, since
+    # their unset roots resolve to relative paths that are unsafe to delete.
+    deletion_root_candidates = [
+        filesystem.mesoscope_directory,
+        filesystem.root_directory,
+        *filesystem.storage_directories.values(),
+    ]
+    deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
+    ):
+        delete_directory(directory_path=candidate)
+
+    console.echo("Migration: Complete.", level=LogLevel.SUCCESS)
+
+
+def _migrate_sessions_via_destination(
+    destination_name: str,
+    destination_root: Path,
+    source_local_root: Path,
+    destination_local_root: Path,
+    animal: str,
+    source_project: str,
+    target_project: str,
+) -> None:
+    """Migrates the animal's sessions from the source to the target project using a long-term storage destination as
+    the source of truth.
+
+    Notes:
+        This helper supports systems that transfer their data to long-term storage destinations. It requires the local
+        source project directory to be free of non-preprocessed sessions, then pulls each destination-stored session to
+        the host machine, re-preprocesses it under the target project, and purges the obsolete source-project copies.
+
+    Args:
+        destination_name: The name of the long-term storage destination used as the source of truth, used in status
+            messages.
+        destination_root: The path to the animal's source-project directory on the long-term storage destination.
+        source_local_root: The path to the animal's source-project directory on the acquisition host machine.
+        destination_local_root: The path to the animal's target-project directory on the acquisition host machine.
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+    """
+    console.echo(f"Using the {destination_name} long-term storage destination as the migration source of truth.")
+
+    # Ensures that all locally stored sessions have been processed and moved to a long-term storage destination. This
+    # guarantees that the destination holds the authoritative copy of every session before the migration relocates it.
     local_sessions = discover_sessions(root_path=source_local_root)
-    if len(local_sessions) > 0:
+    if local_sessions:
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
             f"source project directory on the VRPC contains non-preprocessed session data. "
@@ -729,8 +883,8 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         )
         console.error(message=message, error=FileNotFoundError)
 
-    # Loops over all sessions stored on the server and processes them sequentially
-    sessions = discover_sessions(root_path=source_server_root)
+    # Loops over all sessions stored on the long-term storage destination and processes them sequentially.
+    sessions = discover_sessions(root_path=destination_root)
     for session in sessions:
         console.echo(f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
@@ -738,7 +892,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
         # Pulls the session to the local machine and reassigns it to the target project.
         session_data = migrate_session_directory(
-            remote_session_path=source_server_root.joinpath(session.name),
+            remote_session_path=destination_root.joinpath(session.name),
             local_session_path=local_session_path,
             old_session_data_path=old_session_data_path,
             target_project=target_project,
@@ -746,41 +900,40 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         )
 
         # Runs preprocessing on the session's data again, which regenerates the checksum and transfers the data to
-        # the long-term storage destinations (including the NAS).
+        # all configured long-term storage destinations.
         preprocess_session_data(session_data=session_data)
 
-        # Removes now-obsolete server, NAS, and VRPC directories. To do so, first marks the old session for
+        # Removes the now-obsolete long-term storage and VRPC directories. To do so, first marks the old session for
         # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
         old_session_data = SessionData.load(session_path=old_session_data_path.parents[1])
         old_session_data.raw_data.nk_path.touch()
         purge_session(old_session_data)
 
-    console.echo("Migrating persistent data directories...")
-    # Moves ScanImagePC persistent data for the animal between projects This preserves existing MotionEstimator and ROI
-    # data, if any was resolved for any processed session.
-    old = system_configuration.filesystem.mesoscope_directory.joinpath(source_project, animal)
-    new = system_configuration.filesystem.mesoscope_directory.joinpath(target_project, animal)
-    sh.rmtree(new)
-    sh.move(src=old, dst=new)
 
-    # Also moves the VRPC persistent data for the animal between projects.
-    old = source_local_root.joinpath("persistent_data")
-    new = destination_local_root.joinpath("persistent_data")
-    sh.rmtree(new)
-    sh.move(src=old, dst=new)
+def _migrate_sessions_on_premises(
+    source_local_root: Path,
+    destination_local_root: Path,
+    target_project: str,
+) -> None:
+    """Migrates the animal's sessions from the source to the target project entirely on the acquisition host machine.
 
-    # Removes the old animal directory from all destinations. This also removes any lingering data not moved during
-    # the migration process. This ensures that each animal is found under at most a single project directory on all
-    # destinations.
-    deletion_candidates = [
-        system_configuration.filesystem.mesoscope_directory.joinpath(source_project, animal),
-        system_configuration.filesystem.nas_directory.joinpath(source_project, animal),
-        system_configuration.filesystem.root_directory.joinpath(source_project, animal),
-        system_configuration.filesystem.server_directory.joinpath(source_project, animal),
-    ]
-    for candidate in console.track(
-        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
-    ):
-        delete_directory(directory_path=candidate)
+    Notes:
+        This helper supports systems that do not transfer their data to long-term storage destinations. Since the host
+        machine holds the only copy of the data, the migration relocates each locally stored session directory to the
+        target project and reassigns the session to the target project, without any remote data transfer.
 
-    console.echo("Migration: Complete.", level=LogLevel.SUCCESS)
+    Args:
+        source_local_root: The path to the animal's source-project directory on the acquisition host machine.
+        destination_local_root: The path to the animal's target-project directory on the acquisition host machine.
+        target_project: The name of the project to which the data should be migrated.
+    """
+    # Relocates each locally stored session directory to the target project and reassigns it. Reassigning the project
+    # name and saving the SessionData instance applies the filesystem changes resulting from the project change.
+    for session in discover_sessions(root_path=source_local_root):
+        console.echo(f"Migrating session {session.name}...")
+        target_session_path = destination_local_root.joinpath(session.name)
+        sh.move(src=source_local_root.joinpath(session.name), dst=target_session_path)
+
+        session_data = SessionData.load(session_path=target_session_path)
+        session_data.project_name = target_project
+        session_data.save()

@@ -215,7 +215,7 @@ def window_checking_logic(
         logger.stop()
 
         # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
-        # just copies the session raw_data directory to the NAS and BioHPC server.
+        # just copies the session raw_data directory to all configured long-term storage destinations.
         preprocess_session_data(session_data=session_data)
 
     finally:

@@ -192,12 +192,25 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         This function computes the data integrity checksum before the transfer and removes the local copy of the
         session's data after the data is successfully transferred to all destinations.
 
+        If the input collection contains no storage destinations, the function aborts early with a warning and leaves
+        the local copy of the session's data intact, since there is no destination to back the data up to.
+
     Args:
         session_data: The SessionData instance that defines the processed session.
         destinations: The StorageDestinations collection that defines the long-term storage destinations resolved for
             the processed session.
         threads: The number of worker threads used by each transfer process to parallelize the data transfer.
     """
+    # If no long-term storage destinations are configured, the preprocessed data has nowhere to be backed up. Aborts
+    # the transfer and retains the local copy on the acquisition host machine instead of deleting it.
+    if not destinations.destinations:
+        message = (
+            f"No long-term storage destinations are configured for the host-machine. Skipping the data transfer for "
+            f"session {session_data.session_name} and retaining the local data copy on the acquisition host machine."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
+
     # Resolves the source directory and the per-destination target directories. The target reuses the source's raw_data
     # directory name so that the long-term storage layout matches the host machine's layout.
     source = session_data.raw_data_path

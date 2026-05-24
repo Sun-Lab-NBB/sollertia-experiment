@@ -2,7 +2,7 @@
 acquisition system.
 """
 
-from enum import IntEnum
+from enum import IntEnum, StrEnum
 from pathlib import Path
 from dataclasses import field, dataclass
 
@@ -26,21 +26,40 @@ _SYSTEM_CONFIGURATION_FILENAME: str = "mesoscope_system_configuration.yaml"
 """Canonical filename for the Mesoscope-VR system configuration YAML."""
 
 
+class MesoscopeStorageDestination(StrEnum):
+    """Defines the canonical long-term storage destinations anticipated by the Mesoscope-VR data acquisition system.
+
+    These members seed the default storage_directories configuration and define the order in which destinations are
+    preferred when a single source of truth is required, such as during animal migration. The configuration is not
+    restricted to these members: a system can configure any number of destinations under arbitrary names.
+    """
+
+    NAS = "NAS"
+    """The Network-Attached-Storage backup volume. Preferred as the source of truth when pulling data, since it stores
+    a complete copy of the raw data."""
+    SERVER = "Server"
+    """The remote compute server used as the primary long-term storage and analysis destination."""
+
+
 @dataclass(slots=True)
 class MesoscopeFileSystem:
     """Stores the filesystem configuration of the Mesoscope-VR data acquisition system."""
 
     root_directory: Path = Path()
     """The absolute path to the directory where all projects are stored on the main data acquisition system PC."""
-    server_directory: Path = Path()
-    """The absolute path to the local-filesystem-mounted directory where all projects are stored on the remote compute
-    server."""
-    nas_directory: Path = Path()
-    """The absolute path to the local-filesystem-mounted directory where all projects are stored on the NAS backup
-    storage volume."""
     mesoscope_directory: Path = Path()
     """The absolute path to the local-filesystem-mounted directory where all Mesoscope-acquired data is aggregated
     during acquisition by the PC that manages the Mesoscope during runtime."""
+    storage_directories: dict[str, Path] = field(
+        default_factory=lambda: {
+            MesoscopeStorageDestination.NAS.value: Path(),
+            MesoscopeStorageDestination.SERVER.value: Path(),
+        }
+    )
+    """Maps the name of each long-term storage destination to the absolute path of the local-filesystem-mounted
+    directory where all projects are stored on that destination. Destinations whose path is left unset (an empty path)
+    are treated as not configured and are skipped during data transfer and removal. The mapping order defines the
+    preference order used when a single destination must be selected as the source of truth."""
 
 
 @dataclass(slots=True)
@@ -404,7 +423,10 @@ class MesoscopeData:
     Attributes:
         vrpc_data: Defines the layout of the session-specific VRPC's persistent data directory.
         scanimagepc_data: Defines the layout of the ScanImagePC's mesoscope data directory.
-        destinations: Defines the layout of the long-term data storage infrastructure mounted to the VRPC's filesystem.
+        destinations: Defines the configured long-term data storage destinations mounted to the VRPC's filesystem. Only
+            destinations whose storage root is configured in the system configuration are included.
+        unconfigured_destinations: Stores the names of the long-term storage destinations whose storage root is not
+            configured for the host-machine, used to warn about skipped data backups during preprocessing.
     """
 
     def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
@@ -430,19 +452,24 @@ class MesoscopeData:
             ),
         )
 
-        # Server and NAS (data storage)
-        self.destinations = StorageDestinations(
-            destinations=(
+        # Long-term storage destinations. Resolves a StorageDestination only for each storage root that is configured
+        # (set to a non-default path) in the system configuration. This allows operating systems that lack some or all
+        # long-term storage destinations. Destinations whose root is left unset are recorded under
+        # unconfigured_destinations so the preprocessing pipeline can warn about the skipped backups. The configuration
+        # order is preserved, defining the preference order used when a single destination is required.
+        resolved_destinations: list[StorageDestination] = []
+        unconfigured_destinations: list[str] = []
+        for destination_name, root_directory in system_configuration.filesystem.storage_directories.items():
+            if root_directory == Path():
+                unconfigured_destinations.append(destination_name)
+                continue
+            resolved_destinations.append(
                 StorageDestination(
-                    name="NAS",
-                    session_path=system_configuration.filesystem.nas_directory.joinpath(project, animal, session),
-                ),
-                StorageDestination(
-                    name="BioHPC server",
-                    session_path=system_configuration.filesystem.server_directory.joinpath(project, animal, session),
-                ),
+                    name=destination_name, session_path=root_directory.joinpath(project, animal, session)
+                )
             )
-        )
+        self.destinations = StorageDestinations(destinations=tuple(resolved_destinations))
+        self.unconfigured_destinations: tuple[str, ...] = tuple(unconfigured_destinations)
 
 
 @dataclass()
