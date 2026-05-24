@@ -1,4 +1,4 @@
-"""Provides miscellaneous assets shared by other library packages."""
+"""Provides utilities for discovering project and experiment assets and querying runtime version data."""
 
 from __future__ import annotations
 
@@ -17,10 +17,8 @@ def get_version_data() -> tuple[str, str]:
     """Returns the current Python and sollertia-experiment versions.
 
     Returns:
-        A tuple of two strings. The first string stores the Python version, and the second string stores the
-        sollertia-experiment version.
+        The Python version first, then the sollertia-experiment version.
     """
-    # Determines the local Python version and the version of the sollertia-experiment library.
     sollertia_experiment_version = _metadata("sollertia-experiment")["version"]
     python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return python_version, sollertia_experiment_version

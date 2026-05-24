@@ -1,27 +1,29 @@
 """Provides the assets for interfacing with Google Sheet files."""
 
+from __future__ import annotations
+
 import re
-from typing import Any
-from pathlib import Path  # noqa: TC003
+from typing import TYPE_CHECKING, Any
 from datetime import (
     UTC,
     datetime,
 )
-from zoneinfo import ZoneInfo
 
 from ataraxis_base_utilities import console
 from sollertia_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials
 
-# Stores schemas for supported date formats.
-_supported_date_formats: set[str] = {"%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", "%m/%d/%Y"}
+if TYPE_CHECKING:
+    from pathlib import Path
 
-# Compiles the regex for a digit.
-_DIGIT_PATTERN = re.compile(r"\d+")
+_SUPPORTED_DATE_FORMATS: set[str] = {"%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", "%m/%d/%Y"}
+"""Stores the date format schemas supported when parsing dates read from Google Sheet files."""
 
-# Defines all headers (columns) that must exist in a validly formatted Surgery log Google Sheet
-_required_surgery_headers: set[str] = {
+_DIGIT_PATTERN: re.Pattern[str] = re.compile(r"\d+")
+"""A compiled regular expression that matches one or more consecutive digits."""
+
+_REQUIRED_SURGERY_HEADERS: set[str] = {
     # Subject Data headers
     "id",
     "ear punch",
@@ -47,9 +49,9 @@ _required_surgery_headers: set[str] = {
     "buprenorphine (ml)",
     "dexamethasone (ml)",
 }
+"""Defines all headers (columns) that must exist in a validly formatted surgery log Google Sheet."""
 
-# Defines all headers (columns) that must exist in a validly formatted Water Restriction log Google Sheet
-_required_water_restriction_headers: set[str] = {
+_REQUIRED_WATER_RESTRICTION_HEADERS: set[str] = {
     "date",
     "weight (g)",
     "given by:",
@@ -57,11 +59,16 @@ _required_water_restriction_headers: set[str] = {
     "behavior",
     "time",
 }
+"""Defines all headers (columns) that must exist in a validly formatted water restriction log Google Sheet."""
 
 
 def _convert_date_time_to_timestamp(date: str, time: str) -> int:
     """Converts the input date and time strings to the number of microseconds elapsed since the UTC epoch onset format
     used by the Sollertia platform to store timestamps.
+
+    Notes:
+        The input date and time are human-entered values expressed in the host machine's local time. They are
+        interpreted as local time and converted to a UTC timestamp for internal storage.
 
     Args:
         date: The date string in the format "%m-%d-%y" or "%m-%d-%Y".
@@ -75,7 +82,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
             supported input formats.
     """
     # Ensures date and time are provided
-    if not isinstance(date, str) or len(date) < 1:
+    if not isinstance(date, str) or not date:
         message = (
             f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
             f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'date' argument, but "
@@ -83,7 +90,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         )
         console.error(message=message, error=ValueError)
 
-    if not isinstance(time, str) or len(time) < 1:
+    if not isinstance(time, str) or not time:
         message = (
             f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
             f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'time' argument, but "
@@ -102,7 +109,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         console.error(message=message, error=ValueError)
 
     # Parses the date object
-    for date_format in _supported_date_formats:
+    for date_format in _SUPPORTED_DATE_FORMATS:
         try:
             date_obj = datetime.strptime(date, date_format).date()  # noqa: DTZ007
             break
@@ -111,13 +118,14 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
     else:
         message = (
             f"Invalid date format encountered when parsing Google Sheet data. Expected one of the supported formats "
-            f"({sorted(_supported_date_formats)}), but encountered {date}."
+            f"({sorted(_SUPPORTED_DATE_FORMATS)}), but encountered {date}."
         )
         console.error(message=message, error=ValueError)
 
-    # Constructs the full DT object and converts it into the UTC timestamp in microseconds.
-    full_datetime = datetime.combine(date=date_obj, time=time_obj, tzinfo=UTC)
-    return int(full_datetime.timestamp() * 1_000_000)
+    # Human-entered date and time values use the host machine's local time. Interprets the combined value as local
+    # time, then converts it to a UTC microsecond timestamp for internal storage.
+    local_datetime = datetime.combine(date=date_obj, time=time_obj).astimezone()
+    return int(local_datetime.timestamp() * 1_000_000)
 
 
 def _extract_coordinate_value(substring: str) -> float:
@@ -199,7 +207,7 @@ def _replace_empty_values(row_data: list[str]) -> list[str | None]:
     Returns:
         The filtered version of the input list with all empty and placeholder values replaced with None.
     """
-    empty_values = {"", "n/a", "--", "---"}  # Creates a set once
+    empty_values = {"", "n/a", "--", "---"}
     return [None if cell.strip().lower() in empty_values else cell for cell in row_data]
 
 
@@ -268,30 +276,30 @@ class SurgeryLog:
                 f"row of the target project's surgery log tab appears to be empty instead of containing the "
                 f"human-friendly column headers."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Creates a dictionary mapping header values to Google Sheet column letters
         self._headers: dict[str, str] = {}
-        for i, header in enumerate(header_values):
+        for index, header in enumerate(header_values):
             # Converts column index to column letter (0 -> A, 1 -> B, etc.)
-            column_letter = _convert_index_to_column_letter(i)
+            column_letter = _convert_index_to_column_letter(index)
             self._headers[str(header).strip().lower()] = column_letter
 
         # Checks for missing headers (column names)
         missing_headers = [
             required_header
-            for required_header in _required_surgery_headers
+            for required_header in _REQUIRED_SURGERY_HEADERS
             if required_header.lower() not in self._headers
         ]
 
         # If any required headers are missing, raises an error with a detailed message
         if missing_headers:
-            missing_headers_str = ", ".join([f"'{h}'" for h in sorted(missing_headers)])
+            missing_headers_str = ", ".join(f"'{header}'" for header in sorted(missing_headers))
             message = (
                 f"Unable to parse the surgery data for the project {project_name} and animal {animal_id}. "
                 f"The following required headers are missing from the target surgery log file: {missing_headers_str}."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Retrieves all animal names (IDs) from the 'ID' column. Each ID is z-filled to a triple-digit string for
         # sorting to behave predictably. This data is stored as a tuple of IDs.
@@ -308,14 +316,14 @@ class SurgeryLog:
             .execute()
         )
         id_list = animal_ids.get("values", [[]])[0]
-        self._animals: tuple[str, ...] = tuple([str(animal_id).zfill(5) for animal_id in id_list])
-        if len(self._animals) == 0:
+        self._animals: tuple[str, ...] = tuple(str(animal_id).zfill(5) for animal_id in id_list)
+        if not self._animals:
             message = (
                 f"Unable to parse the surgery data for the project {project_name} and animal {animal_id}. The ID "
                 f"column of the sheet does not contain any animal identifiers, indicating that the surgery log file is "
                 f"empty."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Converts input animal ID to the same format as IDs stored in the id_list generated above for comparison
         formatted_id = str(self._animal_id).zfill(5)
@@ -364,9 +372,9 @@ class SurgeryLog:
         # headers. This procedure assumes that the headers are contiguous, start from row A, and the animal has data for
         # all or most present headers in the same sequential order as headers are encountered.
         animal_data: dict[str, Any] = {}
-        for i, header in enumerate(self._headers):
+        for index, header in enumerate(self._headers):
             # Handles unlikely scenario of animal having more data than headers
-            animal_data[header.lower()] = row_values[i] if i < len(row_values) else None
+            animal_data[header.lower()] = row_values[index] if index < len(row_values) else None
 
         # Parses the animal data and packages it into the SurgeryData instance:
 
@@ -603,7 +611,7 @@ class WaterLog:
         _headers: Maps the water restriction and animal interaction log headers (column names) to the Excel-style
             Google Sheet column letters (A, B, etc.).
         _animal_tab_id: The unique identifier of the log's tab that stores the target animal's data.
-        _current_time: The current ETC/EDT time in the HH:MM format.
+        _current_time: The session start time converted to the host machine's local time, in the HH:MM format.
         _session_row_index: The index of the log's row that stores the processed session's data.
 
     Raises:
@@ -655,17 +663,17 @@ class WaterLog:
                     self._animal_tab_id = tab_id
 
         # Formats the animal IDs with zero-padding for consistent sorting
-        self._animals: tuple[str, ...] = tuple([str(animal_id).zfill(5) for animal_id in animal_ids])
+        self._animals: tuple[str, ...] = tuple(str(animal_id).zfill(5) for animal_id in animal_ids)
 
         # If no IDs are extracted, raises an error. This usually indicates that the target Google Sheet is not formatted
         # appropriately.
-        if len(self._animals) == 0:
+        if not self._animals:
             message = (
                 f"Unable to interface with the water restriction and animal interaction log file for the animal "
                 f"{self._animal_id}. The target log file does not contain any tabs named after unique animal "
                 f"identifiers."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Otherwise, if the target animal ID is not in the extracted IDs list, raises an error.
         if str(self._animal_id).zfill(5) not in self._animals:
@@ -674,7 +682,7 @@ class WaterLog:
                 f"animal {self._animal_id}. The target log file only contains the tabs for the following animals: "
                 f"{[int(animal) for animal in sorted(self._animals)]}."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Retrieves all values stored in the second row of the Google Sheet tab with the name that matches the target
         # animal ID. Note: this is in contrast to the Surgery data log, where the headers are stored in the first sheet
@@ -695,44 +703,44 @@ class WaterLog:
                 f"animal {self._animal_id}. The second row of the target log file's tab does not contain the "
                 f"expected column headers."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
         # Creates a dictionary mapping header values to Google Sheet column letters
         self._headers: dict[str, str] = {}
-        for i, header in enumerate(header_values):
+        for index, header in enumerate(header_values):
             # Converts column index to column letter (0 -> A, 1 -> B, etc.)
-            column_letter = _convert_index_to_column_letter(i)
+            column_letter = _convert_index_to_column_letter(index)
             self._headers[str(header).strip().lower()] = column_letter
 
         # Checks for missing headers (column names)
         missing_headers = [
             required_header
-            for required_header in _required_water_restriction_headers
+            for required_header in _REQUIRED_WATER_RESTRICTION_HEADERS
             if required_header.lower() not in self._headers
         ]
 
         # If any required headers are missing, raises an error
         if missing_headers:
-            missing_headers_str = ", ".join([f"'{h}'" for h in sorted(missing_headers)])
+            missing_headers_str = ", ".join(f"'{header}'" for header in sorted(missing_headers))
             message = (
                 f"Unable to interface with the water restriction and animal interaction log file for the "
                 f"animal {self._animal_id}. The following required headers are missing from the log file: "
                 f"{missing_headers_str}."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
-        # Parses the session's date and converts it into the format used in the log files
-        dt = datetime.strptime(session_date, "%Y-%m-%d-%H-%M-%S-%f").replace(tzinfo=UTC)
+        # Parses the session's date and converts it into the format used in the log files.
+        session_datetime = datetime.strptime(session_date, "%Y-%m-%d-%H-%M-%S-%f").replace(tzinfo=UTC)
 
-        # Session timestamps are in UTC, but our log uses eastern time for user convenience. Converts the date to
-        # ET
-        dt_eastern = dt.astimezone(ZoneInfo("US/Eastern"))
+        # Session timestamps are stored in UTC, but the log files use the host machine's local time for user
+        # convenience. Converting to the local timezone matches the machine configuration used to fill the logs.
+        local_datetime = session_datetime.astimezone()
 
-        # Formats the date to appear the same way as used in the log file
-        formatted_date = dt_eastern.strftime("%-m/%-d/%y")
+        # Formats the date to appear the same way as used in the log file.
+        formatted_date = local_datetime.strftime("%-m/%-d/%y")
 
-        # Formats the session's start time in the same way as used in the log file and saves it to class attribute.
-        self._current_time: str = dt_eastern.strftime("%H:%M")
+        # Formats the session's start time in the same way as used in the log file and saves it to a class attribute.
+        self._current_time: str = local_datetime.strftime("%H:%M")
 
         # Finds the row inside the water restriction log file with session's date. This assumes that the log file is
         # pre-filled with dates. If not, this method will enter a loop to prompt the user to resolve the date issue.
@@ -762,11 +770,11 @@ class WaterLog:
         # is checked for validity and the session row index is discovered at class instantiation, this is a fairly
         # simple writing procedure.
         row_index = self._session_row_index
-        self._write_value("weight (g)", row_index, weight)
-        self._write_value("given by:", row_index, experimenter_id)
-        self._write_value("water given (mL)", row_index, water_ml)
-        self._write_value("behavior", row_index, session_type)
-        self._write_value("time", row_index, self._current_time)
+        self._write_value(column_name="weight (g)", row_index=row_index, value=weight)
+        self._write_value(column_name="given by:", row_index=row_index, value=experimenter_id)
+        self._write_value(column_name="water given (mL)", row_index=row_index, value=water_ml)
+        self._write_value(column_name="behavior", row_index=row_index, value=session_type)
+        self._write_value(column_name="time", row_index=row_index, value=self._current_time)
 
     def _find_date_row(self, target_date: str) -> int:
         """Finds the processed log's row index associated with the target date.
@@ -794,17 +802,17 @@ class WaterLog:
         date_values = date_data.get("values", [])
 
         # Finds the row with the target date
-        for i, date_cell in enumerate(date_values):
+        for index, date_cell in enumerate(date_values):
             # Checks if the cell has a value matching the target date
             if date_cell and date_cell[0] == target_date:
                 # Adds 3 to account for 0-indexing and the fact we started from row 3
-                return i + 3
+                return index + 3
         message = (
             f"Unable to find the row for the target date {target_date} inside the water restriction and "
             f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
             f"specified date and rerun the command that caused this error."
         )
-        console.error(message, error=ValueError)  # Aborts with an error
+        console.error(message=message, error=ValueError)  # Aborts with an error
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
         # noinspection PyUnreachableCode
         raise ValueError(message)  # pragma: no cover

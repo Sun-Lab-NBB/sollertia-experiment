@@ -10,7 +10,7 @@ import matplotlib as mpl
 
 mpl.use("QtAgg")  # Uses QT backend for performance and compatibility with Linux
 
-from ataraxis_time import PrecisionTimer
+from ataraxis_time import PrecisionTimer, TimerPrecisions
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FixedLocator, FixedFormatter
 from matplotlib.patches import Rectangle
@@ -172,7 +172,7 @@ class BehaviorVisualizer:
         # 25 ms.
         self._time_window: int = 10
         self._time_step: int = 25
-        self._update_timer = PrecisionTimer("ms")
+        self._update_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # Pre-creates the structures used to store the displayed data during visualization runtime.
         self._timestamps: NDArray[np.float32] = np.arange(
