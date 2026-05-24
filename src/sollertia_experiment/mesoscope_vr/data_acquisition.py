@@ -44,9 +44,7 @@ from ..vr_task import (
 from .positions import ZaberPositions, MesoscopePositions
 from .runtime_ui import RuntimeControlUI
 from .visualizers import VisualizerMode, BehaviorVisualizer
-from .maintenance_ui import MaintenanceControlUI
-from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
-from ..shared_components import (
+from ..cross_system import (
     BrakeInterface,
     ValveInterface,
     GasPuffValveInterface,
@@ -54,6 +52,8 @@ from ..shared_components import (
     get_animal_project,
     get_project_experiments,
 )
+from .maintenance_ui import MaintenanceControlUI
+from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
 
 if TYPE_CHECKING:
@@ -2272,7 +2272,9 @@ def window_checking_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(animal_id=animal_id)
+    animal_projects = get_animal_project(
+        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    )
     if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
         message = (
             f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
@@ -2475,7 +2477,9 @@ def lick_training_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(animal_id=animal_id)
+    animal_projects = get_animal_project(
+        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    )
     if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
         message = (
             f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
@@ -2790,7 +2794,9 @@ def run_training_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(animal_id=animal_id)
+    animal_projects = get_animal_project(
+        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    )
     if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
         message = (
             f"Unable to execute the run training session for the animal {animal_id} participating in the project "
@@ -3204,9 +3210,7 @@ def experiment_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Prevents the user from executing the session if the project is not configured to run the requested experiment
-    project_experiments = get_project_experiments(
-        project=project_name, filesystem_configuration=system_configuration.filesystem
-    )
+    project_experiments = get_project_experiments(project_directory=project_directory)
     if experiment_name not in project_experiments:
         message = (
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
@@ -3217,7 +3221,9 @@ def experiment_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(animal_id=animal_id)
+    animal_projects = get_animal_project(
+        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    )
     if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
         message = (
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "

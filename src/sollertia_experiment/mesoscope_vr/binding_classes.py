@@ -11,7 +11,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MicroControllerInterface
 
 from .positions import ZaberPositions
-from ..shared_components import (
+from ..cross_system import (
     ZaberAxis,
     TTLInterface,
     LickInterface,

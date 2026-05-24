@@ -1,6 +1,6 @@
 """This package provides the assets shared by multiple data acquisition systems."""
 
-from .shared_assets import get_version_data, get_animal_project, get_project_experiments
+from .project_tools import get_version_data, get_animal_project, get_project_experiments
 from .zaber_bindings import (
     ZaberAxis,
     CRCCalculator,

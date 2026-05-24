@@ -21,6 +21,13 @@ from sollertia_shared_assets import SessionData
 if TYPE_CHECKING:
     from ataraxis_data_structures import YamlConfig
 
+from ..cross_system import (
+    CRCCalculator,
+    get_zaber_devices_info,
+    set_zaber_device_setting,
+    get_zaber_device_settings,
+    validate_zaber_device_configuration,
+)
 from ..mesoscope_vr import (
     ZaberPositions,
     MesoscopePositions,
@@ -30,13 +37,6 @@ from ..mesoscope_vr import (
     get_system_configuration_data,
     get_system_configuration_path,
     migrate_animal_between_projects,
-)
-from ..shared_components import (
-    CRCCalculator,
-    get_zaber_devices_info,
-    set_zaber_device_setting,
-    get_zaber_device_settings,
-    validate_zaber_device_configuration,
 )
 
 # Initializes the MCP server for 'sle get' tools.

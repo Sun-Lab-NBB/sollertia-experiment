@@ -10,12 +10,12 @@ from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
 from .mcp_servers import run_get_server
-from ..mesoscope_vr import get_system_configuration_data
-from ..shared_components import (
+from ..cross_system import (
     CRCCalculator,
     discover_zaber_devices,
     get_project_experiments,
 )
+from ..mesoscope_vr import get_system_configuration_data
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
@@ -67,7 +67,9 @@ def get_projects() -> None:
 def get_experiments(project: str) -> None:
     """Identifies the target project's experiment configurations accessible to the data acquisition system."""
     system_configuration = get_system_configuration_data()
-    experiments = get_project_experiments(project=project, filesystem_configuration=system_configuration.filesystem)
+    experiments = get_project_experiments(
+        project_directory=system_configuration.filesystem.root_directory.joinpath(project)
+    )
     if experiments:
         console.echo(
             f"The {system_configuration.name} data acquisition system is currently configured to execute the following "

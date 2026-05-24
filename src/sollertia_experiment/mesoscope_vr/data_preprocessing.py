@@ -27,6 +27,7 @@ from sollertia_shared_assets import (
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
+    discover_sessions,
     get_google_credentials_path,
 )
 from ataraxis_data_structures import (
@@ -37,7 +38,7 @@ from ataraxis_data_structures import (
 )
 
 from .tools import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
-from ..shared_components import WaterLog, SurgeryLog
+from ..cross_system import WaterLog, SurgeryLog
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -892,7 +893,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
     # Ensures that all locally stored sessions have been processed and moved to the BioHPC server for storage. This is
     # a prerequisite to ensure that all data is properly migrated from the source project to the target project.
-    local_sessions = [file.parents[1] for file in source_local_root.rglob("*session_data.yaml")]
+    local_sessions = discover_sessions(root_path=source_local_root)
     if len(local_sessions) > 0:
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
@@ -902,7 +903,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         console.error(message=message, error=FileNotFoundError)
 
     # Loops over all sessions stored on the server and processes them sequentially
-    sessions = [file.parents[1] for file in source_server_root.rglob("*session_data.yaml")]
+    sessions = discover_sessions(root_path=source_server_root)
     for session in sessions:
         console.echo(f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
