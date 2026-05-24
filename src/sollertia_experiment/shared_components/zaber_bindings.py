@@ -1,8 +1,9 @@
 """Provides interfaces for working with Zaber motor controllers and devices."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 from dataclasses import field, dataclass
-from collections.abc import Callable  # noqa: TC003
 
 from crc import Calculator, Configuration
 from tabulate import tabulate
@@ -10,6 +11,9 @@ from zaber_motion import Tools
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass
@@ -50,7 +54,7 @@ class _ZaberPortData:
     @property
     def has_devices(self) -> bool:
         """Returns True if any devices are connected to this port."""
-        return len(self.devices) > 0
+        return bool(self.devices)
 
 
 @dataclass(frozen=True)
@@ -97,113 +101,48 @@ class ZaberValidationResult:
     """Contains non-critical issues that may affect device operation."""
 
 
-def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
-    """Checks the specified USB port for Zaber devices and parses identification data for any discovered device.
+@dataclass(frozen=True)
+class _ZaberSettings:
+    """Defines the set of codes used to access Zaber settings stored in each interfaced device's non-volatile memory."""
 
-    Args:
-        port: The name of the USB port to scan for Zaber devices.
-
-    Returns:
-        A list of _ZaberDeviceData instances, one for each discovered device or an empty list if none are discovered.
+    maximum_limit: str = SettingConstants.LIMIT_MAX
+    """The maximum absolute position, in native motor units, the motor is allowed to reach during runtime, relative to
+    the motor's home position."""
+    minimum_limit: str = SettingConstants.LIMIT_MIN
+    """The minimum absolute position, in native motor units, the motor is allowed to reach during runtime, relative to
+    the motor's home position."""
+    position: str = SettingConstants.POS
+    """The current absolute position of the motor, in native motor units, relative to its home position."""
+    checksum: str = SettingConstants.USER_DATA_0
+    """The CRC32 checksum that should match the checksum of the device's label, which is used to confirm that the
+    device has been configured to work with the bindings exposed by this library. Uses USER_DATA 0 variable."""
+    shutdown_flag: str = SettingConstants.USER_DATA_1
+    """Tracks whether the device has been properly shut down during the previous runtime. Uses USER_DATA 1 variable."""
+    unsafe_flag: str = SettingConstants.USER_DATA_10
+    """Tracks whether the device can be positioned in a way that is not safe to home after power cycling.
+    Uses USER_DATA 10 variable."""
+    axis_park_position: str = SettingConstants.USER_DATA_11
+    """The absolute position, in native motor units, where the motor should be moved to before parking and shutting
+    down. Uses USER_DATA 11 variable."""
+    axis_maintenance_position: str = SettingConstants.USER_DATA_12
+    """The absolute position, in native motor units, where the motor should be moved as part of the preparation for the
+    system's maintenance. Uses USER_DATA 12 variable.
     """
-    # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
-    # device, this statement opens the connection. Otherwise, the statement raises an exception.
-    with Connection.open_serial_port(port_name=port, direct=False) as connection:
-        # Detects all devices connected to the port
-        devices = connection.detect_devices()
-
-        # Parses device information into _ZaberDeviceData instances
-        device_list = []
-        for number, device in enumerate(devices):
-            axes = [
-                _ZaberAxisData(
-                    axis_id=axis_number, axis_label=device.get_axis(axis_number=axis_number).label or "Not Used"
-                )
-                for axis_number in range(1, device.axis_count + 1)
-            ]
-
-            device_info = _ZaberDeviceData(
-                device_number=number + 1, device_id=device.device_id, label=device.label, name=device.name, axes=axes
-            )
-            device_list.append(device_info)
-
-        return device_list
-
-
-def _scan_active_ports() -> list[_ZaberPortData]:
-    """Scans all available serial ports for Zaber devices and parses their identification data.
-
-    Returns:
-        A list of _ZaberPortData objects, one for each scanned port.
+    axis_mount_position: str = SettingConstants.USER_DATA_13
+    """The absolute position, in native motor units, where the motor should be moved before mounting the animal into the
+    system's enclosure. Uses USER_DATA 13 variable.
     """
-    port_info_list = []
-
-    # Gets the list of serial ports active for the current platform and scans each to determine if any zaber devices
-    # are connected to that port.
-    for port in Tools.list_serial_ports():
-        try:
-            devices = _attempt_connection(port=port)
-            port_info = _ZaberPortData(port_name=port, devices=devices)
-        except Exception as e:
-            # Logs connection errors at debug level and creates empty _ZaberPortData instances.
-            console.echo(f"Error connecting to port {port}: {e}.", level=LogLevel.DEBUG)
-            port_info = _ZaberPortData(port_name=port, devices=[])
-
-        port_info_list.append(port_info)
-
-    return port_info_list
-
-
-def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
-    """Formats the device and axis ID information discovered during port scanning as a table before displaying it to
-     the user.
-
-    Args:
-        port_info_list: A list of _ZaberPortData instances containing device and axis information for each scanned port.
-
-    Returns:
-        A string containing the formatted device and axis ID information as a table.
-    """
-    # Pre-creates the list used to generate the formatted table
-    table_data = []
-
-    # Format the port scanning data as a table
-    for port_info in port_info_list:
-        if not port_info.has_devices:
-            table_data.append([port_info.port_name, "No Devices", "", "", "", "", ""])
-        else:
-            for device in port_info.devices:
-                device_row = [
-                    port_info.port_name,
-                    str(device.device_number),
-                    str(device.device_id),
-                    device.label,
-                    device.name,
-                ]
-                for axis in device.axes:
-                    axis_row = [*device_row, str(axis.axis_id), axis.axis_label]
-                    table_data.append(axis_row)
-                    device_row = [""] * 5
-        table_data.append([""] * 7)  # Adds an empty row to separate port sections
-
-    # Formats the table and returns it to the caller
-    return tabulate(
-        table_data,
-        headers=["Port", "Device Num", "ID", "Label", "Name", "Axis ID", "Axis Label"],
-        tablefmt="grid",
-        stralign="center",
-    )
 
 
 def discover_zaber_devices() -> None:
     """Scans all available serial ports and displays information about connected Zaber devices.
 
-    Note:
+    Notes:
         Connection errors encountered during scanning are logged at DEBUG level and do not interrupt
         the discovery process. Ports that cannot be connected are listed as having "No Devices".
     """
-    port_info_list = _scan_active_ports()  # Scans all active ports
-    formatted_info = _format_device_info(port_info_list)  # Formats the information so that it displays nicely
+    port_info_list = _scan_active_ports()
+    formatted_info = _format_device_info(port_info_list=port_info_list)
 
     # Prints the formatted table. Uses console.echo with raw=True to bypass the console's line-wrapping and log
     # prefixing since the table is already formatted by tabulate.
@@ -272,7 +211,7 @@ def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettin
             )
 
     except Exception as exception:
-        if isinstance(exception, (IndexError,)):
+        if isinstance(exception, IndexError):
             raise
         message = f"Unable to connect to Zaber device on port {port}: {exception}"
         console.error(message=message, error=ConnectionError)
@@ -476,7 +415,7 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
             "required before homing."
         )
 
-    is_valid = checksum_valid and positions_valid and len(errors) == 0
+    is_valid = checksum_valid and positions_valid and not errors
 
     return ZaberValidationResult(
         is_valid=is_valid,
@@ -496,7 +435,7 @@ class CRCCalculator:
 
     def __init__(self) -> None:
         # Specializes and instantiates the CRC checksum calculator
-        config = Configuration(
+        configuration = Configuration(
             width=32,
             polynomial=0x000000AF,
             init_value=0x00000000,
@@ -504,7 +443,7 @@ class CRCCalculator:
             reverse_input=False,
             reverse_output=False,
         )
-        self._calculator = Calculator(config)
+        self._calculator: Calculator = Calculator(configuration=configuration)
 
     def string_checksum(self, string: str) -> int:
         """Calculates the CRC32-XFER checksum for the input string.
@@ -521,39 +460,6 @@ class CRCCalculator:
 # Initializes a shared CRCCalculator instance used by the ZaberDevice class instances to verify the interfaced device's
 # configuration.
 _crc_calculator = CRCCalculator()
-
-
-@dataclass(frozen=True)
-class _ZaberSettings:
-    """Defines the set of codes used to access Zaber settings stored in each interfaced device's non-volatile memory."""
-
-    maximum_limit: str = SettingConstants.LIMIT_MAX
-    """The maximum absolute position, in native motor units, the motor is allowed to reach during runtime, relative to 
-    the motor's home position."""
-    minimum_limit: str = SettingConstants.LIMIT_MIN
-    """The minimum absolute position, in native motor units, the motor is allowed to reach during runtime, relative to 
-    the motor's home position."""
-    position: str = SettingConstants.POS
-    """The current absolute position of the motor, in native motor units, relative to its home position."""
-    checksum: str = SettingConstants.USER_DATA_0
-    """The CRC32 checksum that should match the checksum of the device's label, which is used to confirm that the 
-    device has been configured to work with the bindings exposed by this library. Uses USER_DATA 0 variable."""
-    shutdown_flag: str = SettingConstants.USER_DATA_1
-    """Tracks whether the device has been properly shut down during the previous runtime. Uses USER_DATA 1 variable."""
-    unsafe_flag: str = SettingConstants.USER_DATA_10
-    """Tracks whether the device can be positioned in a way that is not safe to home after power cycling. 
-    Uses USER_DATA 10 variable."""
-    axis_park_position: str = SettingConstants.USER_DATA_11
-    """The absolute position, in native motor units, where the motor should be moved to before parking and shutting 
-    down. Uses USER_DATA 11 variable."""
-    axis_maintenance_position: str = SettingConstants.USER_DATA_12
-    """The absolute position, in native motor units, where the motor should be moved as part of the preparation for the
-    system's maintenance. Uses USER_DATA 12 variable.
-    """
-    axis_mount_position: str = SettingConstants.USER_DATA_13
-    """The absolute position, in native motor units, where the motor should be moved before mounting the animal into the
-    system's enclosure. Uses USER_DATA 13 variable.
-    """
 
 
 class ZaberAxis:
@@ -582,16 +488,15 @@ class ZaberAxis:
             at a pace that does not overwhelm the connection interface with too many successive calls.
 
     Raises:
-        ValueError: If any parameter is read from the motor's non-volatile memory is outside the expected range of
+        ValueError: If any parameter read from the motor's non-volatile memory is outside the expected range of
             values.
     """
 
     _COMMUNICATION_DELAY_MS: int = 5
-    """The minimum delay, in milliseconds, that must separate all consecutive interactions with the motor's 
+    """The minimum delay, in milliseconds, that must separate all consecutive interactions with the motor's
     hardware."""
 
     def __init__(self, motor: Axis) -> None:
-        # Pre-initializes the shutdown tracker early
         self._shutdown_flag: bool = False
 
         # Parses hardcoded information stored in non-volatile hardware memory:
@@ -632,7 +537,7 @@ class ZaberAxis:
         self._timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     def __repr__(self) -> str:
-        """Returns the instance's string representation."""
+        """Returns a string representation of the ZaberAxis instance."""
         return (
             f"ZaberAxis(name={self._motor.label}, homed={self.is_homed}, parked={self.is_parked}, busy={self.is_busy}, "
             f"position={self.get_position()})."
@@ -719,7 +624,7 @@ class ZaberAxis:
             return
 
         # Moves the motor towards the home sensor until it triggers the limit switch.
-        self._padded_method_call(self._motor.home, wait_until_idle=False)
+        self._padded_method_call(method=self._motor.home, wait_until_idle=False)
 
     def move(self, position: int) -> None:
         """Moves the motor to the requested absolute position.
@@ -741,7 +646,7 @@ class ZaberAxis:
             return
 
         # Initiates the movement of the motor
-        self._padded_method_call(self._motor.move_absolute, position=position, wait_until_idle=False)
+        self._padded_method_call(method=self._motor.move_absolute, position=position, wait_until_idle=False)
 
     def stop(self) -> None:
         """Decelerates and stops the motor.
@@ -769,12 +674,12 @@ class ZaberAxis:
         if self.is_busy:
             return
 
-        self._padded_method_call(self._motor.park)
+        self._padded_method_call(method=self._motor.park)
 
     def unpark(self) -> None:
         """Unparks a parked motor, which allows the motor to accept and execute motion commands."""
         if self.is_parked:
-            self._padded_method_call(self._motor.unpark)
+            self._padded_method_call(method=self._motor.unpark)
 
     def shutdown(self) -> None:
         """Prepares the motor for shutting down by seizing any ongoing movement and parking it to cache its current
@@ -783,7 +688,7 @@ class ZaberAxis:
         # If the shutdown flag indicates that the motor has already been shut, abort early. Also returns early if the
         # motor is already parked.
         if self._shutdown_flag or self.is_parked:
-            self._shutdown_flag = True  # Ensures that the shutdown flag is set
+            self._shutdown_flag = True
             return
 
         # If the motor is moving, stops it
@@ -840,7 +745,7 @@ class ZaberDevice:
         # Uses the CRC calculator to generate the checksum for the device's label. It is expected that the
         # device_code (USER_DATA_0) non-volatile variable of the device is set to this checksum for any
         # correctly configured device.
-        device_check: int = _crc_calculator.string_checksum(self._controller.label)
+        device_check: int = _crc_calculator.string_checksum(string=self._controller.label)
         device_code: int = int(device.settings.get(setting=_ZaberSettings.checksum))
         if device_code != device_check:
             message = (
@@ -852,16 +757,16 @@ class ZaberDevice:
             console.error(message=message, error=ValueError)
 
         # Verifies that the device has been properly shut down during the previous runtime. While this is not an issue
-        # for most motors, certain motors require to be positioned in a specific way to ensure they can be homed. These
+        # for most motors, certain motors must be positioned in a specific way to ensure they can be homed. These
         # motors use the 'unsafe_flag' non-volatile tracker to indicate that they require proper shutdown.
-        shutdown_flag: bool = bool(self._controller.settings.get(setting=_ZaberSettings.shutdown_flag))
-        unsafe_flag: bool = bool(self._controller.settings.get(setting=_ZaberSettings.unsafe_flag))
-        if not shutdown_flag and unsafe_flag:
+        shutdown_completed: bool = bool(self._controller.settings.get(setting=_ZaberSettings.shutdown_flag))
+        homing_unsafe: bool = bool(self._controller.settings.get(setting=_ZaberSettings.unsafe_flag))
+        if not shutdown_completed and homing_unsafe:
             message = (
                 f"The {self._controller.label} ({self._controller.name}) device was not properly shutdown during the "
                 f"previous runtime. Since the device is marked as 'unsafe,' it is not possible to reset the device "
-                f"in the unsupervised mode. Ensure that the device is positioned correctly for homing procedure before "
-                f"proceeding. Do you want to proceed with initializing this motor?"
+                f"in the unsupervised mode. Ensure that the device is positioned correctly for the homing procedure "
+                f"before proceeding. Do you want to proceed with initializing this motor?"
             )
             console.echo(message=message, level=LogLevel.WARNING)
 
@@ -884,10 +789,10 @@ class ZaberDevice:
         # During the proper shutdown procedure, the tracker is always set to 1, so setting it to 0 now allows
         # detecting cases where the shutdown is not carried out.
         self._controller.settings.set(setting=_ZaberSettings.shutdown_flag, value=0)
-        self._shutdown_flag = False  # Also sets the local shutdown flag
+        self._shutdown_flag = False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the ZaberDevice instance."""
         return (
             f"ZaberDevice(name='{self._controller.name}', label={self._controller.label}, "
             f"id={self._controller.device_id})"
@@ -900,7 +805,7 @@ class ZaberDevice:
 
         # Sets the shutdown flag to 1 to indicate that the shutdown procedure has been performed.
         self._controller.settings.set(setting=_ZaberSettings.shutdown_flag, value=1)
-        self._shutdown_flag = True  # Also sets the local shutdown flag
+        self._shutdown_flag = True
 
     @property
     def axis(self) -> ZaberAxis:
@@ -939,7 +844,7 @@ class ZaberConnection:
         if not isinstance(port, str):
             message = (
                 f"Invalid 'port' argument type encountered when initializing a ZaberConnection class instance. "
-                f"Expected a {type(str).__name__}, but encountered {port} of type {type(port).__name__}."
+                f"Expected a {str.__name__}, but encountered {port} of type {type(port).__name__}."
             )
             console.error(message=message, error=TypeError)
 
@@ -949,7 +854,7 @@ class ZaberConnection:
         self._is_connected: bool = False
 
     def __repr__(self) -> str:
-        """Returns the string representation of the instance."""
+        """Returns a string representation of the ZaberConnection instance."""
         return f"ZaberConnection(port='{self._port}', connected={self.is_connected})"
 
     def __del__(self) -> None:
@@ -957,7 +862,7 @@ class ZaberConnection:
         garbage-collected.
         """
         if self._connection is not None and self.is_connected:
-            # If the connection is still active ensures all managed devices are properly shut down.
+            # If the connection is still active, ensures all managed devices are properly shut down.
             for device in self._devices:
                 device.shutdown()
 
@@ -970,20 +875,21 @@ class ZaberConnection:
         Raises:
             NoDeviceFoundException: If no compatible Zaber devices are discovered using the target serial port.
         """
-        # If the connection is already established, prevents from attempting to re-establish the connection again.
+        # If the connection is already established, prevents re-establishing the connection.
         if self.is_connected:
             return
 
         # Establishes connection
-        self._connection = Connection.open_serial_port(port_name=self._port, direct=False)
+        connection = Connection.open_serial_port(port_name=self._port, direct=False)
+        self._connection = connection
         self._is_connected = True
 
         # Gets the list of all connected Zaber devices.
-        devices: list[Device] = self._connection.detect_devices()
+        devices: list[Device] = connection.detect_devices()
 
         # Packages each discovered Device into a ZaberDevice class instance and builds the internal device interface
         # tuple.
-        self._devices = tuple([ZaberDevice(device=device) for device in devices])
+        self._devices = tuple(ZaberDevice(device=device) for device in devices)
 
     def disconnect(self) -> None:
         """Shuts down all managed Zaber devices and closes the connection."""
@@ -1042,3 +948,97 @@ class ZaberConnection:
             console.error(message=message, error=ConnectionError)
 
         return self._devices[index]
+
+
+def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
+    """Checks the specified USB port for Zaber devices and parses identification data for any discovered device.
+
+    Args:
+        port: The name of the USB port to scan for Zaber devices.
+
+    Returns:
+        A list of _ZaberDeviceData instances, one for each discovered device or an empty list if none are discovered.
+    """
+    # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
+    # device, this statement opens the connection. Otherwise, the statement raises an exception.
+    with Connection.open_serial_port(port_name=port, direct=False) as connection:
+        # Parses each detected device and its axes into _ZaberDeviceData instances.
+        return [
+            _ZaberDeviceData(
+                device_number=number + 1,
+                device_id=device.device_id,
+                label=device.label,
+                name=device.name,
+                axes=[
+                    _ZaberAxisData(
+                        axis_id=axis_number,
+                        axis_label=device.get_axis(axis_number=axis_number).label or "Not Used",
+                    )
+                    for axis_number in range(1, device.axis_count + 1)
+                ],
+            )
+            for number, device in enumerate(connection.detect_devices())
+        ]
+
+
+def _scan_active_ports() -> list[_ZaberPortData]:
+    """Scans all available serial ports for Zaber devices and parses their identification data.
+
+    Returns:
+        A list of _ZaberPortData objects, one for each scanned port.
+    """
+    port_info_list = []
+
+    # Gets the list of serial ports active for the current platform and scans each to determine if any zaber devices
+    # are connected to that port.
+    for port in Tools.list_serial_ports():
+        try:
+            devices = _attempt_connection(port=port)
+            port_info = _ZaberPortData(port_name=port, devices=devices)
+        except Exception as exception:
+            # Logs connection errors at debug level and creates empty _ZaberPortData instances.
+            console.echo(message=f"Error connecting to port {port}: {exception}.", level=LogLevel.DEBUG)
+            port_info = _ZaberPortData(port_name=port, devices=[])
+
+        port_info_list.append(port_info)
+
+    return port_info_list
+
+
+def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
+    """Formats the device and axis ID information discovered during port scanning as a table for display.
+
+    Args:
+        port_info_list: A list of _ZaberPortData instances containing device and axis information for each scanned port.
+
+    Returns:
+        A string containing the formatted device and axis ID information as a table.
+    """
+    table_data = []
+
+    # Formats the port scanning data as a table
+    for port_info in port_info_list:
+        if not port_info.has_devices:
+            table_data.append([port_info.port_name, "No Devices", "", "", "", "", ""])
+        else:
+            for device in port_info.devices:
+                device_row = [
+                    port_info.port_name,
+                    str(device.device_number),
+                    str(device.device_id),
+                    device.label,
+                    device.name,
+                ]
+                for axis in device.axes:
+                    axis_row = [*device_row, str(axis.axis_id), axis.axis_label]
+                    table_data.append(axis_row)
+                    device_row = [""] * 5
+        table_data.append([""] * 7)  # Adds an empty row to separate port sections
+
+    # Formats the table and returns it to the caller
+    return tabulate(
+        table_data,
+        headers=["Port", "Device Num", "ID", "Label", "Name", "Axis ID", "Axis Label"],
+        tablefmt="grid",
+        stralign="center",
+    )
