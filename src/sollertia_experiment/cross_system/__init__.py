@@ -1,4 +1,4 @@
-"""This package provides the assets shared by multiple data acquisition systems."""
+"""Provides the assets shared by multiple data acquisition systems."""
 
 from .project_tools import get_version_data, get_animal_project, get_project_experiments
 from .zaber_bindings import (

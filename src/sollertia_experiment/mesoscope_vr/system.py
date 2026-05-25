@@ -310,6 +310,7 @@ def create_system_configuration_file(system: AcquisitionSystems | str = Acquisit
         ValueError: If the requested acquisition system is not supported by this package.
     """
     requested = AcquisitionSystems(str(system))
+    # noinspection PyUnreachableCode
     if requested is not AcquisitionSystems.MESOSCOPE_VR:
         message = (
             f"Unable to generate the system configuration file for the acquisition system '{system}'. This package "

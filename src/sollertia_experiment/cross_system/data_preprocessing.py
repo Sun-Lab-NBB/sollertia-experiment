@@ -4,7 +4,7 @@ long-term storage destinations.
 
 from __future__ import annotations
 
-import shutil as sh
+import shutil
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -67,15 +67,12 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
     # Resolves the path to the temporary log directory generated during runtime.
     log_directory = session_data.raw_data_path.joinpath(_LOG_DIRECTORY_NAME)
 
-    # Aborts early if the log directory does not exist.
     if not log_directory.exists():
         return
 
-    # Searches for processed and unprocessed files inside the log directory.
     archives = list(log_directory.glob("*.npz"))
     unarchived_entries = list(log_directory.glob("*.npy"))
 
-    # If there are no unprocessed log entry files, ends the runtime early.
     if not unarchived_entries:
         return
 
@@ -110,7 +107,7 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
             f"log directory.",
             level=LogLevel.WARNING,
         )
-        sh.rmtree(behavior_data_path)
+        shutil.rmtree(behavior_data_path)
 
     log_directory.rename(target=behavior_data_path)
 
@@ -232,7 +229,8 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
                 destination=target,
                 num_threads=threads,
                 progress=True,
-                remove_source=False,  # Does not remove the directory as part of the transfer to avoid race conditions.
+                # Does not remove the directory as part of the transfer to avoid race conditions.
+                remove_source=False,
             ): target
             for target in targets
         }
@@ -244,7 +242,8 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         message="All transfers completed successfully. Removing the now-redundant source directory...",
         level=LogLevel.INFO,
     )
-    delete_directory(directory_path=source.parent)  # Removes the session's directory.
+    # Removes the session's directory.
+    delete_directory(directory_path=source.parent)
 
 
 def delete_session_directories(candidates: tuple[Path, ...], session_name: str, *, require_confirmation: bool) -> bool:
@@ -323,8 +322,9 @@ def migrate_session_directory(
     # Copies the session_data.yaml file from the pulled directory to the old project's session-specific host-machine
     # directory. This is then used to remove the old session data from all destinations.
     new_session_data_path = local_session_path.joinpath("raw_data", "session_data.yaml")
-    ensure_directory_exists(old_session_data_path)  # Since preprocessing removes the raw_data directory, recreates it.
-    sh.copy2(src=new_session_data_path, dst=old_session_data_path)
+    # Since preprocessing removes the raw_data directory, recreates it.
+    ensure_directory_exists(old_session_data_path)
+    shutil.copy2(src=new_session_data_path, dst=old_session_data_path)
 
     # Modifies the SessionData instance for the pulled session to use the new project name.
     session_data = SessionData.load(session_path=local_session_path)
