@@ -3,11 +3,13 @@ according to the instructions from the Sollertia platform microcontrollers proje
 https://github.com/Sun-Lab-NBB/sollertia-micro-controllers.
 """
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray  # noqa: TC002
-from ataraxis_time import TimeUnits, PrecisionTimer, convert_time
+from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from scipy.optimize import curve_fit
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import SharedMemoryArray
@@ -17,27 +19,26 @@ from ataraxis_communication_interface import (
     ModuleInterface,
 )
 
-# Pre-creates NumPy constants used throughout the module to optimize runtime performance by avoiding unnecessary
-# object recreation.
-_ZERO_UINT64 = np.uint64(0)
-_ZERO_FLOAT64 = np.float64(0.0)
-_ZERO_UINT32 = np.uint32(0)
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+_ZERO_UINT64: np.uint64 = np.uint64(0)
+"""A pre-created uint64 zero, reused across the module to avoid unnecessary object recreation."""
+_ZERO_FLOAT64: np.float64 = np.float64(0.0)
+"""A pre-created float64 zero, reused across the module to avoid unnecessary object recreation."""
+_ZERO_UINT32: np.uint32 = np.uint32(0)
+"""A pre-created uint32 zero, reused across the module to avoid unnecessary object recreation."""
 _FALSE: np.bool_ = np.bool_(0)
+"""A pre-created boolean False, reused across the module to avoid unnecessary object recreation."""
 
-# The maximum pulse duration that water and gas valves can use. Longer pulses trigger keepalive intervention.
 _MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
+"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves, kept below the 500 ms firmware
+keepalive interval."""
 _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
+"""The maximum valve pulse duration, in microseconds."""
 
-# The braking strength value sent to the BrakeModule for pulse commands. Uses maximum strength (255).
 _MAXIMUM_BRAKING_STRENGTH: np.uint8 = np.uint8(255)
-
-
-def _power_law_model(pulse_duration: float | NDArray[np.float64], a: float, b: float, /) -> float | NDArray[np.float64]:
-    """Defines the power-law model used during valve calibration.
-
-    This model was empirically found to have the best fit for the water reward valve's performance data.
-    """
-    return a * np.power(pulse_duration, b)
+"""The braking strength sent to the BrakeModule for pulse commands, set to the maximum value (255)."""
 
 
 class EncoderInterface(ModuleInterface):
@@ -108,12 +109,11 @@ class EncoderInterface(ModuleInterface):
         # the animal since class initialization and the current absolute position of the animal in centimeters relative
         # to the onset position.
         self._distance_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_distance_tracker",
+            name=f"{int(self._module_type)}_{int(self._module_id)}_distance_tracker",
             prototype=np.zeros(shape=2, dtype=np.float64),
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
         self._reset_encoder: np.uint8 = np.uint8(2)
 
@@ -148,8 +148,7 @@ class EncoderInterface(ModuleInterface):
         sign = 1 if message.event == _ccw_rotation_code else -1
 
         # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
-        # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
-        # precision.
+        # using the precomputed conversion factor.
         unity_motion = message.data_object * self._unity_unit_per_pulse * sign
 
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
@@ -186,7 +185,7 @@ class EncoderInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -274,12 +273,12 @@ class LickInterface(ModuleInterface):
         )
 
         self._lick_threshold: np.uint16 = np.uint16(lick_threshold)
-        self._polling_frequency = np.uint32(polling_frequency)
+        self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
         # Pre-creates a shared memory array used to track and share the total number of licks recorded by the sensor
         # since class initialization.
         self._lick_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_lick_tracker",
+            name=f"{int(self._module_type)}_{int(self._module_id)}_lick_tracker",
             prototype=np.zeros(shape=1, dtype=np.uint64),
             exists_ok=True,
         )
@@ -288,7 +287,6 @@ class LickInterface(ModuleInterface):
         # the zero value.
         self._previous_readout_zero: bool = False
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
@@ -331,10 +329,7 @@ class LickInterface(ModuleInterface):
         # the last zero-value, classifies the current sensor's state as a lick event and increments the shared memory
         # counter.
         if detected_voltage >= self._lick_threshold and self._previous_readout_zero:
-            # Increments the shared lick counter
             self._lick_tracker[0] += 1
-
-            # Disables further reports until the sensor sends a zero-value again
             self._previous_readout_zero = False
 
     def set_parameters(
@@ -362,7 +357,7 @@ class LickInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -436,7 +431,6 @@ class TorqueInterface(ModuleInterface):
             decimals=8,
         )
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
@@ -492,7 +486,7 @@ class TorqueInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -513,8 +507,9 @@ class TorqueInterface(ModuleInterface):
         return self._torque_per_adc_unit
 
 
-class TTLInterface(ModuleInterface):
-    """Interfaces with TTLModule instances running on the Sensor MicroController.
+class MesoscopeFrameTTLInterface(ModuleInterface):
+    """Interfaces with the TTLModule instance that monitors the Mesoscope frame-acquisition pulses, running on the
+    Sensor MicroController.
 
     Args:
         polling_frequency: The frequency, in microseconds, at which to check for incoming TTL signals when monitoring
@@ -546,12 +541,11 @@ class TTLInterface(ModuleInterface):
         # Pre-creates a SharedMemoryArray used to track and share the number of TTL pulses recorded by the instance
         # with other processes.
         self._pulse_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_pulse_tracker",
+            name=f"{int(self._module_type)}_{int(self._module_id)}_pulse_tracker",
             prototype=np.zeros(shape=1, dtype=np.uint64),
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         # Note, commands codes 1 through 3 are reserved for commands that output TTL signals. This module's
         # functionality is currently NOT used by the Mesoscope-VR system, so these command codes are not stored here to
         # avoid unnecessary clutter.
@@ -597,7 +591,7 @@ class TTLInterface(ModuleInterface):
             averaging_pool_size: The number of sensor readouts to average together when checking the incoming TTL
                 signal state.
         """
-        # Since the module is currently not used to deliver TTL pulses statically sets the pulse duration parameter
+        # Since the module is currently not used to deliver TTL pulses, statically sets the pulse duration parameter
         # to zero.
         self.send_parameters(parameter_data=(_ZERO_UINT32, averaging_pool_size))
 
@@ -608,7 +602,7 @@ class TTLInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -644,8 +638,8 @@ class BrakeInterface(ModuleInterface):
     Attributes:
         _minimum_brake_strength: The minimum torque, in N cm, the brake delivers at minimum voltage.
         _maximum_brake_strength: The maximum torque, in N cm, the brake delivers at maximum voltage.
-        _engage: The code for the EnableBrake module command.
-        _disengage: The code for the DisableBrake module command.
+        _engage: The code for the brake-engage (kToggleOn) module command.
+        _disengage: The code for the brake-disengage (kToggleOff) module command.
         _pulse: The code for the SendPulse module command.
         _enabled: Tracks the current state of the managed brake.
         _previous_pulse_duration: Tracks the pulse duration used during the previous send_pulse() call.
@@ -676,7 +670,6 @@ class BrakeInterface(ModuleInterface):
             decimals=8,
         )
 
-        # Statically computes command code objects
         self._engage: np.uint8 = np.uint8(1)
         self._disengage: np.uint8 = np.uint8(2)
         self._pulse: np.uint8 = np.uint8(4)
@@ -704,10 +697,10 @@ class BrakeInterface(ModuleInterface):
         """Sets the brake to the desired state.
 
         Args:
-            state: The desired state of the brake. True means the brake is engaged; False means the brake is disengaged.
+            state: Determines whether to engage the brake.
         """
         # If the requested state matches the current brake's state, aborts the runtime early.
-        if state == self._enabled:
+        if state is self._enabled:
             return
 
         self.send_command(
@@ -742,8 +735,8 @@ class BrakeInterface(ModuleInterface):
         return self._minimum_brake_strength
 
 
-class ValveInterface(ModuleInterface):
-    """Interfaces with ValveModule instances running on the Actor MicroController.
+class WaterValveInterface(ModuleInterface):
+    """Interfaces with the ValveModule instance that controls the water reward valve on the Actor MicroController.
 
     Notes:
         Type code 5.
@@ -753,9 +746,9 @@ class ValveInterface(ModuleInterface):
 
     Attributes:
         _calibration_count: The number of reward delivery cycles to use during calibration and referencing procedures.
-        _scale_coefficient: The scale coefficient derived from the fitting the power law model to the valve's
+        _scale_coefficient: The scale coefficient derived from fitting the power-law model to the valve's
             calibration data.
-        _nonlinearity_exponent: The intercept derived from the fitting the power law model to the valve's
+        _nonlinearity_exponent: The nonlinearity exponent derived from fitting the power-law model to the valve's
             calibration data.
         _valve_tracker: The SharedMemoryArray instance that transfers the reward data collected by the module from
             the communication process to other runtime processes.
@@ -787,11 +780,15 @@ class ValveInterface(ModuleInterface):
         )
 
         # Statically sets the number of reward delivery cycles used during referencing and calibration procedures.
-        self._calibration_count = np.uint16(200)
+        self._calibration_count: np.uint16 = np.uint16(200)
 
-        # Extracts pulse durations and fluid volumes into separate arrays
-        pulse_durations: NDArray[np.float64] = np.array([x[0] for x in valve_calibration_data], dtype=np.float64)
-        fluid_volumes: NDArray[np.float64] = np.array([x[1] for x in valve_calibration_data], dtype=np.float64)
+        # Extracts pulse durations and fluid volumes into separate arrays.
+        pulse_durations: NDArray[np.float64] = np.array(
+            [calibration_pair[0] for calibration_pair in valve_calibration_data], dtype=np.float64
+        )
+        fluid_volumes: NDArray[np.float64] = np.array(
+            [calibration_pair[1] for calibration_pair in valve_calibration_data], dtype=np.float64
+        )
 
         # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes
         # noinspection PyTupleAssignmentBalance
@@ -808,21 +805,22 @@ class ValveInterface(ModuleInterface):
         # water dispensed by the valve during runtime. Index 1 tracks the current valve calibration state (0 -
         # calibrating, 1 - calibrated). Index 2 tracks the current valve open/close state (0 - closed, 1 - open).
         self._valve_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_valve_tracker",
+            name=f"{int(self._module_type)}_{int(self._module_id)}_valve_tracker",
             prototype=np.zeros(shape=3, dtype=np.float64),
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         self._reward: np.uint8 = np.uint8(1)
         self._open: np.uint8 = np.uint8(2)
         self._close: np.uint8 = np.uint8(3)
         self._calibrate: np.uint8 = np.uint8(4)
         self._tone: np.uint8 = np.uint8(5)
 
-        # Initializes additional trackers and runtime assets
-        self._previous_module_state: bool = False  # This is based on what the module is actually doing.
-        self._configured_valve_state: bool = False  # This is based on what the interface sets the module to do.
+        # Initializes additional trackers and runtime assets.
+        # Reflects what the microcontroller reported it is actually doing.
+        self._previous_module_state: bool = False
+        # Reflects what this interface last commanded the module to do.
+        self._configured_valve_state: bool = False
         self._previous_volume: float = 0.0
         self._previous_tone_duration: int = 0
         self._cycle_timer: PrecisionTimer | None = None
@@ -840,7 +838,7 @@ class ValveInterface(ModuleInterface):
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer and initializes the cycle PrecisionTimer."""
         self._valve_tracker.connect()
-        self._cycle_timer = PrecisionTimer("us")
+        self._cycle_timer = PrecisionTimer(precision=TimerPrecisions.MICROSECOND)
 
     def terminate_remote_assets(self) -> None:
         """Disconnects from the instance's shared memory buffer."""
@@ -857,7 +855,7 @@ class ValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
-            self._valve_tracker[2] = 1  # Valve is now open
+            self._valve_tracker[2] = 1
             self._cycle_timer.reset()  # type: ignore[union-attr]
 
         elif message.event == _valve_closed_code and self._previous_module_state:
@@ -865,7 +863,7 @@ class ValveInterface(ModuleInterface):
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
             self._previous_module_state = False
-            self._valve_tracker[2] = 0  # Valve is now closed
+            self._valve_tracker[2] = 0
             open_duration = self._cycle_timer.elapsed  # type: ignore[union-attr]
 
             # Accumulates delivered water volumes into the tracker.
@@ -881,10 +879,10 @@ class ValveInterface(ModuleInterface):
         """Sets the managed valve to the desired state.
 
         Args:
-            state: The desired state of the valve. True means the valve is open; False means the valve is closed.
+            state: Determines whether to open the valve.
         """
         # If the valve is already in the desired state, aborts the runtime early.
-        if state == self._configured_valve_state:
+        if state is self._configured_valve_state:
             return
 
         self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -953,7 +951,8 @@ class ValveInterface(ModuleInterface):
             parameter_data=(self.get_duration_from_volume(target_volume=5.0), self._calibration_count, _ZERO_UINT32)
         )
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-        self._valve_tracker[1] = 0  # Indicates that the valve has entered the refencing cycle.
+        # Indicates that the valve has entered the referencing cycle.
+        self._valve_tracker[1] = 0
 
     def calibrate_valve(self, pulse_duration: int) -> None:
         """Repeatedly opens the valve for the requested number of milliseconds to determine the volume of fluid
@@ -965,8 +964,8 @@ class ValveInterface(ModuleInterface):
         # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
         if pulse_duration > _MAXIMUM_VALVE_PULSE_DURATION_MS:
             message = (
-                f"The requested pulse duration of {pulse_duration} ms for ValveModule {self._module_id} exceeds the "
-                f"maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
+                f"The requested pulse duration of {pulse_duration} ms for ValveModule {int(self._module_id)} "
+                f"exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
                 f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
             )
             console.echo(message=message, level=LogLevel.WARNING)
@@ -975,7 +974,8 @@ class ValveInterface(ModuleInterface):
         # Converts the pulse duration to microseconds before updating the valve's parameters.
         self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), self._calibration_count, _ZERO_UINT32))
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-        self._valve_tracker[1] = 0  # Indicates that the valve has entered the calibration cycle.
+        # Indicates that the valve has entered the calibration cycle.
+        self._valve_tracker[1] = 0
 
     def get_duration_from_volume(self, target_volume: float) -> np.uint32:
         """Converts the input volume of water, in microliters, to the required period of time, in microseconds, the
@@ -991,14 +991,14 @@ class ValveInterface(ModuleInterface):
         Returns:
             The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
         """
-        # Determines the minimum valid pulse duration. This is hardcoded at 10 ms as this is the lower calibration
-        # boundary.
+        # Determines the minimum valid pulse duration, hardcoded at 10 ms: calibrating below this is empirically
+        # pointless for most water valves, so it is treated as the lower pulse-duration bound.
         min_dispensed_volume = self._scale_coefficient * np.power(10.0, self._nonlinearity_exponent)
 
         if target_volume < min_dispensed_volume:
             message = (
                 f"The requested water volume of {target_volume} uL is too small to be reliably dispensed by the "
-                f"ValveModule {self._module_id}. The smallest volume the valve can reliably dispense is "
+                f"ValveModule {int(self._module_id)}. The smallest volume the valve can reliably dispense is "
                 f"{min_dispensed_volume} uL."
             )
             console.error(message=message, error=ValueError)
@@ -1009,7 +1009,7 @@ class ValveInterface(ModuleInterface):
         # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
         if pulse_duration > _MAXIMUM_VALVE_PULSE_DURATION_US:
             message = (
-                f"The computed pulse duration of {pulse_duration / 1000:.1f} ms for ValveModule {self._module_id} "
+                f"The computed pulse duration of {pulse_duration / 1000:.1f} ms for ValveModule {int(self._module_id)} "
                 f"exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
                 f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
             )
@@ -1061,7 +1061,6 @@ class ScreenInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Statically computes command code objects
         self._toggle: np.uint8 = np.uint8(1)
 
         # Tracks the state of the managed screens
@@ -1095,7 +1094,7 @@ class ScreenInterface(ModuleInterface):
                 powered off.
         """
         # Ends the runtime early if the desired state matches the current screen power state.
-        if state == self._enabled:
+        if state is self._enabled:
             return
 
         self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -1138,7 +1137,6 @@ class GasPuffValveInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Statically computes command code objects
         self._pulse: np.uint8 = np.uint8(1)
         self._open: np.uint8 = np.uint8(2)
         self._close: np.uint8 = np.uint8(3)
@@ -1153,24 +1151,28 @@ class GasPuffValveInterface(ModuleInterface):
         # Creates a SharedMemoryArray used to track and share gas puff data. Index 0 tracks the total number of puffs
         # delivered. Index 1 tracks the current valve open/close state (0 - closed, 1 - open).
         self._puff_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
-            name=f"{self._module_type}_{self._module_id}_puff_tracker",
+            name=f"{int(self._module_type)}_{int(self._module_id)}_puff_tracker",
             prototype=np.zeros(shape=2, dtype=np.uint32),
             exists_ok=True,
         )
 
-    def initialize_remote_assets(self) -> None:
-        """Connects to the puff tracker shared memory array from the remote process."""
-        self._puff_tracker.connect()
-        self._puff_tracker.enable_buffer_destruction()
-
-    def terminate_remote_assets(self) -> None:
-        """Disconnects from and destroys the puff tracker shared memory array."""
+    def __del__(self) -> None:
+        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
         self._puff_tracker.disconnect()
         self._puff_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the puff tracker shared memory array from the local process."""
+        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
         self._puff_tracker.connect()
+        self._puff_tracker.enable_buffer_destruction()
+
+    def initialize_remote_assets(self) -> None:
+        """Connects to the instance's shared memory buffer."""
+        self._puff_tracker.connect()
+
+    def terminate_remote_assets(self) -> None:
+        """Disconnects from the instance's shared memory buffer."""
+        self._puff_tracker.disconnect()
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Updates the puff data stored in the instance's shared memory buffer based on the messages received from
@@ -1182,22 +1184,22 @@ class GasPuffValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Tracks valve open transitions.
             self._previous_module_state = True
-            self._puff_tracker[1] = 1  # Valve is now open
+            self._puff_tracker[1] = 1
 
         elif message.event == _valve_closed_code and self._previous_module_state:
             # Each time the valve transitions to a closed state, increments the puff count tracker.
             self._previous_module_state = False
-            self._puff_tracker[1] = 0  # Valve is now closed
-            self._puff_tracker[0] += 1  # Increment puff count
+            self._puff_tracker[1] = 0
+            self._puff_tracker[0] += 1
 
     def set_state(self, *, state: bool) -> None:
         """Sets the managed valve to the desired state.
 
         Args:
-            state: The desired state of the valve. True means the valve is open; False means the valve is closed.
+            state: Determines whether to open the gas-puff valve.
         """
         # If the valve is already in the desired state, aborts the runtime early.
-        if state == self._configured_state:
+        if state is self._configured_state:
             return
 
         self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -1212,8 +1214,8 @@ class GasPuffValveInterface(ModuleInterface):
         # Guards against pulse durations that exceed the maximum allowed duration. Caps to the safe maximum and warns.
         if duration_ms > _MAXIMUM_VALVE_PULSE_DURATION_MS:
             message = (
-                f"The requested pulse duration of {duration_ms} ms for GasPuffValveModule {self._module_id} exceeds "
-                f"the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
+                f"The requested pulse duration of {duration_ms} ms for GasPuffValveModule {int(self._module_id)} "
+                f"exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. Capping to "
                 f"{_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
             )
             console.echo(message=message, level=LogLevel.WARNING)
@@ -1234,3 +1236,13 @@ class GasPuffValveInterface(ModuleInterface):
     def puff_count(self) -> int:
         """Returns the total number of gas puffs delivered since runtime onset."""
         return int(self._puff_tracker[0])
+
+
+def _power_law_model(
+    pulse_duration: float | NDArray[np.float64], scale_coefficient: float, nonlinearity_exponent: float, /
+) -> float | NDArray[np.float64]:
+    """Defines the power-law model used during valve calibration.
+
+    This model was empirically found to have the best fit for the water reward valve's performance data.
+    """
+    return scale_coefficient * np.power(pulse_duration, nonlinearity_exponent)

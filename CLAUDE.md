@@ -87,7 +87,7 @@ two-photon imaging system, which combines brain imaging with virtual reality beh
 |-----------------------------------------------------|----------------------------------------------------------|
 | `src/sollertia_experiment/command_line_interfaces/` | CLI entry points (consolidated under the `sle` command)  |
 | `src/sollertia_experiment/mesoscope_vr/`            | Mesoscope-VR system implementation (current system)      |
-| `src/sollertia_experiment/shared_components/`       | Cross-system utilities shared by all acquisition systems |
+| `src/sollertia_experiment/cross_system/`            | Cross-system utilities shared by all acquisition systems |
 
 ### Architecture
 
@@ -121,7 +121,7 @@ For Zaber motor configuration, follow the existing patterns in `mesoscope_vr/zab
 **Adding hardware bindings (general):**
 
 1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to
-   `shared_components/module_interfaces.py`
+   `cross_system/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
 4. Use configuration dataclasses from `sollertia-shared-assets` for hardware parameters

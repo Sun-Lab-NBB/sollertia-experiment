@@ -1,27 +1,35 @@
 """Exposes the high-level bindings for all Mesoscope-VR system components (cameras, microcontrollers, Zaber motors)."""
 
-from pathlib import Path  # noqa: TC003
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 from ataraxis_time import TimeUnits, convert_time
 from ataraxis_video_system import VideoSystem, VideoEncoders, CameraInterfaces, OutputPixelFormats
 from ataraxis_base_utilities import LogLevel, console
-from ataraxis_data_structures import DataLogger  # noqa: TC002
 from ataraxis_communication_interface import MicroControllerInterface
 
-from .positions import ZaberPositions
-from .configuration import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
-from .zaber_bindings import ZaberAxis, ZaberConnection
-from ..shared_components import (
-    TTLInterface,
+from .system import ZaberPositions
+from ..cross_system import (
+    ZaberAxis,
     LickInterface,
     BrakeInterface,
-    ValveInterface,
     ScreenInterface,
     TorqueInterface,
+    ZaberConnection,
     EncoderInterface,
+    WaterValveInterface,
     GasPuffValveInterface,
+    MesoscopeFrameTTLInterface,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ataraxis_data_structures import DataLogger
+
+    from .system import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
 
 
 class ZaberMotors:
@@ -404,7 +412,7 @@ class MicroControllerInterfaces:
             minimum_brake_strength=self._configuration.minimum_brake_strength_g_cm,
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
-        self.valve = ValveInterface(
+        self.valve = WaterValveInterface(
             valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
         self.gas_puff_valve = GasPuffValveInterface()
@@ -426,7 +434,9 @@ class MicroControllerInterfaces:
         # logic to maintain the necessary precision.
 
         # Module interfaces:
-        self.mesoscope_frame: TTLInterface = TTLInterface(polling_frequency=_sensor_polling_delay)
+        self.mesoscope_frame: MesoscopeFrameTTLInterface = MesoscopeFrameTTLInterface(
+            polling_frequency=_sensor_polling_delay
+        )
         self.lick: LickInterface = LickInterface(
             lick_threshold=self._configuration.lick_threshold_adc,
             polling_frequency=_sensor_polling_delay,

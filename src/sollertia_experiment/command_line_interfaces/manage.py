@@ -5,15 +5,15 @@ the host-machine.
 from pathlib import Path
 
 import click
-from sollertia_shared_assets import SessionData
 from ataraxis_base_utilities import console
+from sollertia_shared_assets import SessionData
 
 from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
     purge_session,
     preprocess_session_data,
-    migrate_animal_between_projects,
     get_system_configuration_data,
+    migrate_animal_between_projects,
 )
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
@@ -39,7 +39,7 @@ def preprocess_session(session_path: Path) -> None:
     system_configuration = get_system_configuration_data()  # Retrieves the system configuration data.
 
     # Prevent using this command on sessions that are not stored on the local host-machine, but accessible to its
-    # filesystem. Specifically, prevents working with sessions stored on the NAS and BioHPC server.
+    # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
     message = (
         f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
         f"be located inside the root directory of the {system_configuration.name} data acquisition system "

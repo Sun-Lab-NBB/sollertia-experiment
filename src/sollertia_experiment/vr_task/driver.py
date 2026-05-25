@@ -18,7 +18,7 @@ from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decomp
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-    from sollertia_shared_assets import TriggerType, TaskTemplate
+    from sollertia_shared_assets import TaskTemplate
 
     from .configuration import VRTaskConfiguration
 
@@ -51,7 +51,8 @@ class VRTaskEventKind(IntEnum):
     """
 
     NONE = 0
-    """No Unity message was available in the MQTT buffer during this cycle."""
+    """No dispatchable Unity event was produced this cycle: either the MQTT buffer was empty, or the consumed message
+    was on a topic that cycle() does not surface (a handshake topic)."""
     STIMULUS_TRIGGERED = 1
     """The animal triggered the current trial's stimulus delivery."""
     TRIGGER_DELAY_REQUESTED = 2
@@ -104,7 +105,8 @@ class _VRTaskMQTTTopics(StrEnum):
     """
 
     SESSION_START = "SessionStart"
-    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload)."""
+    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload). Outside the setup
+    handshake, a SESSION_START received during cycle() is consumed without producing a typed event."""
     SESSION_STOP = "SessionStop"
     """Lifecycle marker published by Unity on application quit (empty trigger payload)."""
     MOTION = "Motion"
@@ -207,11 +209,6 @@ class VRTaskDriver:
         return self._state
 
     @property
-    def configuration(self) -> VRTaskConfiguration:
-        """Returns the runtime configuration used by the driver."""
-        return self._configuration
-
-    @property
     def cue_sequence_distances(self) -> NDArray[np.float64]:
         """Returns the cumulative distances, in centimeters, the animal must travel to complete each decomposed
         trial.
@@ -222,11 +219,6 @@ class VRTaskDriver:
     def trial_names(self) -> tuple[str, ...]:
         """Returns the name of each decomposed trial, in sequence order."""
         return self._decomposed_trials.trial_names
-
-    @property
-    def trigger_types(self) -> tuple[TriggerType, ...]:
-        """Returns the stimulus trigger type of each decomposed trial, in sequence order."""
-        return self._decomposed_trials.trigger_types
 
     def connect(self) -> None:
         """Establishes the MQTT connection to the Unity game engine."""
@@ -250,10 +242,98 @@ class VRTaskDriver:
         self._verify_scene_name()
         self._verify_vr_display()
         self._rearm_unity()
-        self.refresh_cue_sequence()
+        self._refresh_cue_sequence()
         console.echo(message="Unity setup: Complete.", level=LogLevel.SUCCESS)
 
-    def refresh_cue_sequence(self) -> None:
+    def push_position(self, absolute_position: np.float64) -> None:
+        """Forwards the latest animal position to Unity as a movement delta.
+
+        Notes:
+            The driver internally tracks the last position reported to Unity and only emits an MQTT message when the
+            position has changed.
+
+        Args:
+            absolute_position: The current absolute position of the animal, in Unity units, relative to the origin of
+                the Virtual Reality task environment's track.
+        """
+        delta = absolute_position - self._state.position
+        if delta:
+            self._state.position = absolute_position
+            payload = json.dumps(obj={"movement": float(delta)}).encode("utf-8")
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
+
+    def push_lick_event(self) -> None:
+        """Notifies Unity that the animal performed a lick."""
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.LICK, payload=None)
+
+    def set_reinforcing_guidance(self, *, enabled: bool) -> None:
+        """Sets the reinforcing trial guidance mode.
+
+        Args:
+            enabled: Determines whether to enable or disable reinforcing guidance.
+        """
+        # Unity's RequireLick flag is the inverse of guidance: a True value forces the animal to lick to trigger the
+        # reward, which is the unguided behavior. Enabling guidance therefore clears the lick requirement.
+        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
+        self._state.reinforcing_guidance_enabled = enabled
+
+    def set_aversive_guidance(self, *, enabled: bool) -> None:
+        """Sets the aversive trial guidance mode.
+
+        Args:
+            enabled: Determines whether to enable or disable aversive guidance.
+        """
+        # Unity's RequireWait flag is the inverse of guidance: a True value forces the animal to satisfy the occupancy
+        # duration on its own, while the occupancy guidance zone only pulses the brake when the requirement is cleared.
+        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
+        self._state.aversive_guidance_enabled = enabled
+
+    def cycle(self) -> VRTaskEvent:
+        """Consumes the next pending Unity message and returns it as a typed event.
+
+        Notes:
+            During each runtime cycle, the driver consumes at most one message from the MQTT buffer per cycle.
+            Callers dispatch the returned event to their own hardware (water valve, gas puff, brake) and runtime
+            state (trial advancement, emergency pause).
+
+        Returns:
+            The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
+            event kind is NONE. The event kind is also NONE when the consumed message is on a non-surfaced
+            (handshake) topic, such as SESSION_START, SCENE_NAME, or CUE_SEQUENCE.
+        """
+        data = self._mqtt.get_data()
+        if data is None:
+            return VRTaskEvent(kind=VRTaskEventKind.NONE)
+
+        topic, payload = data
+
+        if topic == _VRTaskMQTTTopics.STIMULUS:
+            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
+
+        if topic == _VRTaskMQTTTopics.DELAY:
+            delay_payload = json.loads(payload.decode("utf-8"))
+            delay_ms = int(delay_payload.get("delayMilliseconds", 0))
+            return VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
+
+        if topic == _VRTaskMQTTTopics.SESSION_STOP:
+            self._state.terminated = True
+            return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
+
+        return VRTaskEvent(kind=VRTaskEventKind.NONE)
+
+    def resume_after_unity_restart(self) -> None:
+        """Re-fetches the cue sequence after Unity has been restarted and resets the termination flag.
+
+        Notes:
+            When the Unity game cycles, it resets the sequence of VR wall cues. This method re-queries the new wall
+            cue sequence to enable accurate tracking of the animal's position in VR after the reset.
+        """
+        self._refresh_cue_sequence()
+        self._state.terminated = False
+
+    def _refresh_cue_sequence(self) -> None:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
 
         Notes:
@@ -310,93 +390,6 @@ class VRTaskDriver:
             )
             console.echo(message=message, level=LogLevel.ERROR)
             input("Enter anything to retry: ")
-
-    def push_position(self, absolute_position: np.float64) -> None:
-        """Forwards the latest animal position to Unity as a movement delta.
-
-        Notes:
-            The driver internally tracks the last position reported to Unity and only emits an MQTT message when the
-            position has changed.
-
-        Args:
-            absolute_position: The current absolute position of the animal, in Unity units, relative to the origin of
-                the Virtual Reality task environment's track.
-        """
-        delta = absolute_position - self._state.position
-        if delta:
-            self._state.position = absolute_position
-            payload = json.dumps(obj={"movement": float(delta)}).encode("utf-8")
-            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
-
-    def push_lick_event(self) -> None:
-        """Notifies Unity that the animal performed a lick."""
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.LICK, payload=None)
-
-    def set_reinforcing_guidance(self, *, enabled: bool) -> None:
-        """Sets the reinforcing trial guidance mode.
-
-        Args:
-            enabled: Determines whether to enable or disable reinforcing guidance.
-        """
-        # Unity's RequireLick flag is the inverse of guidance: a True value forces the animal to lick to trigger the
-        # reward, which is the unguided behavior. Enabling guidance therefore clears the lick requirement.
-        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
-        self._state.reinforcing_guidance_enabled = enabled
-
-    def set_aversive_guidance(self, *, enabled: bool) -> None:
-        """Sets the aversive trial guidance mode.
-
-        Args:
-            enabled: Determines whether to enable or disable aversive guidance.
-        """
-        # Unity's RequireWait flag is the inverse of guidance: a True value forces the animal to satisfy the occupancy
-        # duration on its own, while the occupancy guidance zone only pulses the brake when the requirement is cleared.
-        payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
-        self._state.aversive_guidance_enabled = enabled
-
-    def cycle(self) -> VRTaskEvent:
-        """Consumes the next pending Unity message and returns it as a typed event.
-
-        Notes:
-            During each runtime cycle, the driver receives and parses exactly one message stored in the MQTT
-            buffer. Callers dispatch the returned event to their own hardware (water valve, gas puff, brake) and
-            runtime state (trial advancement, emergency pause).
-
-        Returns:
-            The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
-            event kind is NONE.
-        """
-        data = self._mqtt.get_data()
-        if data is None:
-            return VRTaskEvent(kind=VRTaskEventKind.NONE)
-
-        topic, payload = data
-
-        if topic == _VRTaskMQTTTopics.STIMULUS:
-            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
-
-        if topic == _VRTaskMQTTTopics.DELAY:
-            delay_payload = json.loads(payload.decode("utf-8"))
-            delay_ms = int(delay_payload.get("delayMilliseconds", 0))
-            return VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
-
-        if topic == _VRTaskMQTTTopics.SESSION_STOP:
-            self._state.terminated = True
-            return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
-
-        return VRTaskEvent(kind=VRTaskEventKind.NONE)
-
-    def resume_after_unity_restart(self) -> None:
-        """Re-fetches the cue sequence after Unity has been restarted and resets the termination flag.
-
-        Notes:
-            When the Unity game cycles, it resets the sequence of VR wall cues. This method re-queries the new wall
-            cue sequence to enable accurate tracking of the animal's position in VR after the reset.
-        """
-        self.refresh_cue_sequence()
-        self._state.terminated = False
 
     def _verify_scene_name(self) -> None:
         """Verifies that the Unity scene matches the expected scene name with infinite retry on mismatch."""

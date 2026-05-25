@@ -44,7 +44,7 @@ dependencies = [
     "zaber-motion==9.3.0",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "click==8.4.0",
+    "click==8.4.1",
     "numpy==2.4.6",
     "numba==0.65.1",
     "scipy==1.17.1",

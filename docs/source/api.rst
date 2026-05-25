@@ -21,9 +21,9 @@ Virtual Reality Task Interface
    :undoc-members:
    :show-inheritance:
 
-Shared Acquisition Tools And Assets
-===================================
-.. automodule:: sollertia_experiment.shared_components
+Cross-System Acquisition Tools
+==============================
+.. automodule:: sollertia_experiment.cross_system
    :members:
    :undoc-members:
    :show-inheritance:

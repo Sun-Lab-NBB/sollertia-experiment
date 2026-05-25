@@ -4,9 +4,11 @@ This module exposes tools from the 'sle get' and 'sle manage' subcommand groups 
 (MCP), enabling AI agents to programmatically interact with data acquisition system features.
 """
 
+from __future__ import annotations
+
 from enum import Enum
 import uuid
-from typing import Any, Literal, get_type_hints
+from typing import TYPE_CHECKING, Any, Literal, get_type_hints
 from pathlib import Path
 import contextlib
 from dataclasses import MISSING, fields, is_dataclass
@@ -16,20 +18,25 @@ from mcp.server.fastmcp import FastMCP
 from ataraxis_base_utilities import ensure_directory_exists
 from sollertia_shared_assets import SessionData
 
-from ..mesoscope_vr import (
+if TYPE_CHECKING:
+    from ataraxis_data_structures import YamlConfig
+
+from ..cross_system import (
     CRCCalculator,
+    get_zaber_devices_info,
+    set_zaber_device_setting,
+    get_zaber_device_settings,
+    validate_zaber_device_configuration,
+)
+from ..mesoscope_vr import (
     ZaberPositions,
     MesoscopePositions,
     MesoscopeSystemConfiguration,
     purge_session,
-    get_zaber_devices_info,
     preprocess_session_data,
-    set_zaber_device_setting,
-    get_zaber_device_settings,
     get_system_configuration_data,
     get_system_configuration_path,
     migrate_animal_between_projects,
-    validate_zaber_device_configuration,
 )
 
 # Initializes the MCP server for 'sle get' tools.
@@ -190,7 +197,10 @@ def check_mount_accessibility_tool(path: str) -> str:
         test_file.write_text("test")
         test_file.unlink()
     except PermissionError:
-        return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: Permission denied"
+        return (
+            f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | "
+            f"Error: Permission denied"
+        )
     except OSError as os_error:
         return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: {os_error}"
 
@@ -344,7 +354,7 @@ _RAW_DATA_DIR: str = "raw_data"
 """Subdirectory under each session root that holds the raw data and metadata files."""
 
 
-def _serialize(value: Any) -> Any:  # noqa: ANN401
+def _serialize(value: Any) -> Any:
     """Recursively converts a dataclass, Path, Enum, mapping, or sequence into JSON-friendly Python."""
     if value is None:
         return None
@@ -403,7 +413,7 @@ def _describe_dataclass(cls: type, *, seen: frozenset[type] | None = None) -> di
 def _write_yaml_validated(
     file_path: Path,
     payload: dict[str, Any],
-    validator_cls: type,
+    validator_cls: type[YamlConfig],
     *,
     overwrite: bool = False,
     use_save_method: bool = False,
@@ -439,7 +449,7 @@ def _write_yaml_validated(
     return {"file_path": str(file_path), "data": _serialize(value=instance)}
 
 
-def _read_yaml(file_path: Path, validator_cls: type) -> dict[str, Any]:
+def _read_yaml(file_path: Path, validator_cls: type[YamlConfig]) -> dict[str, Any]:
     """Loads a YAML file via ``validator_cls`` and returns its serialized form."""
     if not file_path.exists():
         return {"error": f"File not found: {file_path}"}
@@ -480,6 +490,35 @@ def _check_path(path: Path) -> dict[str, Any]:
         report["error"] = f"Not writable: {exception}"
     report["ok"] = report["exists"] and report.get("writable", False)
     return report
+
+
+def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dict[str, Any]:
+    """Builds a per-path diagnostic report for the filesystem configuration of the Mesoscope-VR system.
+
+    Notes:
+        Long-term storage destinations whose root is left unset are reported as not configured rather than as errors,
+        since configuring them is optional.
+
+    Args:
+        configuration: The Mesoscope-VR system configuration whose filesystem paths are reported on.
+
+    Returns:
+        A dictionary mapping each configuration path name to its diagnostic report.
+    """
+    filesystem = configuration.filesystem
+    paths: dict[str, Any] = {
+        "root_directory": _check_path(path=filesystem.root_directory),
+        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
+    }
+    for destination_name, destination_root in filesystem.storage_directories.items():
+        report_key = f"storage_directory:{destination_name}"
+        if destination_root == Path():
+            paths[report_key] = {"path": str(destination_root), "configured": False, "ok": True}
+            continue
+        report = _check_path(path=destination_root)
+        report["configured"] = True
+        paths[report_key] = report
+    return paths
 
 
 @get_mcp.tool()
@@ -539,13 +578,7 @@ def validate_system_configuration_tool() -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 
-    filesystem = configuration.filesystem
-    paths = {
-        "root_directory": _check_path(path=filesystem.root_directory),
-        "server_directory": _check_path(path=filesystem.server_directory),
-        "nas_directory": _check_path(path=filesystem.nas_directory),
-        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
-    }
+    paths = _filesystem_paths_report(configuration=configuration)
     issues = [
         f"{name}: {report.get('error', 'not ok')}" for name, report in paths.items() if not report.get("ok", False)
     ]
@@ -566,13 +599,7 @@ def check_system_mounts_tool() -> dict[str, Any]:
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 
-    filesystem = configuration.filesystem
-    paths = {
-        "root_directory": _check_path(path=filesystem.root_directory),
-        "server_directory": _check_path(path=filesystem.server_directory),
-        "nas_directory": _check_path(path=filesystem.nas_directory),
-        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
-    }
+    paths = _filesystem_paths_report(configuration=configuration)
     summary = {
         "ok": sum(1 for report in paths.values() if report.get("ok", False)),
         "failed": sum(1 for report in paths.values() if not report.get("ok", False)),

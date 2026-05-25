@@ -71,8 +71,9 @@ ___
 A data acquisition (and runtime control) system can be broadly defined as a collection of hardware and software tools
 used to conduct training or experiment sessions that acquire scientific data. Each data acquisition system can use one
 or more machines (PCs) to acquire the data, with this library (sollertia-experiment) typically running on the **main** data
-acquisition machine. Additionally, each system typically uses a Network Attached Storage (NAS), a remote storage server,
-or both to safely store the data after the acquisition (with redundancy and parity).
+acquisition machine. Additionally, each system can use any number of long-term storage destinations, such as a remote
+storage Server, a Network-Attached-Storage (NAS) volume, or both, to safely store the data after the acquisition (with
+redundancy and parity).
 
 In the Sollertia platform, each data acquisition system is built around the main tool used to acquire the brain
 activity data. For example, the flagship system is the [Mesoscope-VR](#mesoscope-vr-data-acquisition-system) system,
@@ -348,35 +349,37 @@ it is maintained across all long-term storage destinations. After each data acqu
 raw data is stored under the **root/project/animal/session/raw_data** directory stored on one or more machines mentioned
 below.
 
-Currently, each Sollertia platform data acquisition system uses at least three machines:
+Currently, each Sollertia platform data acquisition system uses a **main data acquisition PC** and any number of
+**long-term storage destinations** (zero, one, or more):
 1. The **main data acquisition PC** is used to acquire and preprocess the data. For example, the *VRPC* of the
    *Mesoscope-VR* system is the main data acquisition PC for that system. This PC is used to both **acquire** the data
    and, critically, to **preprocess** the data before it is moved to the long-term storage destinations.
-2. The **BioHPC compute server** is the main long-term storage destination. This is a high-performance computing
-   server that stores all raw data acquired by Sollertia platform acquisition systems.
-3. The **Synology NAS** is the back-up 'cold' long-term storage destination. It only stores the raw data and is
-   located in a different physical location from the main BioHPC compute server to provide data storage redundancy. It
-   is only used to back up raw data and is generally not intended to be accessed unless the main data storage becomes
-   compromised for any reason.
+2. Each **long-term storage destination** is a machine or storage volume to which the preprocessed data is transferred
+   for long-term storage. The Mesoscope-VR system anticipates two common destinations by default: a **Server** (a
+   high-performance compute server used as the primary long-term storage and analysis destination) and a **NAS** (a
+   Network-Attached-Storage volume used for redundant 'cold' backup storage, typically located in a different physical
+   location to provide data storage redundancy). Neither is required: a system can be configured with any number of
+   destinations under arbitrary names, or with none at all.
 
-***Critical!*** Each data acquisition system is designed to **mount the BioHPC and the NAS to the main acquisition PC
-filesystem using the Server Message Block 3 (SMB3) protocol**. Therefore, each data acquisition system operates on the
-assumption that all storage component filesystems are used contiguously and can be freely accessed by the main
-acquisition PC's Operating System.
+***Critical!*** Each configured long-term storage destination is expected to be **mounted to the main acquisition PC
+filesystem** (for example, using the Server Message Block 3 (SMB3) protocol). Therefore, each data acquisition system
+operates on the assumption that all configured storage destination filesystems are used contiguously and can be freely
+accessed by the main acquisition PC's Operating System.
 
-***Note!*** The library tries to maintain at least two copies of data for long-term storage: one on the NAS and the
-other on the BioHPC server. It is configured to purge redundant data from the data acquisition system machines if
-the data has been moved to the long-term storage destinations.
+***Note,*** the library transfers the preprocessed data to every configured long-term storage destination and purges
+the redundant local copy from the acquisition machine once the transfer succeeds. If no destinations are configured,
+the data is retained on the acquisition machine and the preprocessing is limited to the on-premises data conversion and
+aggregation steps.
 
 ### Root Directory (Volume)
-All data acquisition systems, the Synology NAS, and the BioHPC server keep **ALL** Sollertia platform projects under
+All data acquisition systems and all long-term storage destinations keep **ALL** Sollertia platform projects under
 the same **root** directory. The exact location and name of the root directory on each machine is arbitrary but should
 generally remain fixed (unchanging) over the entire lifetime of that specific machine.
 
 ### Project Directory
 When a new project is created, a **project** directory **named after the project** is created under the **root**
-directory of the main data acquisition machine. Whe the data is moved to the Synology NAS and the BioHPC server 
-as part of preprocessing, the project directory is also created on these destinations, if it does ot already exist.
+directory of the main data acquisition machine. When the data is moved to the configured long-term storage destinations
+as part of preprocessing, the project directory is also created on these destinations, if it does not already exist.
 
 All data acquisition systems also create a **configuration** subdirectory under the root project directory. This
 directory stores all supported experiment configurations for the project. The `sle run session` command searches the
@@ -756,7 +759,7 @@ sle manage preprocess -sp SESSION_PATH
 
 Preprocessing consists of two major steps. The first step pulls all available data to the main data acquisition system
 machine (PC) and re-packages (re-compresses) the data to reduce its size without loss. The second step distributes
-(pushes) the data to **multiple** long-term storage destinations, such as the NAS and the BioHPC server.
+(pushes) the data to all configured long-term storage destinations, such as a Server and a NAS.
 
 **Critical!** It is imperative that **all** valid data acquired in the lab undergoes preprocessing
 **as soon as possible**. Only preprocessed data is stored in a way that maximizes its safety by using both
