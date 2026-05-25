@@ -138,7 +138,7 @@ class _MesoscopeVRSystem:
     _mesoscope_frame_delay: int = 300
     _speed_calculation_window: int = 50
 
-    # Reserves logging source ID code 1 for this class
+    # Reserves logging source ID code 1 for this class.
     _source_id: np.uint8 = np.uint8(1)
 
     def __init__(
@@ -147,7 +147,7 @@ class _MesoscopeVRSystem:
         session_descriptor: MesoscopeExperimentDescriptor | LickTrainingDescriptor | RunTrainingDescriptor,
         experiment_configuration: MesoscopeExperimentConfiguration | None = None,
     ) -> None:
-        # Creates runtime state tracking flags
+        # Creates runtime state tracking flags.
         self._started: bool = False
         self._terminated: bool = False
         self._paused: bool = False
@@ -157,9 +157,9 @@ class _MesoscopeVRSystem:
         # 3 cores for microcontrollers, 1 core for the data logger, 4 cores for the video systems
         # (2 producers, 2 consumers), 1 core for the central process calling this method, 1 core for
         # the main GUI: 10 cores total.
-        _minimum_cpu_count = 10
+        minimum_cpu_count = 10
         cpu_count = os.cpu_count()
-        if cpu_count is None or not cpu_count >= _minimum_cpu_count:
+        if cpu_count is None or not cpu_count >= minimum_cpu_count:
             message = (
                 f"Unable to initialize the Mesoscope-VR system runtime control class. The host PC must have at least "
                 f"10 logical CPU cores available for this runtime to work as expected, but only {cpu_count} cores are "
@@ -277,12 +277,13 @@ class _MesoscopeVRSystem:
             self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
             and self._experiment_configuration is not None
         ):
-            self._task_template = load_vr_task_template(
+            task_template = load_vr_task_template(
                 unity_scene_name=self._experiment_configuration.unity_scene_name
             )
+            self._task_template = task_template
             self._vr_task = VRTaskDriver(
                 configuration=self._system_configuration.assets.vr_task,
-                task_template=self._task_template,
+                task_template=task_template,
                 expected_scene_name=self._experiment_configuration.unity_scene_name,
             )
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
@@ -315,12 +316,13 @@ class _MesoscopeVRSystem:
         message = "Initializing Mesoscope-VR system assets..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts the data logger
+        # Starts the data logger.
         self._logger.start()
 
         # Generates and logs the onset timestamp for the Mesoscope-VR system.
         onset: NDArray[np.uint8] = get_timestamp(output_format=TimestampFormats.BYTES)  # type: ignore[assignment]
-        self._timestamp_timer.reset()  # Immediately resets the timer to align it with the onset timestamp.
+        # Immediately resets the timer to align it with the onset timestamp.
+        self._timestamp_timer.reset()
         self._logger.input_queue.put(
             LogPackage(source_id=self._source_id, acquisition_time=np.uint64(0), serialized_data=onset)
         )  # Logs the onset timestamp
@@ -328,7 +330,7 @@ class _MesoscopeVRSystem:
         message = "DataLogger: Started."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
-        # Starts all microcontroller interfaces
+        # Starts all microcontroller interfaces.
         self._microcontrollers.start()
 
         # Sets the runtime into the Idle state before instructing the user to finalize runtime preparations.
@@ -390,10 +392,10 @@ class _MesoscopeVRSystem:
         # control UI and the visualizer layouts.
         has_reinforcing_trials = True
         has_aversive_trials = True
-        if visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration:
+        if visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration is not None:
             trial_structures = self._experiment_configuration.trial_structures.values()
-            has_reinforcing_trials = any(isinstance(t, WaterRewardTrial) for t in trial_structures)
-            has_aversive_trials = any(isinstance(t, GasPuffTrial) for t in trial_structures)
+            has_reinforcing_trials = any(isinstance(trial, WaterRewardTrial) for trial in trial_structures)
+            has_aversive_trials = any(isinstance(trial, GasPuffTrial) for trial in trial_structures)
 
         # Initializes the runtime control GUI with the appropriate mode and trial type configuration.
         self._ui.start(
@@ -431,13 +433,13 @@ class _MesoscopeVRSystem:
         message = "Initiating data acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts saving frames from al cameras
+        # Starts saving frames from all cameras.
         self._cameras.save_face_camera_frames()
         self._cameras.save_body_camera_frames()
 
         # Starts mesoscope frame acquisition if the runtime is a mesoscope experiment.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            # Enables mesoscope frame monitoring
+            # Enables mesoscope frame monitoring.
             self._microcontrollers.mesoscope_frame.set_monitoring_state(state=True)
 
             # Ensures that the frame monitoring starts before acquisition.
@@ -458,7 +460,7 @@ class _MesoscopeVRSystem:
         if not self._started:
             return
 
-        # Resets the _started tracker before attempting the shutdown sequence
+        # Resets the _started tracker before attempting the shutdown sequence.
         self._started = False
 
         message = "Terminating Mesoscope-VR system runtime..."
@@ -509,10 +511,10 @@ class _MesoscopeVRSystem:
         # runtime.
         _reset_zaber_motors(zaber_motors=self._zaber_motors)
 
-        # Stops all microcontroller interfaces
+        # Stops all microcontroller interfaces.
         self._microcontrollers.stop()
 
-        # Stops the data logger instance
+        # Stops the data logger instance.
         self._logger.stop()
 
         message = "Data Logger: Stopped."
@@ -534,7 +536,7 @@ class _MesoscopeVRSystem:
 
         # Determines whether to carry out data preprocessing or purging.
         message = (
-            "Do you want to preprocess or purge the the acquired session's data? CRITICAL! Only enter 'purge session' "
+            "Do you want to preprocess or purge the acquired session's data? CRITICAL! Only enter 'purge session' "
             "if you want to permanently DELETE the session's data. All valid data REQUIRES preprocessing to ensure "
             "safe storage."
         )
@@ -564,7 +566,10 @@ class _MesoscopeVRSystem:
         """Resolves and caches the snapshot of the system's hardware configuration parameters to the acquired session's
         raw_data directory as a hardware_state.yaml file.
         """
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT and self._experiment_configuration:
+        if (
+            self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
+            and self._experiment_configuration is not None
+        ):
             hardware_state = MesoscopeHardwareState(
                 cm_per_pulse=float(self._microcontrollers.wheel_encoder.cm_per_pulse),
                 maximum_brake_strength=float(self._microcontrollers.brake.maximum_brake_strength),
@@ -576,7 +581,8 @@ class _MesoscopeVRSystem:
                 screens_initially_on=self._microcontrollers.screens.state,
                 recorded_mesoscope_ttl=True,
                 delivered_gas_puffs=any(
-                    isinstance(t, GasPuffTrial) for t in self._experiment_configuration.trial_structures.values()
+                    isinstance(trial, GasPuffTrial)
+                    for trial in self._experiment_configuration.trial_structures.values()
                 ),
                 system_state_codes=MesoscopeVRStates.to_dict(),
             )
@@ -600,15 +606,15 @@ class _MesoscopeVRSystem:
                 system_state_codes=MesoscopeVRStates.to_dict(),
             )
         else:
-            # It should be impossible to satisfy this error clause, but is kept for safety reasons
+            # It should be impossible to satisfy this error clause, but is kept for safety reasons.
             message = (
                 f"Unsupported session type {self._session_data.session_type} encountered when generating "
                 f"the snapshot of the Mesoscope-VR system's hardware configuration."
             )
             console.error(message=message, error=ValueError)
 
-        # Caches the resolved hardware state to disk
-        hardware_state.to_yaml(self._session_data.raw_data.hardware_state_path)
+        # Caches the resolved hardware state to disk.
+        hardware_state.to_yaml(file_path=self._session_data.raw_data.hardware_state_path)
         message = "Mesoscope-VR hardware configuration snapshot: Generated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -627,15 +633,17 @@ class _MesoscopeVRSystem:
 
         # Runtime water volume. This should accurately reflect the volume of water consumed by the animal during
         # runtime.
-        delivered_water = self._microcontrollers.valve.delivered_volume - self._paused_water_volume
-        # Converts from uL to ml
+        paused_water_volume = float(self._paused_water_volume)
+        delivered_water = float(self._microcontrollers.valve.delivered_volume) - paused_water_volume
+        # Converts from uL to ml.
         self.descriptor.dispensed_water_volume_ml = float(round(delivered_water / 1000, ndigits=3))
 
         # Same as above, but tracks the total volume of water dispensed during pauses. While the animal might
         # have consumed some of that water, it is equally plausible that all water was wasted or not dispensed at all.
-        self.descriptor.pause_dispensed_water_volume_ml = float(round(self._paused_water_volume / 1000, ndigits=3))
+        self.descriptor.pause_dispensed_water_volume_ml = float(round(paused_water_volume / 1000, ndigits=3))
 
-        self.descriptor.incomplete = False  # If the runtime reaches this point, the session is likely complete.
+        # If the runtime reaches this point, the session is likely complete.
+        self.descriptor.incomplete = False
 
         # Precalculates the volume of water that the experimenter needs to deliver to the animal if the combined
         # volume delivered during runtime and paused state is less than 1 ml. This is used to pre-fill the
@@ -646,7 +654,9 @@ class _MesoscopeVRSystem:
         if total_delivered_volume < 1:
             self.descriptor.experimenter_given_water_volume_ml = float(round(1 - total_delivered_volume, ndigits=3))
 
-        # Ensures that the user updates the descriptor file.
+        # Ensures that the user updates the descriptor file. The descriptor union accepted by the runtime is a strict
+        # subset of the union accepted by _verify_descriptor_update, so the assignment is type-safe.
+        # noinspection PyTypeChecker
         _verify_descriptor_update(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
         )
@@ -693,13 +703,13 @@ class _MesoscopeVRSystem:
 
             # Waits for mesoscope to start acquiring at least 10 frames.
             _response_delay_timer.reset()
-            _maximum_wait_time = 15000  # 15 seconds
-            _expected_pulses = 10
-            while _response_delay_timer.elapsed < _maximum_wait_time:
+            maximum_wait_time = 15000  # 15 seconds
+            expected_pulses = 10
+            while _response_delay_timer.elapsed < maximum_wait_time:
                 # Adds delay to prevent CPU spinning.
                 _response_delay_timer.delay(delay=10, block=False)
 
-                if self._microcontrollers.mesoscope_frame.pulse_count > _expected_pulses:
+                if self._microcontrollers.mesoscope_frame.pulse_count > expected_pulses:
                     message = "Mesoscope frame acquisition: Started."
                     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -833,7 +843,7 @@ class _MesoscopeVRSystem:
         # used to restore the runtime back to the pre-pause state if the runtime enters the paused state (idle), but the
         # user then chooses to resume the runtime.
         if new_state != MesoscopeVRStates.IDLE:
-            self._system_state = new_state  # Updates the Mesoscope-VR system state
+            self._system_state = new_state
 
         # Logs the system state update. Uses header-code 1 to indicate that the logged value is the system state-code.
         log_package = LogPackage(
@@ -902,8 +912,9 @@ class _MesoscopeVRSystem:
 
         Notes:
             Bundles the work that must follow every cue-sequence retrieval from Unity (cold-start and resume after
-            Unity restart): write the cue-sequence log packet, then copy the VR driver's freshly-decomposed per-trial
-            distances and join the new trial-name sequence with mesoscope-vr-specific reward and puff parameters.
+            Unity restart). Writes the cue-sequence log packet, then copies the VR driver's freshly-decomposed
+            per-trial distances and joins the new trial-name sequence with mesoscope-vr-specific reward and puff
+            parameters.
 
             Does not touch the session-level trial counters (reinforcing_failed_trials, aversive_failed_trials,
             reinforcing_guided_trials, aversive_guided_trials) or the running trial position (_trial_state.completed).
@@ -927,8 +938,7 @@ class _MesoscopeVRSystem:
             cue sequence. This method looks each name up in the experiment configuration's trial-structures mapping
             and builds two parallel tuples: per-trial reward parameters (zero placeholders on aversive trials) and
             per-trial puff durations (zero placeholders on reinforcing trials). It also validates that every trial
-            name produced by the decomposer has a matching entry in the experiment configuration; this check
-            previously lived inside vr_task and was moved out as part of the aq-side / vr-side separation.
+            name produced by the decomposer has a matching entry in the experiment configuration.
 
         Args:
             trial_names: The ordered sequence of trial names produced by the VRTaskDriver's cue-sequence decomposition.
@@ -977,22 +987,22 @@ class _MesoscopeVRSystem:
 
             Setting the system to 'idle' also automatically changes the runtime state to 0 (idle).
         """
-        # Switches runtime state to 0
+        # Switches runtime state to 0.
         self.change_runtime_state(new_state=MesoscopeVRStates.IDLE)
 
-        # Blackens the VR screens
+        # Blackens the VR screens.
         self._microcontrollers.screens.set_state(state=False)
 
-        # Engages the brake
+        # Engages the brake.
         self._microcontrollers.brake.set_state(state=True)
 
-        # Disables all sensor monitoring
+        # Disables all sensor monitoring.
         self._microcontrollers.wheel_encoder.set_monitoring_state(state=False)
         self._microcontrollers.torque.set_monitoring_state(state=False)
         self._microcontrollers.lick.set_monitoring_state(state=False)
 
-        # Sets system state to 0
-        self._change_system_state(MesoscopeVRStates.IDLE)
+        # Sets system state to 0.
+        self._change_system_state(new_state=MesoscopeVRStates.IDLE)
 
     def rest(self) -> None:
         """Switches the Mesoscope-VR system to the rest state.
@@ -1001,13 +1011,13 @@ class _MesoscopeVRSystem:
             In the rest state, the brake is engaged and the screens are turned off. The encoder sensor is
             disabled, and the torque sensor is enabled.
         """
-        # Enables lick monitoring
+        # Enables lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
 
-        # Blackens the VR screens
+        # Blackens the VR screens.
         self._microcontrollers.screens.set_state(state=False)
 
-        # Engages the brake
+        # Engages the brake.
         self._microcontrollers.brake.set_state(state=True)
 
         # Suspends encoder monitoring.
@@ -1016,17 +1026,17 @@ class _MesoscopeVRSystem:
         # Enables torque monitoring.
         self._microcontrollers.torque.set_monitoring_state(state=True)
 
-        # Sets system state to 1
-        self._change_system_state(MesoscopeVRStates.REST)
+        # Sets system state to 1.
+        self._change_system_state(new_state=MesoscopeVRStates.REST)
 
     def run(self) -> None:
         """Switches the Mesoscope-VR system to the run state.
 
         Notes:
-            In the rest state, the brake is disengaged and the screens are turned off. The encoder sensor is
+            In the run state, the brake is disengaged and the screens are turned off. The encoder sensor is
             enabled, and the torque sensor is disabled.
         """
-        # Enables lick monitoring
+        # Enables lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
 
         # Initializes encoder monitoring.
@@ -1038,11 +1048,11 @@ class _MesoscopeVRSystem:
         # Activates VR screens.
         self._microcontrollers.screens.set_state(state=True)
 
-        # Disengages the brake
+        # Disengages the brake.
         self._microcontrollers.brake.set_state(state=False)
 
-        # Sets system state to 2
-        self._change_system_state(MesoscopeVRStates.RUN)
+        # Sets system state to 2.
+        self._change_system_state(new_state=MesoscopeVRStates.RUN)
 
     def lick_train(self) -> None:
         """Switches the Mesoscope-VR system to the lick training state.
@@ -1053,26 +1063,26 @@ class _MesoscopeVRSystem:
 
             Calling this method automatically switches the runtime state to 255 (active training).
         """
-        # Switches runtime state to 255 (active)
+        # Switches runtime state to 255 (active).
         self.change_runtime_state(new_state=255)
 
-        # Blackens the VR screens
+        # Blackens the VR screens.
         self._microcontrollers.screens.set_state(state=False)
 
-        # Engages the brake
+        # Engages the brake.
         self._microcontrollers.brake.set_state(state=True)
 
-        # Disables encoder monitoring
+        # Disables encoder monitoring.
         self._microcontrollers.wheel_encoder.set_monitoring_state(state=False)
 
-        # Initiates torque monitoring
+        # Initiates torque monitoring.
         self._microcontrollers.torque.set_monitoring_state(state=True)
 
-        # Initiates lick monitoring
+        # Initiates lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
 
-        # Sets system state to 3
-        self._change_system_state(MesoscopeVRStates.LICK_TRAINING)
+        # Sets system state to 3.
+        self._change_system_state(new_state=MesoscopeVRStates.LICK_TRAINING)
 
     def run_train(self) -> None:
         """Switches the Mesoscope-VR system to the run training state.
@@ -1083,26 +1093,26 @@ class _MesoscopeVRSystem:
 
             Calling this method automatically switches the runtime state to 255 (active training).
         """
-        # Switches runtime state to 255 (active)
+        # Switches runtime state to 255 (active).
         self.change_runtime_state(new_state=255)
 
-        # Blackens the VR screens
+        # Blackens the VR screens.
         self._microcontrollers.screens.set_state(state=False)
 
         # Disengages the brake.
         self._microcontrollers.brake.set_state(state=False)
 
-        # Ensures that encoder monitoring is enabled
+        # Ensures that encoder monitoring is enabled.
         self._microcontrollers.wheel_encoder.set_monitoring_state(state=True)
 
-        # Ensures torque monitoring is disabled
+        # Ensures torque monitoring is disabled.
         self._microcontrollers.torque.set_monitoring_state(state=False)
 
-        # Initiates lick monitoring
+        # Initiates lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
 
-        # Sets system state to 4
-        self._change_system_state(MesoscopeVRStates.RUN_TRAINING)
+        # Sets system state to 4.
+        self._change_system_state(new_state=MesoscopeVRStates.RUN_TRAINING)
 
     def update_visualizer_thresholds(self, speed_threshold: np.float64, duration_threshold: np.float64) -> None:
         """Instructs the data visualizer to update the displayed running speed and running epoch duration thresholds
@@ -1118,7 +1128,7 @@ class _MesoscopeVRSystem:
         # Python float objects (a requirement to make them YAML-compatible).
         if isinstance(self.descriptor, RunTrainingDescriptor):
             self.descriptor.final_run_speed_threshold_cm_s = round(float(speed_threshold), 2)
-            # Converts time from milliseconds to seconds
+            # Converts time from milliseconds to seconds.
             self.descriptor.final_run_duration_threshold_s = round(float(duration_threshold) / 1000, 2)
 
         self._visualizer.update_run_training_thresholds(
@@ -1129,11 +1139,10 @@ class _MesoscopeVRSystem:
         """Uses the solenoid valve to deliver the requested volume of water in microliters.
 
         Args:
-            reward_size: The volume of water to deliver, in microliters. If this argument is set to None, the method
-                will use the same volume as used during the previous reward delivery or as set via the GUI.
+            reward_size: The volume of water to deliver, in microliters.
             tone_duration: The time, in milliseconds, for which to sound the auditory tone while delivering the reward.
         """
-        self._unconsumed_reward_count += 1  # Increments the unconsumed reward count each time reward is delivered.
+        self._unconsumed_reward_count += 1
         self._microcontrollers.valve.deliver_reward(volume=reward_size, tone_duration=tone_duration)
 
         # Configures the visualizer to display the valve activation event during the next update cycle.
@@ -1164,7 +1173,7 @@ class _MesoscopeVRSystem:
             self._deliver_reward(reward_size=reward_size, tone_duration=tone_duration)
             return True
 
-        # Otherwise, simulates water reward by sounding the buzzer without delivering any water
+        # Otherwise, simulates water reward by sounding the buzzer without delivering any water.
         self._simulate_reward(tone_duration=tone_duration)
         return False
 
@@ -1181,13 +1190,13 @@ class _MesoscopeVRSystem:
             # Handles animal behavior data updates.
             self._data_cycle()
 
-            # Continuously updates the visualizer
+            # Continuously updates the visualizer.
             self._visualizer.update()
 
-            # Synchronizes the runtime state with the state of the user-facing GUI
+            # Synchronizes the runtime state with the state of the user-facing GUI.
             self._ui_cycle()
 
-            # If the GUI was used to terminate the runtime, aborts the cycle early
+            # If the GUI was used to terminate the runtime, aborts the cycle early.
             if self.terminated:
                 return
 
@@ -1218,7 +1227,7 @@ class _MesoscopeVRSystem:
             running_speed = np.float64(((traveled_distance - self._distance) / 100) * 1000)
             self._distance = traveled_distance
             self._running_speed = running_speed
-            self._visualizer.update_running_speed(running_speed)
+            self._visualizer.update_running_speed(running_speed=running_speed)
 
         # Handles Unity-based virtual reality task execution for experiment sessions.
         if self._vr_task is not None:
@@ -1227,8 +1236,8 @@ class _MesoscopeVRSystem:
             self._vr_task.push_position(absolute_position=current_position)
 
             # Checks if the animal has completed the current trial.
-            if self._trial_state.trial_completed(traveled_distance):
-                # Capture outcome BEFORE advance_trial() resets the flags
+            if self._trial_state.trial_completed(traveled_distance=traveled_distance):
+                # Captures the trial outcome before advance_trial() resets the flags.
                 is_aversive = self._trial_state.is_current_trial_aversive()
                 if is_aversive:
                     succeeded = self._trial_state.aversive_succeeded
@@ -1239,7 +1248,7 @@ class _MesoscopeVRSystem:
 
                 failed_count = self._trial_state.advance_trial()
 
-                # Report outcome to visualizer
+                # Reports the trial outcome to the visualizer.
                 self._visualizer.add_trial_outcome(is_aversive=is_aversive, succeeded=succeeded, was_guided=was_guided)
 
                 # Handles recovery mode activation based on trial type.
@@ -1258,7 +1267,7 @@ class _MesoscopeVRSystem:
                         self._trial_state.reinforcing_guided_trials = recovery_trials
                         self._ui.set_reinforcing_guidance_state(enabled=True)
 
-        # Handles incoming lick data
+        # Handles incoming lick data.
         lick_count = self._microcontrollers.lick.lick_count
         if lick_count > self._lick_count:
             self._lick_count = lick_count
@@ -1268,7 +1277,7 @@ class _MesoscopeVRSystem:
             if self._vr_task is not None:
                 self._vr_task.push_lick_event()
 
-        # Handles water delivery tracking
+        # Handles water delivery tracking.
         dispensed_water = self._microcontrollers.valve.delivered_volume - (
             self._paused_water_volume + self._delivered_water_volume
         )
@@ -1292,7 +1301,7 @@ class _MesoscopeVRSystem:
 
         if event.kind == VRTaskEventKind.STIMULUS_TRIGGERED:
             if self._trial_state.is_current_trial_aversive():
-                # Aversive trial: deliver gas puff
+                # Aversive trial: delivers the gas puff.
                 puff_duration = self._trial_state.get_current_puff_duration()
                 self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
 
@@ -1305,7 +1314,7 @@ class _MesoscopeVRSystem:
                 # Marks the aversive trial as failed (puff was delivered).
                 self._trial_state.aversive_succeeded = False
             else:
-                # Reinforcing trial: deliver water reward
+                # Reinforcing trial: delivers the water reward.
                 reward_size, tone_duration = self._trial_state.get_current_reward()
                 self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
 
@@ -1425,17 +1434,17 @@ class _MesoscopeVRSystem:
         if not self._ui.pause_runtime:
             self._ui.set_pause_state(paused=True)
 
-        # Records pause onset time
+        # Records pause onset time.
         self._pause_start_time = self._timestamp_timer.elapsed
 
         # Switches the Mesoscope-VR system into the idle state.
         self.idle()
 
-        # Notifies the user that the runtime has been paused
+        # Notifies the user that the runtime has been paused.
         message = "Mesoscope-VR runtime: Paused."
         console.echo(message=message, level=LogLevel.WARNING)
 
-        # Sets the paused flag
+        # Sets the paused flag.
         self._paused = True
 
     def _resume_runtime(self) -> None:
@@ -1469,7 +1478,7 @@ class _MesoscopeVRSystem:
 
             self._start_mesoscope()
 
-            # Resets the termination tacker if Mesoscope acquisition restarts successfully.
+            # Resets the termination tracker if Mesoscope acquisition restarts successfully.
             self._mesoscope_terminated = False
 
         # Updates the 'paused_time' value to reflect the time spent inside the 'paused' state. Most runtimes use this
@@ -1484,7 +1493,7 @@ class _MesoscopeVRSystem:
         # Restores the system state to pre-pause condition.
         if self._system_state == MesoscopeVRStates.IDLE:
             # This is a rare case where the pause was triggered before a valid non-idle state was activated by the
-            # runtime logic function. While rare, it is not technically impossible, so it is supported here
+            # runtime logic function. While rare, it is not technically impossible, so it is supported here.
             self.idle()
         elif self._system_state == MesoscopeVRStates.REST:
             self.rest()
@@ -1495,7 +1504,7 @@ class _MesoscopeVRSystem:
         elif self._system_state == MesoscopeVRStates.RUN_TRAINING:
             self.run_train()
 
-        # Resets the paused flag
+        # Resets the paused flag.
         self._paused = False
 
     def _terminate_runtime(self) -> None:
@@ -1515,7 +1524,7 @@ class _MesoscopeVRSystem:
                 self._terminated = True
                 return
 
-            # Returns without terminating the runtime
+            # Returns without terminating the runtime.
             if answer == "n":
                 return
 
