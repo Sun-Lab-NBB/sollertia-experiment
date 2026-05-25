@@ -495,13 +495,13 @@ The Mesoscope-VR system generates the following files and directories, in additi
 raw data section on the VRPC:
 1. **mesoscope_data**: Stores all Mesoscope-acquired data. Since Mesoscope data is only acquired for **experiment**
    and **window checking** sessions, this directory is kept empty for training session types. During preprocessing,
-   the directory contents are organized to automatically work with
-   [sl-suite2p](https://github.com/Sun-Lab-NBB/sl-suite2p) processing library. The directory contains:
+   the directory contents are organized to automatically work with the
+   [cindra](https://github.com/Sun-Lab-NBB/cindra) processing library. The directory contains:
    - **mesoscope_XXXXXX_XXXXXX.tiff**: Recompressed Mesoscope frame stacks using LERC lossless compression.
    - **frame_invariant_metadata.json**: ScanImage metadata constant across all frames (frame rate, plane/channel
      count, and ROI information).
    - **frame_variant_metadata.npz**: Per-frame metadata (frame numbers, timestamps, acquisition triggers).
-   - **suite2p_parameters.json**: sl-suite2p-compatible configuration used for further data processing.
+   - **cindra_parameters.json**: cindra-compatible configuration used for further data processing.
    - **MotionEstimator.me**: Reference motion estimator file.
    - **fov.roi**: Region-of-interest file defining the imaging field.
    - **zstack.tiff**: A high-resolution z-stack reference image for future alignment with histology data.
