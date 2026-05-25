@@ -1,5 +1,7 @@
 """Provides the graphical user interface used by the Mesoscope-VR system to facilitate system maintenance operations."""
 
+from __future__ import annotations
+
 import sys
 from enum import IntEnum
 import contextlib
@@ -30,19 +32,33 @@ class _DataArrayIndex(IntEnum):
     """
 
     TERMINATION = 0
+    """Signals the UI process to terminate and shut down the GUI window."""
     VALVE_OPEN = 1
+    """Tracks the user's request to open the water valve."""
     VALVE_CLOSE = 2
+    """Tracks the user's request to close the water valve."""
     VALVE_REWARD = 3
+    """Tracks the user's request to deliver a water reward."""
     VALVE_REFERENCE = 4
+    """Tracks the user's request to run the valve referencing procedure."""
     VALVE_CALIBRATE = 5
+    """Tracks the user's request to run the valve calibration procedure."""
     BRAKE_LOCK = 6
+    """Tracks the user's request to lock the wheel brake."""
     BRAKE_UNLOCK = 7
+    """Tracks the user's request to unlock the wheel brake."""
     REWARD_VOLUME = 8
+    """Stores the user-defined water reward volume in microliters."""
     CALIBRATION_PULSE_DURATION = 9
+    """Stores the user-defined calibration pulse duration in milliseconds."""
     GAS_VALVE_OPEN = 10
+    """Tracks the user's request to open the gas puff valve."""
     GAS_VALVE_CLOSE = 11
+    """Tracks the user's request to close the gas puff valve."""
     GAS_VALVE_PULSE = 12
+    """Tracks the user's request to pulse the gas puff valve."""
     GAS_VALVE_PULSE_DURATION = 13
+    """Stores the user-defined gas puff pulse duration in milliseconds."""
 
 
 class MaintenanceControlUI:
@@ -80,23 +96,25 @@ class MaintenanceControlUI:
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Default 5 uL
         prototype[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = 30  # Default 30 ms
 
-        # Initializes the SharedMemoryArray instance
-        self._data_array = SharedMemoryArray.create_array(
+        self._data_array: SharedMemoryArray = SharedMemoryArray.create_array(
             name="maintenance_control_ui", prototype=prototype, exists_ok=True
         )
 
-        # Caches tracker references to class attributes
-        self._valve_tracker = valve_tracker
-        self._gas_puff_tracker = gas_puff_tracker
+        self._valve_tracker: SharedMemoryArray = valve_tracker
+        self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
         # Defines but does not automatically start the UI process
-        self._ui_process = Process(target=self._run_ui_process, daemon=True)
-        self._started = False
+        self._ui_process: Process = Process(target=self._run_ui_process, daemon=True)
+        self._started: bool = False
 
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
         # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the MaintenanceControlUI instance."""
+        return f"MaintenanceControlUI(started={self._started})"
 
     def start(self) -> None:
         """Starts the remote UI process."""
@@ -130,33 +148,6 @@ class MaintenanceControlUI:
         # them would break access to delivered_volume when generating the session descriptor during shutdown.
 
         self._started = False
-
-    def _run_ui_process(self) -> None:
-        """Runs UI management cycle in a parallel process."""
-        self._data_array.connect()
-        self._valve_tracker.connect()
-        self._gas_puff_tracker.connect()
-
-        try:
-            app = QApplication(sys.argv)
-            app.setApplicationName("Mesoscope-VR Maintenance Panel")
-            app.setOrganizationName("Sollertia")
-            app.setStyle("Fusion")
-
-            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
-            window.show()
-
-            app.exec()
-        except Exception as e:
-            message = (
-                f"Unable to initialize the GUI application for the maintenance user interface. "
-                f"Encountered the following error {e}."
-            )
-            console.error(message=message, error=RuntimeError)
-        finally:
-            self._data_array.disconnect()
-            self._valve_tracker.disconnect()
-            self._gas_puff_tracker.disconnect()
 
     @property
     def exit_signal(self) -> bool:
@@ -248,6 +239,33 @@ class MaintenanceControlUI:
         """Returns the current user-defined gas puff pulse duration in milliseconds."""
         return int(self._data_array[_DataArrayIndex.GAS_VALVE_PULSE_DURATION])
 
+    def _run_ui_process(self) -> None:
+        """Runs the UI management cycle in a parallel process."""
+        self._data_array.connect()
+        self._valve_tracker.connect()
+        self._gas_puff_tracker.connect()
+
+        try:
+            app = QApplication(sys.argv)
+            app.setApplicationName("Mesoscope-VR Maintenance Panel")
+            app.setOrganizationName("Sollertia")
+            app.setStyle("Fusion")
+
+            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
+            window.show()
+
+            app.exec()
+        except Exception as e:
+            message = (
+                f"Unable to initialize the GUI application for the maintenance user interface. "
+                f"Encountered the following error {e}."
+            )
+            console.error(message=message, error=RuntimeError)
+        finally:
+            self._data_array.disconnect()
+            self._valve_tracker.disconnect()
+            self._gas_puff_tracker.disconnect()
+
 
 class _MaintenanceUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's maintenance GUI application window.
@@ -274,13 +292,9 @@ class _MaintenanceUIWindow(QMainWindow):
         self._valve_tracker: SharedMemoryArray = valve_tracker
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
-        # Tracks whether a reward delivery is in progress.
         self._reward_in_progress: bool = False
-        # Tracks whether a calibration procedure is in progress.
         self._calibration_in_progress: bool = False
-        # Tracks whether a referencing procedure is in progress.
         self._referencing_in_progress: bool = False
-        # Tracks whether a gas puff delivery is in progress.
         self._puff_in_progress: bool = False
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
@@ -307,19 +321,19 @@ class _MaintenanceUIWindow(QMainWindow):
         # Basic valve controls
         basic_valve_layout = QHBoxLayout()
 
-        self.valve_open_btn = QPushButton("🔓 Open")
-        self.valve_open_btn.setToolTip("Open the valve")
+        self._valve_open_button = QPushButton("🔓 Open")
+        self._valve_open_button.setToolTip("Open the valve")
         # noinspection PyUnresolvedReferences
-        self.valve_open_btn.clicked.connect(self._valve_open)
-        self.valve_open_btn.setObjectName("valveOpenButton")
+        self._valve_open_button.clicked.connect(self._valve_open)
+        self._valve_open_button.setObjectName("valveOpenButton")
 
-        self.valve_close_btn = QPushButton("🔒 Close")
-        self.valve_close_btn.setToolTip("Close the valve")
+        self._valve_close_button = QPushButton("🔒 Close")
+        self._valve_close_button.setToolTip("Close the valve")
         # noinspection PyUnresolvedReferences
-        self.valve_close_btn.clicked.connect(self._valve_close)
-        self.valve_close_btn.setObjectName("valveCloseButton")
+        self._valve_close_button.clicked.connect(self._valve_close)
+        self._valve_close_button.setObjectName("valveCloseButton")
 
-        for button in [self.valve_open_btn, self.valve_close_btn]:
+        for button in [self._valve_open_button, self._valve_close_button]:
             button.setMinimumHeight(35)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             basic_valve_layout.addWidget(button)
@@ -336,41 +350,40 @@ class _MaintenanceUIWindow(QMainWindow):
         volume_label = QLabel("Reward volume:")
         volume_label.setObjectName("volumeLabel")
 
-        self.volume_spinbox = QDoubleSpinBox()
-        self.volume_spinbox.setRange(1, 20)
-        self.volume_spinbox.setValue(5)
-        self.volume_spinbox.setDecimals(0)
-        self.volume_spinbox.setSuffix(" μL")
-        self.volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
-        self.volume_spinbox.setMinimumHeight(35)
+        self._volume_spinbox = QDoubleSpinBox()
+        self._volume_spinbox.setRange(1, 20)
+        self._volume_spinbox.setValue(5)
+        self._volume_spinbox.setDecimals(0)
+        self._volume_spinbox.setSuffix(" μL")
+        self._volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
+        self._volume_spinbox.setMinimumHeight(35)
         # noinspection PyUnresolvedReferences
-        self.volume_spinbox.valueChanged.connect(self._update_reward_volume)
+        self._volume_spinbox.valueChanged.connect(self._update_reward_volume)
 
         volume_sub_layout.addWidget(volume_label)
-        volume_sub_layout.addWidget(self.volume_spinbox)
+        volume_sub_layout.addWidget(self._volume_spinbox)
 
         # Reward button on the right (same width as Close button)
-        self.valve_reward_btn = QPushButton("💧 Reward")
-        self.valve_reward_btn.setToolTip("Deliver water reward with specified volume")
+        self._valve_reward_button = QPushButton("💧 Reward")
+        self._valve_reward_button.setToolTip("Deliver water reward with specified volume")
         # noinspection PyUnresolvedReferences
-        self.valve_reward_btn.clicked.connect(self._valve_reward)
-        self.valve_reward_btn.setObjectName("rewardButton")
-        self.valve_reward_btn.setMinimumHeight(35)
+        self._valve_reward_button.clicked.connect(self._valve_reward)
+        self._valve_reward_button.setObjectName("rewardButton")
+        self._valve_reward_button.setMinimumHeight(35)
 
         volume_reward_layout.addLayout(volume_sub_layout, stretch=1)
-        volume_reward_layout.addWidget(self.valve_reward_btn, stretch=1)
+        volume_reward_layout.addWidget(self._valve_reward_button, stretch=1)
 
         valve_layout.addLayout(volume_reward_layout)
 
-        # Valve status
-        self.valve_status_label = QLabel("Valve: Closed")
-        self.valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._valve_status_label = QLabel("Valve: Closed")
+        self._valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         status_font = QFont()
         status_font.setPointSize(12)
         status_font.setBold(True)
-        self.valve_status_label.setFont(status_font)
-        self.valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        valve_layout.addWidget(self.valve_status_label)
+        self._valve_status_label.setFont(status_font)
+        self._valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+        valve_layout.addWidget(self._valve_status_label)
 
         main_layout.addWidget(valve_group)
 
@@ -379,15 +392,14 @@ class _MaintenanceUIWindow(QMainWindow):
         calibration_layout = QVBoxLayout(calibration_group)
         calibration_layout.setSpacing(6)
 
-        # Reference button
-        self.valve_reference_btn = QPushButton("🔄 Reference (200 x 5 μL)")
-        self.valve_reference_btn.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
+        self._valve_reference_button = QPushButton("🔄 Reference (200 x 5 μL)")
+        self._valve_reference_button.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
         # noinspection PyUnresolvedReferences
-        self.valve_reference_btn.clicked.connect(self._valve_reference)
-        self.valve_reference_btn.setObjectName("referenceButton")
-        self.valve_reference_btn.setMinimumHeight(35)
-        self.valve_reference_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        calibration_layout.addWidget(self.valve_reference_btn)
+        self._valve_reference_button.clicked.connect(self._valve_reference)
+        self._valve_reference_button.setObjectName("referenceButton")
+        self._valve_reference_button.setMinimumHeight(35)
+        self._valve_reference_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        calibration_layout.addWidget(self._valve_reference_button)
 
         # Pulse duration control
         pulse_duration_layout = QHBoxLayout()
@@ -396,38 +408,36 @@ class _MaintenanceUIWindow(QMainWindow):
         pulse_label = QLabel("Pulse duration:")
         pulse_label.setObjectName("volumeLabel")
 
-        self.pulse_duration_spinbox = QDoubleSpinBox()
-        self.pulse_duration_spinbox.setRange(1, 200)
-        self.pulse_duration_spinbox.setValue(30)
-        self.pulse_duration_spinbox.setDecimals(0)
-        self.pulse_duration_spinbox.setSuffix(" ms")
-        self.pulse_duration_spinbox.setToolTip("Sets calibration pulse duration. Accepts values between 1 and 200 ms.")
-        self.pulse_duration_spinbox.setMinimumHeight(30)
+        self._pulse_duration_spinbox = QDoubleSpinBox()
+        self._pulse_duration_spinbox.setRange(1, 200)
+        self._pulse_duration_spinbox.setValue(30)
+        self._pulse_duration_spinbox.setDecimals(0)
+        self._pulse_duration_spinbox.setSuffix(" ms")
+        self._pulse_duration_spinbox.setToolTip("Sets calibration pulse duration. Accepts values between 1 and 200 ms.")
+        self._pulse_duration_spinbox.setMinimumHeight(30)
         # noinspection PyUnresolvedReferences
-        self.pulse_duration_spinbox.valueChanged.connect(self._update_pulse_duration)
+        self._pulse_duration_spinbox.valueChanged.connect(self._update_pulse_duration)
 
         pulse_duration_layout.addWidget(pulse_label)
-        pulse_duration_layout.addWidget(self.pulse_duration_spinbox)
+        pulse_duration_layout.addWidget(self._pulse_duration_spinbox)
 
-        # Calibrate button
-        self.calibrate_btn = QPushButton("📊 Calibrate")
-        self.calibrate_btn.setToolTip("Run valve calibration with specified pulse duration")
+        self._calibrate_button = QPushButton("📊 Calibrate")
+        self._calibrate_button.setToolTip("Run valve calibration with specified pulse duration")
         # noinspection PyUnresolvedReferences
-        self.calibrate_btn.clicked.connect(self._calibrate)
-        self.calibrate_btn.setObjectName("calibrateButton")
-        self.calibrate_btn.setMinimumHeight(35)
-        self.calibrate_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._calibrate_button.clicked.connect(self._calibrate)
+        self._calibrate_button.setObjectName("calibrateButton")
+        self._calibrate_button.setMinimumHeight(35)
+        self._calibrate_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        pulse_duration_layout.addWidget(self.calibrate_btn)
+        pulse_duration_layout.addWidget(self._calibrate_button)
 
         calibration_layout.addLayout(pulse_duration_layout)
 
-        # Calibration status label
-        self.calibration_status_label = QLabel("Calibration: Idle")
-        self.calibration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.calibration_status_label.setFont(status_font)
-        self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        calibration_layout.addWidget(self.calibration_status_label)
+        self._calibration_status_label = QLabel("Calibration: Idle")
+        self._calibration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._calibration_status_label.setFont(status_font)
+        self._calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+        calibration_layout.addWidget(self._calibration_status_label)
 
         main_layout.addWidget(calibration_group)
 
@@ -438,19 +448,19 @@ class _MaintenanceUIWindow(QMainWindow):
 
         brake_buttons_layout = QHBoxLayout()
 
-        self.brake_lock_btn = QPushButton("🔒 Lock Brake")
-        self.brake_lock_btn.setToolTip("Lock the wheel brake")
+        self._brake_lock_button = QPushButton("🔒 Lock Brake")
+        self._brake_lock_button.setToolTip("Lock the wheel brake")
         # noinspection PyUnresolvedReferences
-        self.brake_lock_btn.clicked.connect(self._brake_lock)
-        self.brake_lock_btn.setObjectName("brakeLockButton")
+        self._brake_lock_button.clicked.connect(self._brake_lock)
+        self._brake_lock_button.setObjectName("brakeLockButton")
 
-        self.brake_unlock_btn = QPushButton("🔓 Unlock Brake")
-        self.brake_unlock_btn.setToolTip("Unlock the wheel brake")
+        self._brake_unlock_button = QPushButton("🔓 Unlock Brake")
+        self._brake_unlock_button.setToolTip("Unlock the wheel brake")
         # noinspection PyUnresolvedReferences
-        self.brake_unlock_btn.clicked.connect(self._brake_unlock)
-        self.brake_unlock_btn.setObjectName("brakeUnlockButton")
+        self._brake_unlock_button.clicked.connect(self._brake_unlock)
+        self._brake_unlock_button.setObjectName("brakeUnlockButton")
 
-        for button in [self.brake_lock_btn, self.brake_unlock_btn]:
+        for button in [self._brake_lock_button, self._brake_unlock_button]:
             button.setMinimumHeight(35)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             brake_buttons_layout.addWidget(button)
@@ -458,11 +468,11 @@ class _MaintenanceUIWindow(QMainWindow):
         brake_layout.addLayout(brake_buttons_layout)
 
         # Brake status - starts locked
-        self.brake_status_label = QLabel("Brake Status: 🔒 Locked")
-        self.brake_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.brake_status_label.setFont(status_font)
-        self.brake_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
-        brake_layout.addWidget(self.brake_status_label)
+        self._brake_status_label = QLabel("Brake Status: 🔒 Locked")
+        self._brake_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._brake_status_label.setFont(status_font)
+        self._brake_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
+        brake_layout.addWidget(self._brake_status_label)
 
         main_layout.addWidget(brake_group)
 
@@ -474,19 +484,19 @@ class _MaintenanceUIWindow(QMainWindow):
         # Open/Close buttons
         gas_valve_buttons_layout = QHBoxLayout()
 
-        self.gas_valve_open_btn = QPushButton("🔓 Open")
-        self.gas_valve_open_btn.setToolTip("Open the gas puff valve")
+        self._gas_valve_open_button = QPushButton("🔓 Open")
+        self._gas_valve_open_button.setToolTip("Open the gas puff valve")
         # noinspection PyUnresolvedReferences
-        self.gas_valve_open_btn.clicked.connect(self._gas_valve_open)
-        self.gas_valve_open_btn.setObjectName("valveOpenButton")
+        self._gas_valve_open_button.clicked.connect(self._gas_valve_open)
+        self._gas_valve_open_button.setObjectName("valveOpenButton")
 
-        self.gas_valve_close_btn = QPushButton("🔒 Close")
-        self.gas_valve_close_btn.setToolTip("Close the gas puff valve")
+        self._gas_valve_close_button = QPushButton("🔒 Close")
+        self._gas_valve_close_button.setToolTip("Close the gas puff valve")
         # noinspection PyUnresolvedReferences
-        self.gas_valve_close_btn.clicked.connect(self._gas_valve_close)
-        self.gas_valve_close_btn.setObjectName("valveCloseButton")
+        self._gas_valve_close_button.clicked.connect(self._gas_valve_close)
+        self._gas_valve_close_button.setObjectName("valveCloseButton")
 
-        for button in [self.gas_valve_open_btn, self.gas_valve_close_btn]:
+        for button in [self._gas_valve_open_button, self._gas_valve_close_button]:
             button.setMinimumHeight(35)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             gas_valve_buttons_layout.addWidget(button)
@@ -503,50 +513,48 @@ class _MaintenanceUIWindow(QMainWindow):
         gas_puff_label = QLabel("Puff duration:")
         gas_puff_label.setObjectName("volumeLabel")
 
-        self.gas_puff_duration_spinbox = QDoubleSpinBox()
-        self.gas_puff_duration_spinbox.setRange(10, 350)
-        self.gas_puff_duration_spinbox.setValue(100)
-        self.gas_puff_duration_spinbox.setDecimals(0)
-        self.gas_puff_duration_spinbox.setSuffix(" ms")
-        self.gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
-        self.gas_puff_duration_spinbox.setMinimumHeight(35)
+        self._gas_puff_duration_spinbox = QDoubleSpinBox()
+        self._gas_puff_duration_spinbox.setRange(10, 350)
+        self._gas_puff_duration_spinbox.setValue(100)
+        self._gas_puff_duration_spinbox.setDecimals(0)
+        self._gas_puff_duration_spinbox.setSuffix(" ms")
+        self._gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
+        self._gas_puff_duration_spinbox.setMinimumHeight(35)
         # noinspection PyUnresolvedReferences
-        self.gas_puff_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
+        self._gas_puff_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
         puff_sub_layout.addWidget(gas_puff_label)
-        puff_sub_layout.addWidget(self.gas_puff_duration_spinbox)
+        puff_sub_layout.addWidget(self._gas_puff_duration_spinbox)
 
         # Puff button on the right (same width as Close button)
-        self.gas_valve_puff_btn = QPushButton("💨 Puff")
-        self.gas_valve_puff_btn.setToolTip("Deliver a gas puff with specified duration")
+        self._gas_valve_puff_button = QPushButton("💨 Puff")
+        self._gas_valve_puff_button.setToolTip("Deliver a gas puff with specified duration")
         # noinspection PyUnresolvedReferences
-        self.gas_valve_puff_btn.clicked.connect(self._gas_valve_puff)
-        self.gas_valve_puff_btn.setObjectName("rewardButton")
-        self.gas_valve_puff_btn.setMinimumHeight(35)
+        self._gas_valve_puff_button.clicked.connect(self._gas_valve_puff)
+        self._gas_valve_puff_button.setObjectName("rewardButton")
+        self._gas_valve_puff_button.setMinimumHeight(35)
 
         puff_layout.addLayout(puff_sub_layout, stretch=1)
-        puff_layout.addWidget(self.gas_valve_puff_btn, stretch=1)
+        puff_layout.addWidget(self._gas_valve_puff_button, stretch=1)
 
         gas_valve_layout.addLayout(puff_layout)
 
-        # Gas valve status
-        self.gas_valve_status_label = QLabel("Valve: Closed")
-        self.gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.gas_valve_status_label.setFont(status_font)
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
-        gas_valve_layout.addWidget(self.gas_valve_status_label)
+        self._gas_valve_status_label = QLabel("Valve: Closed")
+        self._gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._gas_valve_status_label.setFont(status_font)
+        self._gas_valve_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+        gas_valve_layout.addWidget(self._gas_valve_status_label)
 
         main_layout.addWidget(gas_valve_group)
 
-        # Terminate Button
-        self.terminate_btn = QPushButton("✖ Terminate Maintenance")
-        self.terminate_btn.setToolTip("Gracefully end the maintenance runtime")
+        self._terminate_button = QPushButton("✖ Terminate Maintenance")
+        self._terminate_button.setToolTip("Gracefully end the maintenance runtime")
         # noinspection PyUnresolvedReferences
-        self.terminate_btn.clicked.connect(self._terminate_runtime)
-        self.terminate_btn.setObjectName("exitButton")
-        self.terminate_btn.setMinimumHeight(40)
+        self._terminate_button.clicked.connect(self._terminate_runtime)
+        self._terminate_button.setObjectName("exitButton")
+        self._terminate_button.setMinimumHeight(40)
 
-        main_layout.addWidget(self.terminate_btn)
+        main_layout.addWidget(self._terminate_button)
 
     def _apply_qt6_styles(self) -> None:
         """Applies optimized styling to all UI elements."""
@@ -791,17 +799,17 @@ class _MaintenanceUIWindow(QMainWindow):
 
     def _setup_monitoring(self) -> None:
         """Sets up a QTimer to monitor the runtime termination status and valve's state."""
-        self.monitor_timer = QTimer(self)
+        self._monitor_timer = QTimer(self)
         # noinspection PyUnresolvedReferences
-        self.monitor_timer.timeout.connect(self._check_external_state)
-        self.monitor_timer.start(100)  # Check every 100ms
+        self._monitor_timer.timeout.connect(self._check_external_state)
+        self._monitor_timer.start(100)  # Check every 100ms
 
     def _check_external_state(self) -> None:
         """Checks for external termination signal and updates valve, calibration, and gas puff status."""
         # noinspection PyBroadException
         try:
             # Checks for termination.
-            if self._data_array[_DataArrayIndex.TERMINATION] == 1:
+            if bool(self._data_array[_DataArrayIndex.TERMINATION]):
                 self.close()
 
             # Reads valve tracker state (index 1 = calibration state, index 2 = open/close state).
@@ -814,27 +822,31 @@ class _MaintenanceUIWindow(QMainWindow):
             # Detects when water valve closes (state transitions to closed while reward was in progress).
             if self._reward_in_progress and water_valve_state == 0:
                 self._reward_in_progress = False
-                self.valve_status_label.setText("Valve: Closed")
-                self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+                self._valve_status_label.setText("Valve: Closed")
+                self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
             # Detects when calibration or referencing completes (valve_tracker indicates no longer calibrating).
             if (self._calibration_in_progress or self._referencing_in_progress) and not is_calibrating:
                 self._calibration_in_progress = False
                 self._referencing_in_progress = False
-                self.calibration_status_label.setText("Calibration: Idle")
-                self.calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+                self._calibration_status_label.setText("Calibration: Idle")
+                self._calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
 
             # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
             if self._puff_in_progress and gas_valve_state == 0:
                 self._puff_in_progress = False
-                self.gas_valve_status_label.setText("Valve: Closed")
-                self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+                self._gas_valve_status_label.setText("Valve: Closed")
+                self._gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
         except Exception:
             self.close()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
-        """Handles GUI window close events."""
+        """Handles GUI window close events.
+
+        Args:
+            event: The Qt-generated window shutdown event instance.
+        """
         with contextlib.suppress(Exception):
             self._data_array[_DataArrayIndex.TERMINATION] = 1
         if event is not None:
@@ -842,82 +854,82 @@ class _MaintenanceUIWindow(QMainWindow):
 
     def _update_reward_volume(self) -> None:
         """Updates the volume used when delivering water rewards to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.REWARD_VOLUME] = int(self.volume_spinbox.value())
+        self._data_array[_DataArrayIndex.REWARD_VOLUME] = int(self._volume_spinbox.value())
 
     def _update_pulse_duration(self) -> None:
         """Updates the calibration pulse duration to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = int(self.pulse_duration_spinbox.value())
+        self._data_array[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = int(self._pulse_duration_spinbox.value())
 
     def _valve_open(self) -> None:
         """Signals to open the valve."""
         self._data_array[_DataArrayIndex.VALVE_OPEN] = 1
-        self.valve_status_label.setText("Valve: Open")
-        self.valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+        self._valve_status_label.setText("Valve: Open")
+        self._valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _valve_close(self) -> None:
         """Signals to close the valve."""
         self._data_array[_DataArrayIndex.VALVE_CLOSE] = 1
-        self.valve_status_label.setText("Valve: Closed")
-        self.valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+        self._valve_status_label.setText("Valve: Closed")
+        self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _valve_reward(self) -> None:
         """Signals to deliver a water reward."""
         self._data_array[_DataArrayIndex.VALVE_REWARD] = 1
         self._reward_in_progress = True
-        self.valve_status_label.setText("Valve: Delivering Reward")
-        self.valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
+        self._valve_status_label.setText("Valve: Delivering Reward")
+        self._valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
     def _valve_reference(self) -> None:
         """Signals to run the valve referencing procedure."""
         self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 1
         self._referencing_in_progress = True
-        self.calibration_status_label.setText("Calibration: Referencing")
-        self.calibration_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
+        self._calibration_status_label.setText("Calibration: Referencing")
+        self._calibration_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
 
     def _calibrate(self) -> None:
         """Signals to run the valve calibration procedure for the currently set pulse duration."""
         self._data_array[_DataArrayIndex.VALVE_CALIBRATE] = 1
         self._calibration_in_progress = True
-        self.calibration_status_label.setText("Calibration: Calibrating")
-        self.calibration_status_label.setStyleSheet("QLabel { color: #16a085; font-weight: bold; }")
+        self._calibration_status_label.setText("Calibration: Calibrating")
+        self._calibration_status_label.setStyleSheet("QLabel { color: #16a085; font-weight: bold; }")
 
     def _brake_lock(self) -> None:
         """Signals to lock the brake."""
         self._data_array[_DataArrayIndex.BRAKE_LOCK] = 1
-        self.brake_status_label.setText("Brake: 🔒 Locked")
-        self.brake_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
+        self._brake_status_label.setText("Brake: 🔒 Locked")
+        self._brake_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
 
     def _brake_unlock(self) -> None:
         """Signals to unlock the brake."""
         self._data_array[_DataArrayIndex.BRAKE_UNLOCK] = 1
-        self.brake_status_label.setText("Brake: 🔓 Unlocked")
-        self.brake_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+        self._brake_status_label.setText("Brake: 🔓 Unlocked")
+        self._brake_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _update_gas_puff_duration(self) -> None:
         """Updates the gas puff duration to match the current GUI configuration."""
-        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = int(self.gas_puff_duration_spinbox.value())
+        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = int(self._gas_puff_duration_spinbox.value())
 
     def _gas_valve_open(self) -> None:
         """Signals to open the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 1
-        self.gas_valve_status_label.setText("Valve: Open")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
+        self._gas_valve_status_label.setText("Valve: Open")
+        self._gas_valve_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
     def _gas_valve_close(self) -> None:
         """Signals to close the gas puff valve."""
         self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 1
-        self.gas_valve_status_label.setText("Valve: Closed")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
+        self._gas_valve_status_label.setText("Valve: Closed")
+        self._gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
     def _gas_valve_puff(self) -> None:
         """Signals to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 1
         self._puff_in_progress = True
-        self.gas_valve_status_label.setText("Valve: Puffing")
-        self.gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
+        self._gas_valve_status_label.setText("Valve: Puffing")
+        self._gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
 
     def _terminate_runtime(self) -> None:
         """Signals to terminate the maintenance runtime."""
         self._data_array[_DataArrayIndex.TERMINATION] = 1
-        self.terminate_btn.setText("✖ Termination Requested")
-        self.terminate_btn.setEnabled(False)
+        self._terminate_button.setText("✖ Termination Requested")
+        self._terminate_button.setEnabled(False)
