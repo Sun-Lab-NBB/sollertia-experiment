@@ -34,7 +34,7 @@ from ..mesoscope_vr import (
     MesoscopeSystemConfiguration,
     purge_session,
     preprocess_session_data,
-    get_system_configuration_data,
+    get_system_configuration,
     get_system_configuration_path,
     migrate_animal_between_projects,
 )
@@ -249,7 +249,7 @@ def preprocess_session_tool(session_path: str) -> str:
     """
     try:
         path = Path(session_path)
-        system_configuration = get_system_configuration_data()
+        system_configuration = get_system_configuration()
 
         # Validates that the session is stored locally.
         if not path.is_relative_to(system_configuration.filesystem.root_directory):
@@ -296,7 +296,7 @@ def delete_session_tool(session_path: str, *, confirm_deletion: bool = False) ->
 
     try:
         path = Path(session_path)
-        system_configuration = get_system_configuration_data()
+        system_configuration = get_system_configuration()
 
         # Validates that the session is stored locally.
         if not path.is_relative_to(system_configuration.filesystem.root_directory):
@@ -530,7 +530,7 @@ def read_system_configuration_tool() -> dict[str, Any]:
         ``{"error": ...}`` on failure.
     """
     try:
-        instance = get_system_configuration_data()
+        instance = get_system_configuration()
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
     return {"file_path": str(get_system_configuration_path()), "data": _serialize(value=instance)}
@@ -574,7 +574,7 @@ def validate_system_configuration_tool() -> dict[str, Any]:
         ``{"error": ...}`` on failure.
     """
     try:
-        configuration = get_system_configuration_data()
+        configuration = get_system_configuration()
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 
@@ -595,7 +595,7 @@ def describe_system_configuration_schema_tool() -> dict[str, Any]:
 def check_system_mounts_tool() -> dict[str, Any]:
     """Verifies all filesystem paths declared in the active Mesoscope-VR system configuration."""
     try:
-        configuration = get_system_configuration_data()
+        configuration = get_system_configuration()
     except (FileNotFoundError, OSError, ValueError) as exception:
         return {"error": str(exception)}
 

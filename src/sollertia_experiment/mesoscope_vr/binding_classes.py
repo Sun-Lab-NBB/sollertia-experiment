@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from ataraxis_data_structures import DataLogger
 
-    from .system import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
+    from .system import MesoscopeCameras, MesoscopeVRAssets, MesoscopeMicroControllers
 
 
 class ZaberMotors:
@@ -51,7 +51,7 @@ class ZaberMotors:
     Args:
         zaber_positions: The ZaberPositions instance that stores the positions of Zaber motors used during a
             previous runtime or None if there is no previous position data to use.
-        zaber_configuration: The MesoscopeExternalAssets instance that stores the configuration parameters for the
+        zaber_configuration: The MesoscopeVRAssets instance that stores the configuration parameters for the
             managed Zaber devices.
 
     Attributes:
@@ -69,7 +69,7 @@ class ZaberMotors:
            previous runtime or None if there is no previous position data to use.
     """
 
-    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeExternalAssets) -> None:
+    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeVRAssets) -> None:
         # Initializes the ZaberConnection instances for all zaber controller groups.
         self._headbar: ZaberConnection = ZaberConnection(port=zaber_configuration.headbar_port)
         self._wheel: ZaberConnection = ZaberConnection(port=zaber_configuration.wheel_port)

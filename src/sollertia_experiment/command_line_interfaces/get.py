@@ -15,7 +15,7 @@ from ..cross_system import (
     discover_zaber_devices,
     get_project_experiments,
 )
-from ..mesoscope_vr import get_system_configuration_data
+from ..mesoscope_vr import get_system_configuration
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
@@ -35,7 +35,7 @@ def get_zaber_devices() -> None:
 @get.command("projects")
 def get_projects() -> None:
     """Identifies the projects accessible to the data acquisition system."""
-    system_configuration = get_system_configuration_data()
+    system_configuration = get_system_configuration()
     projects = natsorted(
         [
             directory.name  # Use .name instead of .stem (they're the same for directories)
@@ -66,7 +66,7 @@ def get_projects() -> None:
 )
 def get_experiments(project: str) -> None:
     """Identifies the target project's experiment configurations accessible to the data acquisition system."""
-    system_configuration = get_system_configuration_data()
+    system_configuration = get_system_configuration()
     experiments = get_project_experiments(
         project_directory=system_configuration.filesystem.root_directory.joinpath(project)
     )

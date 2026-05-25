@@ -1,18 +1,17 @@
-"""This package provides the assets for acquiring and preprocessing data via the Mesoscope-VR data acquisition
-system.
+"""Provides the assets for acquiring and preprocessing data via the Mesoscope-VR data acquisition system.
 """
 
 from .system import (
     ZaberPositions,
     MesoscopeCameras,
+    MesoscopeVRAssets,
     MesoscopePositions,
     MesoscopeFileSystem,
     MesoscopeGoogleSheets,
-    MesoscopeExternalAssets,
     MesoscopeMicroControllers,
     MesoscopeStorageDestination,
     MesoscopeSystemConfiguration,
-    get_system_configuration_data,
+    get_system_configuration,
     get_system_configuration_path,
     create_system_configuration_file,
 )
@@ -31,17 +30,17 @@ from .data_preprocessing import (
 
 __all__ = [
     "MesoscopeCameras",
-    "MesoscopeExternalAssets",
     "MesoscopeFileSystem",
     "MesoscopeGoogleSheets",
     "MesoscopeMicroControllers",
     "MesoscopePositions",
     "MesoscopeStorageDestination",
     "MesoscopeSystemConfiguration",
+    "MesoscopeVRAssets",
     "ZaberPositions",
     "create_system_configuration_file",
     "experiment_logic",
-    "get_system_configuration_data",
+    "get_system_configuration",
     "get_system_configuration_path",
     "lick_training_logic",
     "maintenance_logic",

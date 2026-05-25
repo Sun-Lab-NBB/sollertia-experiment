@@ -480,7 +480,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
     # Ensures that the screenshot is created before proceeding further.
     while True:
-        screenshots = list(mesoscope_data.scanimagepc_data.meso_data_path.glob("*.png"))
+        screenshots = list(mesoscope_data.scanimagepc_data.mesoscope_root_path.glob("*.png"))
 
         if screenshots:
             break

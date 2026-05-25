@@ -25,6 +25,14 @@ _CONFIGURATION_DIR: str = "configuration"
 _SYSTEM_CONFIGURATION_FILENAME: str = "mesoscope_system_configuration.yaml"
 """Canonical filename for the Mesoscope-VR system configuration YAML."""
 
+MESOSCOPE_VR_SESSIONS: tuple[str, str, str, str] = (
+    SessionTypes.LICK_TRAINING,
+    SessionTypes.RUN_TRAINING,
+    SessionTypes.MESOSCOPE_EXPERIMENT,
+    SessionTypes.WINDOW_CHECKING,
+)
+"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
+
 
 class MesoscopeStorageDestination(StrEnum):
     """Defines the canonical long-term storage destinations anticipated by the Mesoscope-VR data acquisition system.
@@ -35,8 +43,8 @@ class MesoscopeStorageDestination(StrEnum):
     """
 
     NAS = "NAS"
-    """The Network-Attached-Storage backup volume. Preferred as the source of truth when pulling data, since it stores
-    a complete copy of the raw data."""
+    """The Network-Attached-Storage backup volume. Preferred when pulling data, due to a typically faster transfer 
+    speed."""
     SERVER = "Server"
     """The remote compute server used as the primary long-term storage and analysis destination."""
 
@@ -59,12 +67,19 @@ class MesoscopeFileSystem:
     """Maps the name of each long-term storage destination to the absolute path of the local-filesystem-mounted
     directory where all projects are stored on that destination. Destinations whose path is left unset (an empty path)
     are treated as not configured and are skipped during data transfer and removal. The mapping order defines the
-    preference order used when a single destination must be selected as the source of truth."""
+    preference order used when the data must be pulled back to the acquisition system for any reason."""
 
 
 @dataclass(slots=True)
 class MesoscopeGoogleSheets:
-    """Stores the identifiers for the Google Sheets used by the Mesoscope-VR data acquisition system."""
+    """Stores the identifiers for the Google Sheets used by the Mesoscope-VR data acquisition system.
+
+    Notes:
+        Both sheet identifiers are optional. A sheet whose identifier is left unset (an empty string) is treated as not
+        configured, and the data exchange that depends on it is skipped with a warning. If neither
+        identifier is set, the system disables all Google Sheets integration and preprocesses sessions without
+        snapshotting surgery records or updating the water restriction log.
+    """
 
     surgery_sheet_id: str = ""
     """The identifier of the Google Sheet that stores information about surgical interventions performed on the animals
@@ -178,8 +193,13 @@ class MesoscopeMicroControllers:
 
 
 @dataclass(slots=True)
-class MesoscopeExternalAssets:
-    """Stores the third-party asset configuration of the Mesoscope-VR data acquisition system."""
+class MesoscopeVRAssets:
+    """Stores the Virtual Reality task asset configuration of the Mesoscope-VR data acquisition system.
+
+    These assets consist of the Zaber motor controllers that position the head-fixed animal and the associated hardware
+    to optimize Virtual Reality task performance. They also include the runtime configuration used to communicate with
+    the Unity game engine that runs the task.
+    """
 
     headbar_port: str = "/dev/ttyUSB0"
     """The USB port used by the HeadBar Zaber motor controllers."""
@@ -201,13 +221,13 @@ class MesoscopeSystemConfiguration(YamlConfig):
     filesystem: MesoscopeFileSystem = field(default_factory=MesoscopeFileSystem)
     """Stores the filesystem configuration."""
     sheets: MesoscopeGoogleSheets = field(default_factory=MesoscopeGoogleSheets)
-    """Stores the identifiers and access credentials for the Google Sheets."""
+    """Stores the identifiers for the Google Sheets."""
     cameras: MesoscopeCameras = field(default_factory=MesoscopeCameras)
     """Stores the video cameras configuration."""
     microcontrollers: MesoscopeMicroControllers = field(default_factory=MesoscopeMicroControllers)
     """Stores the microcontrollers configuration."""
-    assets: MesoscopeExternalAssets = field(default_factory=MesoscopeExternalAssets)
-    """Stores the third-party hardware and firmware assets configuration."""
+    assets: MesoscopeVRAssets = field(default_factory=MesoscopeVRAssets)
+    """Stores the Virtual Reality task asset configuration."""
 
     def __post_init__(self) -> None:
         """Normalizes the valve calibration data to a tuple representation and validates its shape."""
@@ -299,6 +319,28 @@ class MesoscopePositions(YamlConfig):  # pragma: no cover
     """The Mesoscope objective's Z-axis position, in micrometers, used for the red-dot alignment procedure."""
 
 
+class MesoscopeVRStates(IntEnum):
+    """Defines the set of codes used by the Mesoscope-VR data acquisition system to communicate its runtime state."""
+
+    IDLE = 0
+    """The system is currently not conducting a data acquisition session."""
+    REST = 1
+    """The system is conducting the 'rest' period of an experiment session."""
+    RUN = 2
+    """The system is conducting the 'run' period of an experiment session."""
+    LICK_TRAINING = 3
+    """The system is conducting the lick training session."""
+    RUN_TRAINING = 4
+    """The system is conducting the run training session."""
+
+    @classmethod
+    def to_dict(cls) -> dict[str, int]:
+        """Converts the enumeration members to a mapping of each lowercased member name, with underscores replaced by
+        spaces, to its value.
+        """
+        return {member.name.lower().replace("_", " "): member.value for member in cls}
+
+
 def create_system_configuration_file(system: AcquisitionSystems | str = AcquisitionSystems.MESOSCOPE_VR) -> None:
     """Creates the .YAML configuration file for the Mesoscope-VR data acquisition system and configures the local
     machine (PC) to use this file for all future acquisition-system-related calls.
@@ -341,8 +383,9 @@ def get_system_configuration_path() -> Path:
     return get_working_directory().joinpath(_CONFIGURATION_DIR, _SYSTEM_CONFIGURATION_FILENAME)
 
 
-def get_system_configuration_data() -> MesoscopeSystemConfiguration:
-    """Resolves the path to the local Mesoscope-VR system configuration file and loads the configuration data.
+def get_system_configuration() -> MesoscopeSystemConfiguration:
+    """Loads the local system configuration file and verifies that the host-machine belongs to the Mesoscope-VR data
+    acquisition system.
 
     Returns:
         The initialized MesoscopeSystemConfiguration instance that stores the loaded configuration parameters.
@@ -350,68 +393,27 @@ def get_system_configuration_data() -> MesoscopeSystemConfiguration:
     Raises:
         FileNotFoundError: If the local Sollertia platform working directory does not contain the expected Mesoscope-VR
             system configuration file.
+        TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
-    config_path = get_system_configuration_path()
+    configuration_path = get_system_configuration_path()
 
-    if not config_path.exists():
+    if not configuration_path.exists():
         message = (
             f"Unable to load the Mesoscope-VR data acquisition system configuration. Expected the configuration file "
-            f"at {config_path}, but it does not exist. Call the 'sle configure system' CLI command to generate a "
-            f"default configuration file."
+            f"at {configuration_path}, but it does not exist. Call the 'sle configure system' CLI command to generate "
+            f"a default configuration file."
         )
         console.error(message=message, error=FileNotFoundError)
 
-    return MesoscopeSystemConfiguration.from_yaml(file_path=config_path)
-
-
-def get_system_configuration() -> MesoscopeSystemConfiguration:
-    """Verifies that the host-machine belongs to the Mesoscope-VR data acquisition system and loads the
-    system configuration data as a MesoscopeSystemConfiguration instance.
-
-    Returns:
-        The data acquisition system configuration data as a MesoscopeSystemConfiguration instance.
-
-    Raises:
-        TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
-    """
-    system_configuration = get_system_configuration_data()
-    if not isinstance(system_configuration, MesoscopeSystemConfiguration):
+    system_configuration = MesoscopeSystemConfiguration.from_yaml(file_path=configuration_path)
+    if system_configuration.name != AcquisitionSystems.MESOSCOPE_VR.value:
         message = (
             f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
             f"belongs to the {system_configuration.name} data acquisition system. Use the 'sle configure system' CLI "
-            f"command to reconfigure the host-machine to belong the Mesoscope-VR data acquisition system."
+            f"command to reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
         )
-        console.error(message, error=TypeError)
+        console.error(message=message, error=TypeError)
     return system_configuration
-
-
-class MesoscopeVRStates(IntEnum):
-    """Defines the set of codes used by the Mesoscope-VR data acquisition system to communicate its runtime state."""
-
-    IDLE = 0
-    """The system is currently not conducting a data acquisition session."""
-    REST = 1
-    """The system is conducting the 'rest' period of an experiment session."""
-    RUN = 2
-    """The system is conducting the 'run' period of an experiment session."""
-    LICK_TRAINING = 3
-    """The system is conducting the lick training session."""
-    RUN_TRAINING = 4
-    """The system is conducting the run training session."""
-
-    @classmethod
-    def to_dict(cls) -> dict[str, int]:
-        """Converts the instance's data to a dictionary mapping, replacing underscores with spaces."""
-        return {member.name.lower().replace("_", " "): member.value for member in cls}
-
-
-mesoscope_vr_sessions: tuple[str, str, str, str] = (
-    SessionTypes.LICK_TRAINING,
-    SessionTypes.RUN_TRAINING,
-    SessionTypes.MESOSCOPE_EXPERIMENT,
-    SessionTypes.WINDOW_CHECKING,
-)
-"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
 
 
 class MesoscopeData:
@@ -419,6 +421,8 @@ class MesoscopeData:
     session's data.
 
     Args:
+        system_configuration: The MesoscopeSystemConfiguration instance whose filesystem settings define the resolved
+            directory layout.
         session_data: The SessionData instance that defines the processed data acquisition session.
 
     Attributes:
@@ -431,23 +435,23 @@ class MesoscopeData:
     """
 
     def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
-        # Unpacks session path nodes from the SessionData instance
+        # Unpacks session path nodes from the SessionData instance.
         project = session_data.project_name
         animal = session_data.animal_id
         session = session_data.session_name
 
-        # VRPC persistent data
-        self.vrpc_data = _VRPCPersistentData(
+        # Resolves the VRPC persistent data layout.
+        self.vrpc_data: _VRPCPersistentData = _VRPCPersistentData(
             session_type=session_data.session_type,
             persistent_data_path=system_configuration.filesystem.root_directory.joinpath(
                 project, animal, "persistent_data"
             ),
         )
 
-        # ScanImagePC mesoscope data
-        self.scanimagepc_data = _ScanImagePCData(
+        # Resolves the ScanImagePC mesoscope data layout.
+        self.scanimagepc_data: _ScanImagePCData = _ScanImagePCData(
             session=session,
-            meso_data_path=system_configuration.filesystem.mesoscope_directory,
+            mesoscope_root_path=system_configuration.filesystem.mesoscope_directory,
             persistent_data_path=system_configuration.filesystem.mesoscope_directory.joinpath(
                 project, animal, "persistent_data"
             ),
@@ -469,11 +473,18 @@ class MesoscopeData:
                     name=destination_name, session_path=root_directory.joinpath(project, animal, session)
                 )
             )
-        self.destinations = StorageDestinations(destinations=tuple(resolved_destinations))
+        self.destinations: StorageDestinations = StorageDestinations(destinations=tuple(resolved_destinations))
         self.unconfigured_destinations: tuple[str, ...] = tuple(unconfigured_destinations)
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the MesoscopeData instance."""
+        return (
+            f"MesoscopeData(destinations={self.destinations}, "
+            f"unconfigured_destinations={self.unconfigured_destinations})"
+        )
 
-@dataclass()
+
+@dataclass(slots=True)
 class _VRPCPersistentData:
     """Defines the layout of the VRPC's 'persistent_data' directory, used to cache animal-specific runtime parameters
     between data acquisition sessions.
@@ -513,27 +524,27 @@ class _VRPCPersistentData:
         elif self.session_type == SessionTypes.WINDOW_CHECKING:
             self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_descriptor.yaml")
 
-        else:  # Raises an error for unsupported session types
+        else:  # Raises an error for unsupported session types.
             message = (
                 f"Unsupported session type '{self.session_type}' encountered when resolving the filesystem layout for "
                 f"the Mesoscope-VR data acquisition system. Currently, only the following data acquisition session "
-                f"types are supported: {','.join(mesoscope_vr_sessions)}."
+                f"types are supported: {','.join(MESOSCOPE_VR_SESSIONS)}."
             )
-            console.error(message, error=ValueError)
+            console.error(message=message, error=ValueError)
 
-        # Ensures that the target persistent_data directory exists
+        # Ensures that the target persistent_data directory exists.
         ensure_directory_exists(self.persistent_data_path)
 
 
-@dataclass()
+@dataclass(slots=True)
 class _ScanImagePCData:
-    """Defines the layout of the ScanImagePC's 'meso_data' directory used to aggregate all Mesoscope-acquired data
-    during a data acquisition session's runtime.
+    """Defines the layout of the ScanImagePC's Mesoscope data root directory (the configured mesoscope_directory) used
+    to aggregate all Mesoscope-acquired data during a data acquisition session's runtime.
     """
 
     session: str
     """The unique identifier of the session for which this instance was initialized."""
-    meso_data_path: Path
+    mesoscope_root_path: Path
     """The path to the root ScanImagePC data-output directory."""
     persistent_data_path: Path
     """The path to the project- and animal-specific directory that stores the ScanImagePC (Mesoscope) runtime parameters
@@ -561,11 +572,11 @@ class _ScanImagePCData:
         self,
     ) -> None:
         """Resolves the managed directory layout, creating any missing directory components."""
-        # Resolves additional paths using the input root paths
+        # Resolves additional paths using the input root paths.
         self.motion_estimator_path = self.persistent_data_path.joinpath("MotionEstimator.me")
         self.roi_path = self.persistent_data_path.joinpath("fov.roi")
-        self.session_specific_path = self.meso_data_path.joinpath(self.session)
-        self.mesoscope_data_path = self.meso_data_path.joinpath("mesoscope_data")
+        self.session_specific_path = self.mesoscope_root_path.joinpath(self.session)
+        self.mesoscope_data_path = self.mesoscope_root_path.joinpath("mesoscope_data")
         self.kinase_path = self.mesoscope_data_path.joinpath("kinase.bin")
         self.phosphatase_path = self.mesoscope_data_path.joinpath("phosphatase.bin")
 

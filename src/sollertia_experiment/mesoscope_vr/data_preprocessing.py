@@ -30,7 +30,7 @@ from sollertia_shared_assets import (
 )
 from ataraxis_data_structures import delete_directory, transfer_directory
 
-from .system import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
+from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
 from ..cross_system import (
     WaterLog,
     push_session_data,
@@ -496,10 +496,11 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     surgical intervention record to the session's data directory as the surgery_data.yaml file.
 
     Notes:
-        Every Google Sheets interaction in this function is optional. If no Google service account credentials are
-        configured for the host-machine, the function skips all Google Sheets processing with a warning. If a specific
-        Google Sheet is not configured in the system configuration, the function skips only the processing that depends
-        on that sheet with a warning. This allows operating systems that do not use some or all of the Google Sheets.
+        Google Sheets processing is optional and gated on the configured sheet identifiers. If neither sheet identifier
+        is set, the function skips all Google Sheets processing with a warning and does not require Google service
+        account credentials. If at least one sheet identifier is set, the host-machine must provide valid credentials,
+        and a missing or invalid credentials file aborts preprocessing. When credentials are available, a sheet whose
+        identifier is unset is skipped individually with a warning.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -508,19 +509,23 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
 
     Raises:
         ValueError: If the session_type attribute of the input SessionData instance is not one of the supported options.
+        FileNotFoundError: If at least one Google Sheet is configured for the host-machine, but the Google service
+            account credentials are not configured or the configured credentials file does not exist.
     """
-    # Resolves the path to the Google service account credentials. If no credentials are configured for the
-    # host-machine, gracefully skips all Google Sheets processing instead of aborting the preprocessing pipeline.
-    try:
-        credentials_path = get_google_credentials_path()
-    except FileNotFoundError:
+    # Skips all Google Sheets processing without requiring credentials when neither Google Sheet is configured for the
+    # host-machine. This supports systems that do not use the Google Sheets integration at all.
+    if not sheets_data.surgery_sheet_id and not sheets_data.water_log_sheet_id:
         message = (
-            f"No Google service account credentials are configured for the host-machine. Skipping all Google Sheets "
-            f"processing (surgery data snapshot and water restriction log update) for the session "
-            f"{session_data.session_name}."
+            f"No Google Sheets are configured for the host-machine. Skipping all Google Sheets processing (surgery "
+            f"data snapshot and water restriction log update) for the session {session_data.session_name}."
         )
         console.echo(message=message, level=LogLevel.WARNING)
         return
+
+    # At least one Google Sheet is configured, so the host-machine is expected to provide valid Google service account
+    # credentials. Resolving the path raises a FileNotFoundError if the credentials are missing or invalid, aborting
+    # preprocessing.
+    credentials_path = get_google_credentials_path()
 
     # Resolves the animal's unique identifier code and loads the session's descriptor file based on the session's type.
     animal_id = int(session_data.animal_id)
@@ -540,7 +545,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         message = (
             f"Unable to extract the water restriction data from the {session_data.session_name} session's descriptor "
             f"file, as the session's type {session_type} is not one of the valid Mesoscope-VR sessions: "
-            f"{', '.join(mesoscope_vr_sessions)}."
+            f"{', '.join(MESOSCOPE_VR_SESSIONS)}."
         )
         console.error(message, error=ValueError)
 
