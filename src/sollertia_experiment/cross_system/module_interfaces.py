@@ -113,7 +113,6 @@ class EncoderInterface(ModuleInterface):
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
         self._reset_encoder: np.uint8 = np.uint8(2)
 
@@ -186,7 +185,7 @@ class EncoderInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -288,7 +287,6 @@ class LickInterface(ModuleInterface):
         # the zero value.
         self._previous_readout_zero: bool = False
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
@@ -331,10 +329,7 @@ class LickInterface(ModuleInterface):
         # the last zero-value, classifies the current sensor's state as a lick event and increments the shared memory
         # counter.
         if detected_voltage >= self._lick_threshold and self._previous_readout_zero:
-            # Increments the shared lick counter
             self._lick_tracker[0] += 1
-
-            # Disables further reports until the sensor sends a zero-value again
             self._previous_readout_zero = False
 
     def set_parameters(
@@ -362,7 +357,7 @@ class LickInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -436,7 +431,6 @@ class TorqueInterface(ModuleInterface):
             decimals=8,
         )
 
-        # Statically computes command code objects
         self._check_state: np.uint8 = np.uint8(1)
 
         # Tracks the current sensor monitoring status
@@ -492,7 +486,7 @@ class TorqueInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -552,7 +546,6 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         # Note, commands codes 1 through 3 are reserved for commands that output TTL signals. This module's
         # functionality is currently NOT used by the Mesoscope-VR system, so these command codes are not stored here to
         # avoid unnecessary clutter.
@@ -598,7 +591,7 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
             averaging_pool_size: The number of sensor readouts to average together when checking the incoming TTL
                 signal state.
         """
-        # Since the module is currently not used to deliver TTL pulses statically sets the pulse duration parameter
+        # Since the module is currently not used to deliver TTL pulses, statically sets the pulse duration parameter
         # to zero.
         self.send_parameters(parameter_data=(_ZERO_UINT32, averaging_pool_size))
 
@@ -609,7 +602,7 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
             state: Determines whether to start or stop monitoring the managed sensor's state.
         """
         # If the current monitoring state matches the desired state, aborts the runtime early.
-        if state == self._monitoring:
+        if state is self._monitoring:
             return
 
         # Enables sensor monitoring
@@ -677,7 +670,6 @@ class BrakeInterface(ModuleInterface):
             decimals=8,
         )
 
-        # Statically computes command code objects
         self._engage: np.uint8 = np.uint8(1)
         self._disengage: np.uint8 = np.uint8(2)
         self._pulse: np.uint8 = np.uint8(4)
@@ -705,10 +697,10 @@ class BrakeInterface(ModuleInterface):
         """Sets the brake to the desired state.
 
         Args:
-            state: The desired state of the brake. True means the brake is engaged; False means the brake is disengaged.
+            state: Determines whether to engage the brake.
         """
         # If the requested state matches the current brake's state, aborts the runtime early.
-        if state == self._enabled:
+        if state is self._enabled:
             return
 
         self.send_command(
@@ -818,7 +810,6 @@ class WaterValveInterface(ModuleInterface):
             exists_ok=True,
         )
 
-        # Statically computes command code objects
         self._reward: np.uint8 = np.uint8(1)
         self._open: np.uint8 = np.uint8(2)
         self._close: np.uint8 = np.uint8(3)
@@ -864,7 +855,7 @@ class WaterValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
-            self._valve_tracker[2] = 1  # Valve is now open
+            self._valve_tracker[2] = 1
             self._cycle_timer.reset()  # type: ignore[union-attr]
 
         elif message.event == _valve_closed_code and self._previous_module_state:
@@ -872,7 +863,7 @@ class WaterValveInterface(ModuleInterface):
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
             self._previous_module_state = False
-            self._valve_tracker[2] = 0  # Valve is now closed
+            self._valve_tracker[2] = 0
             open_duration = self._cycle_timer.elapsed  # type: ignore[union-attr]
 
             # Accumulates delivered water volumes into the tracker.
@@ -888,10 +879,10 @@ class WaterValveInterface(ModuleInterface):
         """Sets the managed valve to the desired state.
 
         Args:
-            state: The desired state of the valve. True means the valve is open; False means the valve is closed.
+            state: Determines whether to open the valve.
         """
         # If the valve is already in the desired state, aborts the runtime early.
-        if state == self._configured_valve_state:
+        if state is self._configured_valve_state:
             return
 
         self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -1070,7 +1061,6 @@ class ScreenInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Statically computes command code objects
         self._toggle: np.uint8 = np.uint8(1)
 
         # Tracks the state of the managed screens
@@ -1104,7 +1094,7 @@ class ScreenInterface(ModuleInterface):
                 powered off.
         """
         # Ends the runtime early if the desired state matches the current screen power state.
-        if state == self._enabled:
+        if state is self._enabled:
             return
 
         self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -1147,7 +1137,6 @@ class GasPuffValveInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Statically computes command code objects
         self._pulse: np.uint8 = np.uint8(1)
         self._open: np.uint8 = np.uint8(2)
         self._close: np.uint8 = np.uint8(3)
@@ -1195,22 +1184,22 @@ class GasPuffValveInterface(ModuleInterface):
         if message.event == _valve_open_code and not self._previous_module_state:
             # Tracks valve open transitions.
             self._previous_module_state = True
-            self._puff_tracker[1] = 1  # Valve is now open
+            self._puff_tracker[1] = 1
 
         elif message.event == _valve_closed_code and self._previous_module_state:
             # Each time the valve transitions to a closed state, increments the puff count tracker.
             self._previous_module_state = False
-            self._puff_tracker[1] = 0  # Valve is now closed
-            self._puff_tracker[0] += 1  # Increment puff count
+            self._puff_tracker[1] = 0
+            self._puff_tracker[0] += 1
 
     def set_state(self, *, state: bool) -> None:
         """Sets the managed valve to the desired state.
 
         Args:
-            state: The desired state of the valve. True means the valve is open; False means the valve is closed.
+            state: Determines whether to open the gas-puff valve.
         """
         # If the valve is already in the desired state, aborts the runtime early.
-        if state == self._configured_state:
+        if state is self._configured_state:
             return
 
         self.send_command(command=self._open if state else self._close, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
@@ -1249,9 +1238,11 @@ class GasPuffValveInterface(ModuleInterface):
         return int(self._puff_tracker[0])
 
 
-def _power_law_model(pulse_duration: float | NDArray[np.float64], a: float, b: float, /) -> float | NDArray[np.float64]:
+def _power_law_model(
+    pulse_duration: float | NDArray[np.float64], scale_coefficient: float, nonlinearity_exponent: float, /
+) -> float | NDArray[np.float64]:
     """Defines the power-law model used during valve calibration.
 
     This model was empirically found to have the best fit for the water reward valve's performance data.
     """
-    return a * np.power(pulse_duration, b)
+    return scale_coefficient * np.power(pulse_duration, nonlinearity_exponent)

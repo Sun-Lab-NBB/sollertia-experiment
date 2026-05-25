@@ -434,7 +434,7 @@ class CRCCalculator:
     """
 
     def __init__(self) -> None:
-        # Specializes and instantiates the CRC checksum calculator
+        # Specializes and instantiates the CRC checksum calculator.
         configuration = Configuration(
             width=32,
             polynomial=0x000000AF,
@@ -557,14 +557,12 @@ class ZaberAxis:
         """
         # Ensures that at least 5 milliseconds have elapsed since the previous interaction with the motor's hardware.
         # This design is chosen over delay() to allow instantaneous escapes if this method is called when the delay
-        # has already expired
+        # has already expired.
         while self._timer.elapsed < self._COMMUNICATION_DELAY_MS:
             pass
 
-        # Executes the requested method
         result = method(*args, **kwargs)
 
-        # Resets the padding timer and returns the call result
         self._timer.reset()
         return result
 
@@ -645,7 +643,6 @@ class ZaberAxis:
         if position < self._minimum_limit or position > self._maximum_limit:
             return
 
-        # Initiates the movement of the motor
         self._padded_method_call(method=self._motor.move_absolute, position=position, wait_until_idle=False)
 
     def stop(self) -> None:
@@ -800,7 +797,6 @@ class ZaberDevice:
 
     def shutdown(self) -> None:
         """Gracefully shuts down the motor (axis) managed by this controller."""
-        # Shuts down the managed axis (motor).
         self._axis.shutdown()
 
         # Sets the shutdown flag to 1 to indicate that the shutdown procedure has been performed.
@@ -866,7 +862,6 @@ class ZaberConnection:
             for device in self._devices:
                 device.shutdown()
 
-            # Closes the connection
             self._connection.close()
 
     def connect(self) -> None:
@@ -897,7 +892,6 @@ class ZaberConnection:
         if not self.is_connected:
             return
 
-        # Loops over each connected device and triggers its shutdown procedure
         for device in self._devices:
             device.shutdown()
 
@@ -910,7 +904,6 @@ class ZaberConnection:
     @property
     def is_connected(self) -> bool:
         """Returns True if the class has established connection with the managed serial port."""
-        # Actualizes the connection status and returns it to the caller
         if self._connection is not None and self._is_connected:
             # noinspection PyBroadException
             try:
@@ -921,7 +914,7 @@ class ZaberConnection:
                 # Otherwise, the connection is broken
                 self._is_connected = False
             else:
-                self._is_connected = True  # If device check succeeded the connection is active
+                self._is_connected = True  # If device check succeeded the connection is active.
                 return True
         return self._is_connected
 
@@ -937,7 +930,7 @@ class ZaberConnection:
             A ZaberDevice instance that interfaces with the specified controller.
 
         Raises:
-            ConnectionError : If the instance is not connected to the managed serial port.
+            ConnectionError: If the instance is not connected to the managed serial port.
         """
         # Prevents retrieving the device data if the connection has not been established.
         if not self.is_connected:
@@ -1016,7 +1009,6 @@ def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
     """
     table_data = []
 
-    # Formats the port scanning data as a table
     for port_info in port_info_list:
         if not port_info.has_devices:
             table_data.append([port_info.port_name, "No Devices", "", "", "", "", ""])
@@ -1035,9 +1027,8 @@ def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
                     device_row = [""] * 5
         table_data.append([""] * 7)  # Adds an empty row to separate port sections
 
-    # Formats the table and returns it to the caller
     return tabulate(
-        table_data,
+        tabular_data=table_data,
         headers=["Port", "Device Num", "ID", "Label", "Name", "Axis ID", "Axis Label"],
         tablefmt="grid",
         stralign="center",

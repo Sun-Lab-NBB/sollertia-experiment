@@ -64,7 +64,6 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
     Raises:
         RuntimeError: If the target log directory contains both unprocessed and processed log entries.
     """
-    # Resolves the path to the temporary log directory generated during runtime.
     log_directory = session_data.raw_data_path.joinpath(_LOG_DIRECTORY_NAME)
 
     if not log_directory.exists():
@@ -76,7 +75,6 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
     if not unarchived_entries:
         return
 
-    # If both processed and unprocessed log files exist in the same directory, aborts with an error.
     if archives and unarchived_entries:
         message = (
             f"The temporary log directory for the session {session_data.session_name} contains both unprocessed .npy "
@@ -86,8 +84,6 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
         )
         console.error(message=message, error=RuntimeError)
 
-    # If the input directory contains unarchived .npy log entries and no archived log entries, archives all log
-    # entries in the directory.
     assemble_log_archives(
         log_directory=log_directory,
         remove_sources=True,
@@ -213,7 +209,6 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
     source = session_data.raw_data_path
     targets = tuple(destination.session_path.joinpath(source.name) for destination in destinations.destinations)
 
-    # Ensures all target directories exist before starting the transfers.
     for target in targets:
         ensure_directory_exists(target)
 
@@ -242,7 +237,7 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         message="All transfers completed successfully. Removing the now-redundant source directory...",
         level=LogLevel.INFO,
     )
-    # Removes the session's directory.
+    # source is the raw_data directory; its parent is the session directory to remove.
     delete_directory(directory_path=source.parent)
 
 
@@ -262,7 +257,6 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
     Returns:
         True if the directories were removed, False if the user aborted the deletion.
     """
-    # If confirmation is required, locks the runtime and waits for the user response.
     if require_confirmation:
         message = (
             f"Preparing to remove all data for the session {session_name}. Warning, this process is NOT reversible "
@@ -273,16 +267,13 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         while True:
             answer = input("Enter 'yes' (to proceed) or 'no' (to abort): ")
 
-            # Continues with the deletion.
             if answer.lower() == "yes":
                 break
 
-            # Aborts without deleting.
             if answer.lower() == "no":
                 console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
                 return False
 
-    # Removes all session-specific data directories from all storage locations.
     for candidate in console.track(iterable=candidates, description="Deleting session directories", unit="directory"):
         delete_directory(directory_path=candidate)
 
@@ -326,7 +317,6 @@ def migrate_session_directory(
     ensure_directory_exists(old_session_data_path)
     shutil.copy2(src=new_session_data_path, dst=old_session_data_path)
 
-    # Modifies the SessionData instance for the pulled session to use the new project name.
     session_data = SessionData.load(session_path=local_session_path)
     session_data.project_name = target_project
     session_data.save()

@@ -32,7 +32,7 @@ def get_animal_project(animal_id: str, root_directory: Path) -> tuple[str, ...]:
         contains at least one acquired session for the target animal.
 
     Args:
-        animal_id: The unique identifier of the animal for which to discover the projects that include this animal.
+        animal_id: The unique identifier of the animal whose projects are discovered.
         root_directory: The path to the root directory that stores all project directories managed by the data
             acquisition system.
 

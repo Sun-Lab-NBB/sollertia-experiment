@@ -63,8 +63,8 @@ _REQUIRED_WATER_RESTRICTION_HEADERS: set[str] = {
 
 
 def _convert_date_time_to_timestamp(date: str, time: str) -> int:
-    """Converts the input date and time strings to the number of microseconds elapsed since the UTC epoch onset format
-    used by the Sollertia platform to store timestamps.
+    """Converts the input date and time strings to the microseconds-since-UTC-epoch timestamp format used by the
+    Sollertia platform.
 
     Notes:
         The input date and time are human-entered values expressed in the host machine's local time. They are
@@ -81,7 +81,6 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         ValueError: If date or time inputs are an empty string. If the date or time format does not match any of the
             supported input formats.
     """
-    # Ensures date and time are provided
     if not isinstance(date, str) or not date:
         message = (
             f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
@@ -98,9 +97,8 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         )
         console.error(message=message, error=ValueError)
 
-    # Parses the time object
     try:
-        time_obj = datetime.strptime(time, "%H:%M").time()  # noqa: DTZ007
+        parsed_time = datetime.strptime(time, "%H:%M").time()  # noqa: DTZ007
     except ValueError:
         message = (
             f"Invalid time format encountered when parsing Google Sheet data. Expected the supported time format "
@@ -108,10 +106,9 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         )
         console.error(message=message, error=ValueError)
 
-    # Parses the date object
     for date_format in _SUPPORTED_DATE_FORMATS:
         try:
-            date_obj = datetime.strptime(date, date_format).date()  # noqa: DTZ007
+            parsed_date = datetime.strptime(date, date_format).date()  # noqa: DTZ007
             break
         except ValueError:
             continue
@@ -124,7 +121,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
 
     # Human-entered date and time values use the host machine's local time. Interprets the combined value as local
     # time, then converts it to a UTC microsecond timestamp for internal storage.
-    local_datetime = datetime.combine(date=date_obj, time=time_obj).astimezone()
+    local_datetime = datetime.combine(date=parsed_date, time=parsed_time).astimezone()
     return int(local_datetime.timestamp() * 1_000_000)
 
 
@@ -143,11 +140,9 @@ def _extract_coordinate_value(substring: str) -> float:
     # Finds the coordinate number that precedes the anatomical axis designator (AP, ML, DV) and extracts it as a float.
     match = re.search(r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", substring)
 
-    # If the coordinate value is extracted, returns the extracted value as a float
     if match is not None:
         return float(match.group(1))
 
-    # Otherwise, raises an error
     message = f"Unable to extract the anatomical coordinate value from the input substring {substring}."
     console.error(message=message, error=ValueError)
     # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
@@ -159,7 +154,7 @@ def _parse_stereotactic_coordinates(coordinate_string: str) -> tuple[float, floa
     """Parses the AP, ML, and DV stereotactic coordinates from the input coordinate string.
 
     Notes:
-        This method expects the coordinates to be stored as a string formatted as: "-1.8 AP, 2 ML, .25 DV".
+        This function expects the coordinates to be stored as a string formatted as: "-1.8 AP, 2 ML, .25 DV".
 
     Args:
         coordinate_string: The input string containing the stereotactic coordinates.
@@ -261,14 +256,14 @@ class SurgeryLog:
         # Retrieves all values stored in the first row of the target sheet tab. Each tab represents a particular
         # project. The first row contains the headers for all data columns stored in the sheet.
         # noinspection PyUnresolvedReferences
+        # Extracts the entire first row.
         headers = (
             self._service.spreadsheets()
             .values()
-            .get(spreadsheetId=sheet_id, range=f"'{self._project_name}'!1:1")  # extracts the entire first row
+            .get(spreadsheetId=sheet_id, range=f"'{self._project_name}'!1:1")
             .execute()
         )
 
-        # Converts headers to a list of strings and raises an error if the header list is empty
         header_values = headers.get("values", [[]])[0]
         if not header_values:
             message = (
@@ -278,21 +273,17 @@ class SurgeryLog:
             )
             console.error(message=message, error=ValueError)
 
-        # Creates a dictionary mapping header values to Google Sheet column letters
         self._headers: dict[str, str] = {}
         for index, header in enumerate(header_values):
-            # Converts column index to column letter (0 -> A, 1 -> B, etc.)
             column_letter = _convert_index_to_column_letter(index)
             self._headers[str(header).strip().lower()] = column_letter
 
-        # Checks for missing headers (column names)
         missing_headers = [
             required_header
             for required_header in _REQUIRED_SURGERY_HEADERS
             if required_header.lower() not in self._headers
         ]
 
-        # If any required headers are missing, raises an error with a detailed message
         if missing_headers:
             missing_headers_str = ", ".join(f"'{header}'" for header in sorted(missing_headers))
             message = (
@@ -310,8 +301,9 @@ class SurgeryLog:
             .values()
             .get(
                 spreadsheetId=sheet_id,
-                range=f"{self._project_name}!{id_column}2:{id_column}",  # row 2 onward, row 1 stores headers
-                majorDimension="COLUMNS",  # Gets data in column-major order
+                # Reads row 2 onward in column-major order, since row 1 stores the headers.
+                range=f"{self._project_name}!{id_column}2:{id_column}",
+                majorDimension="COLUMNS",
             )
             .execute()
         )
@@ -365,7 +357,7 @@ class SurgeryLog:
         # Converts the data from dictionary format into a list of strings.
         row_values = row_data.get("values")[0]
 
-        # Replaces empty cells and value placeholders ('n/a'', '--' or '---') with None.
+        # Replaces empty cells and value placeholders ('n/a', '--', or '---') with None.
         row_values = _replace_empty_values(row_values)
 
         # Creates a dictionary mapping headers (column names) to the animal-specific extracted values for these
@@ -427,13 +419,13 @@ class SurgeryLog:
             # This extraction only considers the 'main' column that stores the name of each implant and injection.
             # Such columns do not contain the whitespace separators between multiple words.
             if " " not in key.strip() and ("implant" in key or "injection" in key):
-                # Finds the first occurrence of one or more digits and parses the digits as a number
+                # Parses the first run of digits in the key as the implant or injection number.
                 match = _DIGIT_PATTERN.search(key)
-                if match:
+                if match is not None:
                     number = int(match.group())
                     if "implant" in key:
                         implant_numbers.append(number)
-                    else:  # If the key is not 'implant,' it must be an injection.
+                    else:  # If the key is not 'implant', it must be an injection.
                         injection_numbers.append(number)
 
         # Extracts and packages the data for each implant into an ImplantData class instance. If the processed surgery
@@ -441,8 +433,9 @@ class SurgeryLog:
         # placeholder list being empty or all implant column values being None (empty).
         implants = []
         for number in implant_numbers:
-            base_key = f"implant{number}"  # Precomputes the 'base' implant name, based on the number
-            implant_name: str | None = animal_data.get(base_key)  # Gets the name stored in the 'main' implant column
+            # Builds the 'base' implant name from the number, then reads the name stored in the 'main' implant column.
+            base_key = f"implant{number}"
+            implant_name: str | None = animal_data.get(base_key)
 
             # If the implant name is 'None', the processed subject does not have this implant, despite the
             # header being present. If the name is a string, it processes the rest of the data
@@ -506,14 +499,11 @@ class SurgeryLog:
             quality: The integer value that reflects the quality of the animal's surgical intervention for scientific
                 data acquisition on a scale from 0 (unusable) to 3 (high-grade scientific publication).
         """
-        # Finds the column for "surgery quality"
         quality_column = self._get_column_id("surgery quality")
 
-        # Finds the index of the target animal in the ID value tuple
         animal_index = self._animals.index(str(self._animal_id).zfill(5))
         row_number = animal_index + 2  # +2 to account for header row and 0-indexing
 
-        # Writes the quality value to the appropriate cell
         cell_range = f"{quality_column}{row_number}"
         body = {"values": [[quality]]}
         # noinspection PyUnresolvedReferences
@@ -526,10 +516,10 @@ class SurgeryLog:
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
-        col_index = 0
+        column_index = 0
         for char in quality_column.upper():  # type: ignore[union-attr]
-            col_index = col_index * 26 + (ord(char) - ord("A") + 1)
-        col_index -= 1  # Convert to 0-based index
+            column_index = column_index * 26 + (ord(char) - ord("A") + 1)
+        column_index -= 1  # Convert to 0-based index
         row_index_zero_based = row_number - 1
 
         # Gets the sheet ID for the project tab
@@ -554,8 +544,8 @@ class SurgeryLog:
                             "sheetId": sheet_id,
                             "startRowIndex": row_index_zero_based,
                             "endRowIndex": row_index_zero_based + 1,
-                            "startColumnIndex": col_index,
-                            "endColumnIndex": col_index + 1,
+                            "startColumnIndex": column_index,
+                            "endColumnIndex": column_index + 1,
                         },
                         "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}},
                         "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment",
@@ -602,7 +592,6 @@ class WaterLog:
             water restriction and animal interaction log.
         sheet_id: The unique identifier of the Google Sheet that contains the water restriction and animal interaction
             data.
-
 
     Attributes:
         _sheet_id: The unique identifier of the water restriction and animal interaction log Google Sheet.
@@ -688,14 +677,14 @@ class WaterLog:
         # animal ID. Note: this is in contrast to the Surgery data log, where the headers are stored in the first sheet
         # row.
         # noinspection PyUnresolvedReferences
+        # Extracts the entire second row.
         headers = (
             self._service.spreadsheets()
             .values()
-            .get(spreadsheetId=sheet_id, range=f"'{self._animal_id}'!2:2")  # extracts the entire second row
+            .get(spreadsheetId=sheet_id, range=f"'{self._animal_id}'!2:2")
             .execute()
         )
 
-        # Converts headers to a list of strings and raises an error if the header list is empty
         header_values = headers.get("values", [[]])[0]
         if not header_values:
             message = (
@@ -705,21 +694,17 @@ class WaterLog:
             )
             console.error(message=message, error=ValueError)
 
-        # Creates a dictionary mapping header values to Google Sheet column letters
         self._headers: dict[str, str] = {}
         for index, header in enumerate(header_values):
-            # Converts column index to column letter (0 -> A, 1 -> B, etc.)
             column_letter = _convert_index_to_column_letter(index)
             self._headers[str(header).strip().lower()] = column_letter
 
-        # Checks for missing headers (column names)
         missing_headers = [
             required_header
             for required_header in _REQUIRED_WATER_RESTRICTION_HEADERS
             if required_header.lower() not in self._headers
         ]
 
-        # If any required headers are missing, raises an error
         if missing_headers:
             missing_headers_str = ", ".join(f"'{header}'" for header in sorted(missing_headers))
             message = (
@@ -801,9 +786,7 @@ class WaterLog:
         )
         date_values = date_data.get("values", [])
 
-        # Finds the row with the target date
         for index, date_cell in enumerate(date_values):
-            # Checks if the cell has a value matching the target date
             if date_cell and date_cell[0] == target_date:
                 # Adds 3 to account for 0-indexing and the fact we started from row 3
                 return index + 3
@@ -825,10 +808,7 @@ class WaterLog:
             row_index: The row index (1-based) to write to.
             value: The value to write.
         """
-        # Gets the column letter for the specified column name
         column_letter = self._headers[column_name.lower()]
-
-        # Defines the cell range based on the column letter and row index
         cell_range = f"{column_letter}{row_index}"
 
         # Formats value based on its type and column
@@ -836,7 +816,6 @@ class WaterLog:
         if column_name.lower() == "weight (g)" or column_name.lower() == "water given (ml)":
             formatted_value = round(float(value), ndigits=1)
 
-        # Writes the value to the target cell
         body = {"values": [[formatted_value]]}
         # noinspection PyUnresolvedReferences
         self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
@@ -848,10 +827,10 @@ class WaterLog:
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
-        col_index = 0
+        column_index = 0
         for char in column_letter.upper():
-            col_index = col_index * 26 + (ord(char) - ord("A") + 1)
-        col_index -= 1  # Converts to 0-based index
+            column_index = column_index * 26 + (ord(char) - ord("A") + 1)
+        column_index -= 1  # Converts to 0-based index
         row_index_zero_based = row_index - 1
 
         # Applies formatting to the newly written value using the cached sheet ID
@@ -862,8 +841,8 @@ class WaterLog:
                         "sheetId": self._animal_tab_id,
                         "startRowIndex": row_index_zero_based,
                         "endRowIndex": row_index_zero_based + 1,
-                        "startColumnIndex": col_index,
-                        "endColumnIndex": col_index + 1,
+                        "startColumnIndex": column_index,
+                        "endColumnIndex": column_index + 1,
                     },
                     "cell": {"userEnteredFormat": {"horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE"}},
                     "fields": "userEnteredFormat.horizontalAlignment,userEnteredFormat.verticalAlignment",
