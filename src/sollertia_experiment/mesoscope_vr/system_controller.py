@@ -29,7 +29,7 @@ from ..vr_task import (
     load_vr_task_template,
 )
 from .runtime_ui import RuntimeControlUI
-from .visualizers import VisualizerMode, BehaviorVisualizer
+from .visualizer import VisualizerMode, BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
 

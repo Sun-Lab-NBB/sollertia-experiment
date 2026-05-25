@@ -1,5 +1,4 @@
-"""Provides the assets for acquiring and preprocessing data via the Mesoscope-VR data acquisition system.
-"""
+"""Provides the assets for acquiring and preprocessing data via the Mesoscope-VR data acquisition system."""
 
 from .system import (
     ZaberPositions,

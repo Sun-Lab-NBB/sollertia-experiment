@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
 
-from .visualizers import VisualizerMode
+from .visualizer import VisualizerMode
 
 
 class _DataArrayIndex(IntEnum):

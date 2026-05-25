@@ -1,4 +1,4 @@
-"""Provides a graphical user interface for Mesoscope-VR system maintenance operations."""
+"""Provides the graphical user interface used by the Mesoscope-VR system to facilitate system maintenance operations."""
 
 import sys
 from enum import IntEnum
