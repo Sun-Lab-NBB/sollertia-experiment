@@ -39,7 +39,7 @@ _FONTDICT_TITLE: dict[str, str | int] = {"family": "Arial", "weight": "normal", 
 _FONTDICT_LEGEND: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 14}
 """The font properties used for legend and annotation text."""
 
-_LINE_STYLE_DICT: dict[str, str] = {"solid": "-", "dashed": "--", "dotdashed": "_.", "dotted": ":"}
+_LINE_STYLE_DICT: dict[str, str] = {"solid": "-", "dashed": "--", "dotdashed": "-.", "dotted": ":"}
 """Maps colloquial line style names to pyplot linestyle string-codes."""
 _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
     "green": (0.000, 0.639, 0.408),
@@ -57,6 +57,16 @@ _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
 
 _TRIAL_HISTORY_SIZE: int = 20
 """The number of trials to display in the trial performance panel."""
+
+_SPEED_AXIS_YLIM: tuple[float, float] = (-2.0, 42.0)
+"""The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
+_BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
+"""The lower and upper Y-axis bounds for the binary state plots (lick, valve, and air puff)."""
+
+_TRIAL_RECTANGLE_WIDTH: float = 0.35
+"""The width, in trial-axis data units, of each trial outcome rectangle in the trial performance panel."""
+_TRIAL_RECTANGLE_OFFSET: float = _TRIAL_RECTANGLE_WIDTH / 2
+"""The horizontal offset used to center each trial rectangle on its integer trial position."""
 
 
 class VisualizerMode(IntEnum):
@@ -314,14 +324,14 @@ class BehaviorVisualizer:
                 self._trial_axis = self._figure.add_subplot(grid_spec[4])
 
         self._lick_axis.set_title(label="Lick Sensor State", fontdict=_FONTDICT_TITLE)
-        self._lick_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._lick_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
         self._lick_axis.set_xlim(left=-self._time_window, right=0)
         self._lick_axis.set_xlabel(xlabel="")
         self._lick_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
         self._lick_axis.yaxis.set_major_formatter(FixedFormatter(seq=["No Lick", "Lick"]))
 
         self._valve_axis.set_title(label="Reward Valve State", fontdict=_FONTDICT_TITLE)
-        self._valve_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._valve_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
         self._valve_axis.set_xlim(left=-self._time_window, right=0)
         self._valve_axis.set_xlabel(xlabel="")
         self._valve_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
@@ -330,7 +340,7 @@ class BehaviorVisualizer:
         # Configures the air puff axis, which only exists in EXPERIMENT mode with aversive trials.
         if self._puff_axis is not None:
             self._puff_axis.set_title(label="Air Puff Valve State", fontdict=_FONTDICT_TITLE)
-            self._puff_axis.set_ylim(bottom=-0.05, top=1.05)
+            self._puff_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
             self._puff_axis.set_xlim(left=-self._time_window, right=0)
             self._puff_axis.set_xlabel(xlabel="")
             self._puff_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
@@ -339,7 +349,7 @@ class BehaviorVisualizer:
         # Configures the speed axis, which only exists in RUN_TRAINING and EXPERIMENT modes.
         if self._speed_axis is not None:
             self._speed_axis.set_title(label="Average Running Speed", fontdict=_FONTDICT_TITLE)
-            self._speed_axis.set_ylim(bottom=-2, top=42)
+            self._speed_axis.set_ylim(bottom=_SPEED_AXIS_YLIM[0], top=_SPEED_AXIS_YLIM[1])
             self._speed_axis.set_xlim(left=-self._time_window, right=0)
             self._speed_axis.set_ylabel(ylabel="Speed (cm / s)", fontdict=_FONTDICT_AXIS_LABEL)
             self._speed_axis.yaxis.labelpad = 10
@@ -532,53 +542,6 @@ class BehaviorVisualizer:
         # redraws the data lines on top.
         self._blit_manager.refresh()  # type: ignore[union-attr]
 
-    def close(self) -> None:
-        """Closes the visualized figure and cleans up the resources used by the instance during runtime."""
-        if self._is_open and self._figure is not None:
-            plt.close(self._figure)
-            self._is_open = False
-
-    def _sample_data(self) -> None:
-        """Updates the visualization data arrays with the data accumulated since the last visualization update."""
-        # Rolls arrays by one position to the left, so the first element becomes the last.
-        self._valve_data = np.roll(a=self._valve_data, shift=-1)
-        self._lick_data = np.roll(a=self._lick_data, shift=-1)
-
-        # Replaces the last element (previously the first or 'oldest' value) with new data.
-
-        # If the runtime has detected at least one lick event since the last visualizer update, emits a lick tick.
-        if self._lick_event:
-            self._lick_data[-1] = self._event_tick_true
-        else:
-            self._lick_data[-1] = self._event_tick_false
-        self._lick_event = False  # Resets the lick event flag.
-
-        # If the runtime has detected at least one water reward (valve) event since the last visualizer update, emits a
-        # valve activation tick.
-        if self._valve_event:
-            self._valve_data[-1] = self._event_tick_true
-        else:
-            self._valve_data[-1] = self._event_tick_false
-        self._valve_event = False  # Resets the valve event flag.
-
-        # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
-        # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).
-        if self._puff_axis is not None:
-            self._puff_data = np.roll(a=self._puff_data, shift=-1)
-            if self._puff_event:
-                self._puff_data[-1] = self._event_tick_true
-            else:
-                self._puff_data[-1] = self._event_tick_false
-            self._puff_event = False  # Resets the puff event flag.
-
-        # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
-        # update cycle the last speed point is overwritten with the previous speed point. This generates a
-        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
-        # exists (not in LICK_TRAINING mode).
-        if self._speed_axis is not None:
-            self._speed_data = np.roll(a=self._speed_data, shift=-1)
-            self._speed_data[-1] = self._running_speed
-
     def add_lick_event(self) -> None:
         """Instructs the visualizer to render a new lick event during the next update cycle."""
         self._lick_event = True
@@ -594,98 +557,6 @@ class BehaviorVisualizer:
     def update_running_speed(self, running_speed: np.float64) -> None:
         """Instructs the visualizer to render the provided running speed datapoint during the next update cycle."""
         self._running_speed = running_speed
-
-    def _setup_trial_axis(self) -> None:
-        """Initializes the trial performance panel with empty rectangle patches.
-
-        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
-        types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
-        with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
-        a single-row layout is used.
-        """
-        if self._trial_axis is None:
-            return
-
-        self._trial_axis.set_title(label="Trial Performance", fontdict=_FONTDICT_TITLE)
-        self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
-        self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_FONTDICT_AXIS_LABEL)
-        self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
-        self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
-
-        # Configures the Y-axis layout based on which trial types are enabled.
-        if self._has_reinforcing_trials and self._has_aversive_trials:
-            # Two-row layout: reinforcing on bottom, aversive on top.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.25, 0.75])
-            self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
-            self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
-            reinforcing_y = 0.05
-            aversive_y = 0.55
-            rectangle_height = 0.4
-        elif self._has_reinforcing_trials:
-            # Single-row layout: reinforcing only.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.45])
-            self._trial_axis.set_yticklabels(labels=["Reinforcing"])
-            reinforcing_y = 0.15
-            aversive_y = 0.0  # Not used.
-            rectangle_height = 0.6
-        else:
-            # Single-row layout: aversive only.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.45])
-            self._trial_axis.set_yticklabels(labels=["Aversive"])
-            reinforcing_y = 0.0  # Not used.
-            aversive_y = 0.15
-            rectangle_height = 0.6
-
-        # Adds color legend for trial outcomes.
-        legend_elements = [
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="gray"), label="Guided"),
-        ]
-        self._trial_axis.legend(
-            handles=legend_elements,
-            loc="lower right",
-            ncol=3,
-            fontsize=10,
-            framealpha=0.9,
-            edgecolor="none",
-            bbox_to_anchor=(1.0, -0.02),
-        )
-
-        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
-        self._reinforcing_rectangles = []
-        if self._has_reinforcing_trials:
-            for index in range(_TRIAL_HISTORY_SIZE):
-                rectangle = Rectangle(
-                    xy=(index + 1 - 0.175, reinforcing_y),
-                    width=0.35,
-                    height=rectangle_height,
-                    facecolor=_plt_palette(color="gray"),
-                    edgecolor="none",
-                    alpha=0.3,
-                    visible=False,
-                )
-                self._trial_axis.add_patch(rectangle)
-                self._reinforcing_rectangles.append(rectangle)
-
-        # Creates the aversive trial rectangles if aversive trials are enabled.
-        self._aversive_rectangles = []
-        if self._has_aversive_trials:
-            for index in range(_TRIAL_HISTORY_SIZE):
-                rectangle = Rectangle(
-                    xy=(index + 1 - 0.175, aversive_y),
-                    width=0.35,
-                    height=rectangle_height,
-                    facecolor=_plt_palette(color="gray"),
-                    edgecolor="none",
-                    alpha=0.3,
-                    visible=False,
-                )
-                self._trial_axis.add_patch(rectangle)
-                self._aversive_rectangles.append(rectangle)
 
     def add_trial_outcome(self, *, is_aversive: bool, succeeded: bool, was_guided: bool) -> None:
         """Records a trial outcome and updates the trial performance visualization.
@@ -758,6 +629,145 @@ class BehaviorVisualizer:
         # Rebuilds the cached background so the updated trial rectangles and tick labels persist
         # across subsequent blitted updates.
         self._blit_manager.refresh()  # type: ignore[union-attr]
+
+    def close(self) -> None:
+        """Closes the visualized figure and cleans up the resources used by the instance during runtime."""
+        if self._is_open and self._figure is not None:
+            plt.close(self._figure)
+            self._is_open = False
+
+    def _sample_data(self) -> None:
+        """Updates the visualization data arrays with the data accumulated since the last visualization update."""
+        # Rolls arrays by one position to the left, so the first element becomes the last.
+        self._valve_data = np.roll(a=self._valve_data, shift=-1)
+        self._lick_data = np.roll(a=self._lick_data, shift=-1)
+
+        # Replaces the last element (previously the first or 'oldest' value) with new data.
+
+        # If the runtime has detected at least one lick event since the last visualizer update, emits a lick tick.
+        if self._lick_event:
+            self._lick_data[-1] = self._event_tick_true
+        else:
+            self._lick_data[-1] = self._event_tick_false
+        self._lick_event = False  # Resets the lick event flag.
+
+        # If the runtime has detected at least one water reward (valve) event since the last visualizer update, emits a
+        # valve activation tick.
+        if self._valve_event:
+            self._valve_data[-1] = self._event_tick_true
+        else:
+            self._valve_data[-1] = self._event_tick_false
+        self._valve_event = False  # Resets the valve event flag.
+
+        # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
+        # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).
+        if self._puff_axis is not None:
+            self._puff_data = np.roll(a=self._puff_data, shift=-1)
+            if self._puff_event:
+                self._puff_data[-1] = self._event_tick_true
+            else:
+                self._puff_data[-1] = self._event_tick_false
+            self._puff_event = False  # Resets the puff event flag.
+
+        # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
+        # update cycle the last speed point is overwritten with the previous speed point. This generates a
+        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
+        # exists (not in LICK_TRAINING mode).
+        if self._speed_axis is not None:
+            self._speed_data = np.roll(a=self._speed_data, shift=-1)
+            self._speed_data[-1] = self._running_speed
+
+    def _setup_trial_axis(self) -> None:
+        """Initializes the trial performance panel with empty rectangle patches.
+
+        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
+        types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
+        with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
+        a single-row layout is used.
+        """
+        if self._trial_axis is None:
+            return
+
+        self._trial_axis.set_title(label="Trial Performance", fontdict=_FONTDICT_TITLE)
+        self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
+        self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_FONTDICT_AXIS_LABEL)
+        self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
+        self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
+
+        # Configures the Y-axis layout based on which trial types are enabled.
+        if self._has_reinforcing_trials and self._has_aversive_trials:
+            # Two-row layout: reinforcing on bottom, aversive on top.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.25, 0.75])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
+            self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
+            reinforcing_y = 0.05
+            aversive_y = 0.55
+            rectangle_height = 0.4
+        elif self._has_reinforcing_trials:
+            # Single-row layout: reinforcing only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing"])
+            reinforcing_y = 0.15
+            aversive_y = 0.0  # Not used.
+            rectangle_height = 0.6
+        else:
+            # Single-row layout: aversive only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Aversive"])
+            reinforcing_y = 0.0  # Not used.
+            aversive_y = 0.15
+            rectangle_height = 0.6
+
+        # Adds color legend for trial outcomes.
+        legend_elements = [
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="gray"), label="Guided"),
+        ]
+        self._trial_axis.legend(
+            handles=legend_elements,
+            loc="lower right",
+            ncol=3,
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="none",
+            bbox_to_anchor=(1.0, -0.02),
+        )
+
+        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
+        self._reinforcing_rectangles = []
+        if self._has_reinforcing_trials:
+            for index in range(_TRIAL_HISTORY_SIZE):
+                rectangle = Rectangle(
+                    xy=(index + 1 - _TRIAL_RECTANGLE_OFFSET, reinforcing_y),
+                    width=_TRIAL_RECTANGLE_WIDTH,
+                    height=rectangle_height,
+                    facecolor=_plt_palette(color="gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rectangle)
+                self._reinforcing_rectangles.append(rectangle)
+
+        # Creates the aversive trial rectangles if aversive trials are enabled.
+        self._aversive_rectangles = []
+        if self._has_aversive_trials:
+            for index in range(_TRIAL_HISTORY_SIZE):
+                rectangle = Rectangle(
+                    xy=(index + 1 - _TRIAL_RECTANGLE_OFFSET, aversive_y),
+                    width=_TRIAL_RECTANGLE_WIDTH,
+                    height=rectangle_height,
+                    facecolor=_plt_palette(color="gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rectangle)
+                self._aversive_rectangles.append(rectangle)
 
     @staticmethod
     def _update_trial_rectangle(rectangles: list[Rectangle], index: int, outcome: np.int8) -> None:
@@ -870,10 +880,6 @@ class _BlitManager:
 
         self._connection_id = canvas.mpl_connect("draw_event", self._on_draw)
 
-    def _on_draw(self, _event: Event) -> None:
-        """Caches the static figure background after each full canvas redraw."""
-        self._background = self._canvas.copy_from_bbox(self._figure.bbox)
-
     def update(self) -> None:
         """Restores the cached background, redraws the data lines on top, and blits the result to the canvas."""
         # Captures the background on the first update if no full redraw has populated it yet.
@@ -890,3 +896,7 @@ class _BlitManager:
         """Rebuilds the cached background after static artists change, then redraws the data lines on top."""
         self._canvas.draw()
         self.update()
+
+    def _on_draw(self, _event: Event) -> None:
+        """Caches the static figure background after each full canvas redraw."""
+        self._background = self._canvas.copy_from_bbox(self._figure.bbox)

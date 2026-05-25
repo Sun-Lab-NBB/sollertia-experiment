@@ -56,7 +56,7 @@ class ZaberMotors:
 
     Attributes:
         _headbar: The ZaberConnection instance that manages the headbar holder motor group.
-        _headbar_z: The ZaberAxis instance that interfaces with the headbar's z-axis motor.
+        _headbar_z: The ZaberAxis instance that interfaces with the headbar's Z-axis motor.
         _headbar_pitch: The ZaberAxis instance that interfaces with the headbar's pitch-axis motor.
         _headbar_roll: The ZaberAxis instance that interfaces with the headbar's roll-axis motor.
         _wheel: The ZaberConnection instance that manages the wheel motor group.
@@ -66,7 +66,7 @@ class ZaberMotors:
         _lickport_x: The ZaberAxis instance that interfaces with the lickport's X-axis motor.
         _lickport_y: The ZaberAxis instance that interfaces with the lickport's Y-axis motor.
         _previous_positions: A ZaberPositions instance that stores the positions of Zaber motors used during a
-           previous runtime or None if there is no previous position data to use.
+            previous runtime or None if there is no previous position data to use.
     """
 
     def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeVRAssets) -> None:
@@ -99,7 +99,7 @@ class ZaberMotors:
                 "runtime. Configuring all Zaber motors to use the default positions cached in the non-volatile memory "
                 "of each motor controller. Proceed with caution."
             )
-            console.echo(message=message, level=LogLevel.ERROR)
+            console.echo(message=message, level=LogLevel.WARNING)
 
     def __repr__(self) -> str:
         """Returns a string representation of the ZaberMotors instance."""
@@ -299,6 +299,16 @@ class ZaberMotors:
         self._previous_positions = position_snapshot
         return position_snapshot
 
+    def unpark_motors(self) -> None:
+        """Unparks all managed motor groups, allowing them to be moved via this library or the Zaber GUI."""
+        self._headbar_pitch.unpark()
+        self._headbar_roll.unpark()
+        self._headbar_z.unpark()
+        self._wheel_x.unpark()
+        self._lickport_x.unpark()
+        self._lickport_y.unpark()
+        self._lickport_z.unpark()
+
     def wait_until_idle(self) -> None:
         """Blocks in-place while at least one motor in the managed motor groups is moving."""
         # Waits for the motors to finish moving. Note, motor state polling includes the built-in delay mechanism to
@@ -314,12 +324,6 @@ class ZaberMotors:
         ):
             pass
 
-    def disconnect(self) -> None:
-        """Shuts down all managed motors and disconnects from the motor groups."""
-        self._headbar.disconnect()
-        self._wheel.disconnect()
-        self._lickport.disconnect()
-
     def park_motors(self) -> None:
         """Parks all managed Zaber motors, preventing them from being moved via this library or Zaber GUI until
         they are unparked.
@@ -332,15 +336,11 @@ class ZaberMotors:
         self._lickport_y.park()
         self._lickport_z.park()
 
-    def unpark_motors(self) -> None:
-        """Unparks all managed motor groups, allowing them to be moved via this library or the Zaber GUI."""
-        self._headbar_pitch.unpark()
-        self._headbar_roll.unpark()
-        self._headbar_z.unpark()
-        self._wheel_x.unpark()
-        self._lickport_x.unpark()
-        self._lickport_y.unpark()
-        self._lickport_z.unpark()
+    def disconnect(self) -> None:
+        """Shuts down all managed motors and disconnects from the motor groups."""
+        self._headbar.disconnect()
+        self._wheel.disconnect()
+        self._lickport.disconnect()
 
     @property
     def is_connected(self) -> bool:
@@ -545,7 +545,6 @@ class MicroControllerInterfaces:
             averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size),
         )
 
-        # The setup procedure is complete.
         self._started = True
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Initialized."
@@ -553,7 +552,7 @@ class MicroControllerInterfaces:
 
     def stop(self) -> None:
         """Stops all microcontroller communication processes and releases all reserved resources."""
-        # Prevents stopping an already stopped VR process.
+        # Prevents stopping already-stopped microcontroller communication processes.
         if not self._started:
             return
 
@@ -673,7 +672,6 @@ class VideoSystems:
         message = "Initializing face camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._face_camera.start()
         self._face_camera_started = True
 
@@ -694,7 +692,6 @@ class VideoSystems:
         message = "Initializing body camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._body_camera.start()
         self._body_camera_started = True
 

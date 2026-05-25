@@ -25,6 +25,21 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
 
+_REWARD_VOLUME_RANGE: tuple[int, int] = (1, 20)
+"""The inclusive minimum and maximum water reward volume in microliters accepted by the reward volume spinbox."""
+_DEFAULT_REWARD_VOLUME: int = 5
+"""The default water reward volume in microliters."""
+_CALIBRATION_PULSE_DURATION_RANGE: tuple[int, int] = (1, 200)
+"""The inclusive minimum and maximum valve calibration pulse duration in milliseconds accepted by the spinbox."""
+_DEFAULT_CALIBRATION_PULSE_DURATION: int = 30
+"""The default valve calibration pulse duration in milliseconds."""
+_GAS_PUFF_DURATION_RANGE: tuple[int, int] = (10, 350)
+"""The inclusive minimum and maximum gas puff duration in milliseconds accepted by the gas puff duration spinbox."""
+_DEFAULT_GAS_PUFF_DURATION: int = 100
+"""The default gas puff duration in milliseconds."""
+_STATE_MONITOR_INTERVAL: int = 100
+"""The interval in milliseconds between successive external-state polling cycles performed by the monitor QTimer."""
+
 
 class _DataArrayIndex(IntEnum):
     """Defines the shared memory array indices for each runtime parameter and hardware component addressable from the
@@ -61,6 +76,26 @@ class _DataArrayIndex(IntEnum):
     """Stores the user-defined gas puff pulse duration in milliseconds."""
 
 
+class _ValveTrackerIndex(IntEnum):
+    """Defines the indices of the ValveModule's valve_tracker SharedMemoryArray read by the maintenance GUI."""
+
+    TOTAL_VOLUME = 0
+    """Stores the cumulative volume of water dispensed by the valve during runtime."""
+    CALIBRATION_STATE = 1
+    """Tracks the valve calibration state, where 0 indicates calibrating and 1 indicates calibrated."""
+    OPEN_STATE = 2
+    """Tracks the valve open/close state, where 0 indicates closed and 1 indicates open."""
+
+
+class _GasPuffTrackerIndex(IntEnum):
+    """Defines the indices of the GasPuffValveInterface's puff_tracker SharedMemoryArray read by the maintenance GUI."""
+
+    TOTAL_PUFFS = 0
+    """Stores the cumulative number of gas puffs delivered by the valve during runtime."""
+    OPEN_STATE = 1
+    """Tracks the gas puff valve open/close state, where 0 indicates closed and 1 indicates open."""
+
+
 class MaintenanceControlUI:
     """Provides the Graphical User Interface (GUI) that allows controlling the Mesoscope-VR hardware during
     maintenance runtimes.
@@ -89,12 +124,11 @@ class MaintenanceControlUI:
     """
 
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
-        # Defines the prototype array for SharedMemoryArray initialization
         prototype = np.zeros(shape=14, dtype=np.uint32)
         prototype[_DataArrayIndex.TERMINATION] = 0
-        prototype[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = 100  # Default gas puff duration: 100 ms
-        prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Default 5 uL
-        prototype[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = 30  # Default 30 ms
+        prototype[_DataArrayIndex.GAS_VALVE_PULSE_DURATION] = _DEFAULT_GAS_PUFF_DURATION
+        prototype[_DataArrayIndex.REWARD_VOLUME] = _DEFAULT_REWARD_VOLUME
+        prototype[_DataArrayIndex.CALIBRATION_PULSE_DURATION] = _DEFAULT_CALIBRATION_PULSE_DURATION
 
         self._data_array: SharedMemoryArray = SharedMemoryArray.create_array(
             name="maintenance_control_ui", prototype=prototype, exists_ok=True
@@ -103,14 +137,14 @@ class MaintenanceControlUI:
         self._valve_tracker: SharedMemoryArray = valve_tracker
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
-        # Defines but does not automatically start the UI process
+        # Defines but does not automatically start the UI process. The start() method launches it.
         self._ui_process: Process = Process(target=self._run_ui_process, daemon=True)
         self._started: bool = False
 
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
-        # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces
+        # Does not disconnect or destroy the trackers as they are owned by their respective interfaces.
 
     def __repr__(self) -> str:
         """Returns a string representation of the MaintenanceControlUI instance."""
@@ -125,7 +159,7 @@ class MaintenanceControlUI:
         self._data_array.connect()
         self._data_array.enable_buffer_destruction()
 
-        # Connects to trackers to monitor valve and gas puff states
+        # Connects to trackers to monitor valve and gas puff states.
         self._valve_tracker.connect()
         self._gas_puff_tracker.connect()
 
@@ -255,10 +289,10 @@ class MaintenanceControlUI:
             window.show()
 
             app.exec()
-        except Exception as e:
+        except Exception as error:
             message = (
                 f"Unable to initialize the GUI application for the maintenance user interface. "
-                f"Encountered the following error {e}."
+                f"Encountered the following error: {error}."
             )
             console.error(message=message, error=RuntimeError)
         finally:
@@ -304,6 +338,17 @@ class _MaintenanceUIWindow(QMainWindow):
         self._setup_monitoring()
         self._apply_qt6_styles()
 
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
+        """Handles GUI window close events.
+
+        Args:
+            event: The Qt-generated window shutdown event instance.
+        """
+        with contextlib.suppress(Exception):
+            self._data_array[_DataArrayIndex.TERMINATION] = 1
+        if event is not None:
+            event.accept()
+
     def _setup_ui(self) -> None:
         """Creates and arranges all UI elements."""
         central_widget = QWidget()
@@ -313,12 +358,10 @@ class _MaintenanceUIWindow(QMainWindow):
         main_layout.setSpacing(12)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # Reward Valve Control Group
         valve_group = QGroupBox("Reward Valve Control")
         valve_layout = QVBoxLayout(valve_group)
         valve_layout.setSpacing(6)
 
-        # Basic valve controls
         basic_valve_layout = QHBoxLayout()
 
         self._valve_open_button = QPushButton("🔓 Open")
@@ -340,19 +383,18 @@ class _MaintenanceUIWindow(QMainWindow):
 
         valve_layout.addLayout(basic_valve_layout)
 
-        # Volume control and reward section
         volume_reward_layout = QHBoxLayout()
         volume_reward_layout.setSpacing(6)
 
-        # Volume control on the left (same width as Open button)
+        # Places the volume control on the left, matching the width of the Open button.
         volume_sub_layout = QHBoxLayout()
         volume_sub_layout.setSpacing(6)
         volume_label = QLabel("Reward volume:")
         volume_label.setObjectName("volumeLabel")
 
         self._volume_spinbox = QDoubleSpinBox()
-        self._volume_spinbox.setRange(1, 20)
-        self._volume_spinbox.setValue(5)
+        self._volume_spinbox.setRange(*_REWARD_VOLUME_RANGE)
+        self._volume_spinbox.setValue(_DEFAULT_REWARD_VOLUME)
         self._volume_spinbox.setDecimals(0)
         self._volume_spinbox.setSuffix(" μL")
         self._volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
@@ -363,7 +405,7 @@ class _MaintenanceUIWindow(QMainWindow):
         volume_sub_layout.addWidget(volume_label)
         volume_sub_layout.addWidget(self._volume_spinbox)
 
-        # Reward button on the right (same width as Close button)
+        # Places the reward button on the right, matching the width of the Close button.
         self._valve_reward_button = QPushButton("💧 Reward")
         self._valve_reward_button.setToolTip("Deliver water reward with specified volume")
         # noinspection PyUnresolvedReferences
@@ -387,7 +429,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         main_layout.addWidget(valve_group)
 
-        # Calibration Group
         calibration_group = QGroupBox("Valve Calibration")
         calibration_layout = QVBoxLayout(calibration_group)
         calibration_layout.setSpacing(6)
@@ -401,7 +442,6 @@ class _MaintenanceUIWindow(QMainWindow):
         self._valve_reference_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         calibration_layout.addWidget(self._valve_reference_button)
 
-        # Pulse duration control
         pulse_duration_layout = QHBoxLayout()
         pulse_duration_layout.setSpacing(6)
 
@@ -409,8 +449,8 @@ class _MaintenanceUIWindow(QMainWindow):
         pulse_label.setObjectName("volumeLabel")
 
         self._pulse_duration_spinbox = QDoubleSpinBox()
-        self._pulse_duration_spinbox.setRange(1, 200)
-        self._pulse_duration_spinbox.setValue(30)
+        self._pulse_duration_spinbox.setRange(*_CALIBRATION_PULSE_DURATION_RANGE)
+        self._pulse_duration_spinbox.setValue(_DEFAULT_CALIBRATION_PULSE_DURATION)
         self._pulse_duration_spinbox.setDecimals(0)
         self._pulse_duration_spinbox.setSuffix(" ms")
         self._pulse_duration_spinbox.setToolTip("Sets calibration pulse duration. Accepts values between 1 and 200 ms.")
@@ -441,7 +481,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         main_layout.addWidget(calibration_group)
 
-        # Brake Control Group
         brake_group = QGroupBox("Brake Control")
         brake_layout = QVBoxLayout(brake_group)
         brake_layout.setSpacing(6)
@@ -467,7 +506,7 @@ class _MaintenanceUIWindow(QMainWindow):
 
         brake_layout.addLayout(brake_buttons_layout)
 
-        # Brake status - starts locked
+        # The brake defaults to the locked state on startup.
         self._brake_status_label = QLabel("Brake Status: 🔒 Locked")
         self._brake_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._brake_status_label.setFont(status_font)
@@ -476,12 +515,10 @@ class _MaintenanceUIWindow(QMainWindow):
 
         main_layout.addWidget(brake_group)
 
-        # Gas Puff Valve Control Group
         gas_valve_group = QGroupBox("Gas Puff Valve Control")
         gas_valve_layout = QVBoxLayout(gas_valve_group)
         gas_valve_layout.setSpacing(6)
 
-        # Open/Close buttons
         gas_valve_buttons_layout = QHBoxLayout()
 
         self._gas_valve_open_button = QPushButton("🔓 Open")
@@ -503,19 +540,18 @@ class _MaintenanceUIWindow(QMainWindow):
 
         gas_valve_layout.addLayout(gas_valve_buttons_layout)
 
-        # Puff duration control and puff button
         puff_layout = QHBoxLayout()
         puff_layout.setSpacing(6)
 
-        # Duration control on the left (same width as Open button)
+        # Places the duration control on the left, matching the width of the Open button.
         puff_sub_layout = QHBoxLayout()
         puff_sub_layout.setSpacing(6)
         gas_puff_label = QLabel("Puff duration:")
         gas_puff_label.setObjectName("volumeLabel")
 
         self._gas_puff_duration_spinbox = QDoubleSpinBox()
-        self._gas_puff_duration_spinbox.setRange(10, 350)
-        self._gas_puff_duration_spinbox.setValue(100)
+        self._gas_puff_duration_spinbox.setRange(*_GAS_PUFF_DURATION_RANGE)
+        self._gas_puff_duration_spinbox.setValue(_DEFAULT_GAS_PUFF_DURATION)
         self._gas_puff_duration_spinbox.setDecimals(0)
         self._gas_puff_duration_spinbox.setSuffix(" ms")
         self._gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
@@ -526,7 +562,7 @@ class _MaintenanceUIWindow(QMainWindow):
         puff_sub_layout.addWidget(gas_puff_label)
         puff_sub_layout.addWidget(self._gas_puff_duration_spinbox)
 
-        # Puff button on the right (same width as Close button)
+        # Places the puff button on the right, matching the width of the Close button.
         self._gas_valve_puff_button = QPushButton("💨 Puff")
         self._gas_valve_puff_button.setToolTip("Deliver a gas puff with specified duration")
         # noinspection PyUnresolvedReferences
@@ -557,7 +593,7 @@ class _MaintenanceUIWindow(QMainWindow):
         main_layout.addWidget(self._terminate_button)
 
     def _apply_qt6_styles(self) -> None:
-        """Applies optimized styling to all UI elements."""
+        """Applies styling to all UI elements."""
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #ecf0f1;
@@ -802,7 +838,7 @@ class _MaintenanceUIWindow(QMainWindow):
         self._monitor_timer = QTimer(self)
         # noinspection PyUnresolvedReferences
         self._monitor_timer.timeout.connect(self._check_external_state)
-        self._monitor_timer.start(100)  # Check every 100ms
+        self._monitor_timer.start(_STATE_MONITOR_INTERVAL)
 
     def _check_external_state(self) -> None:
         """Checks for external termination signal and updates valve, calibration, and gas puff status."""
@@ -812,12 +848,12 @@ class _MaintenanceUIWindow(QMainWindow):
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
                 self.close()
 
-            # Reads valve tracker state (index 1 = calibration state, index 2 = open/close state).
-            is_calibrating = float(self._valve_tracker[1]) == 0.0
-            water_valve_state = int(self._valve_tracker[2])
+            # Reads the valve tracker calibration and open/close states.
+            is_calibrating = float(self._valve_tracker[_ValveTrackerIndex.CALIBRATION_STATE]) == 0.0
+            water_valve_state = int(self._valve_tracker[_ValveTrackerIndex.OPEN_STATE])
 
-            # Reads gas puff tracker state (index 1 = open/close state).
-            gas_valve_state = int(self._gas_puff_tracker[1])
+            # Reads the gas puff tracker open/close state.
+            gas_valve_state = int(self._gas_puff_tracker[_GasPuffTrackerIndex.OPEN_STATE])
 
             # Detects when water valve closes (state transitions to closed while reward was in progress).
             if self._reward_in_progress and water_valve_state == 0:
@@ -840,17 +876,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         except Exception:
             self.close()
-
-    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
-        """Handles GUI window close events.
-
-        Args:
-            event: The Qt-generated window shutdown event instance.
-        """
-        with contextlib.suppress(Exception):
-            self._data_array[_DataArrayIndex.TERMINATION] = 1
-        if event is not None:
-            event.accept()
 
     def _update_reward_volume(self) -> None:
         """Updates the volume used when delivering water rewards to match the current GUI configuration."""

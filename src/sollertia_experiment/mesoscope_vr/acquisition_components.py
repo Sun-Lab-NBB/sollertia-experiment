@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 _RESPONSE_DELAY: int = 2000
-"""Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires 
+"""Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 
 _response_delay_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
@@ -53,7 +53,7 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
     AVERSIVE_GUIDANCE_STATE = 4
     """The system has changed the aversive (gas puff) trial guidance state."""
     DISTANCE_SNAPSHOT = 5
-    """The system has taken a snapshot of the total distance traveled by the animal due to changing the VR wall cue 
+    """The system has taken a snapshot of the total distance traveled by the animal due to changing the VR wall cue
     sequence."""
 
 
@@ -66,13 +66,13 @@ class _TrialState:
     reinforcing (water reward) and aversive (gas puff) trial types.
     """
 
-    # Overall trial tracking
+    # Overall trial tracking.
     completed: int = 0
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
     """Stores the total cumulative distance, in centimeters, the animals would travel at the end of each trial."""
 
-    # Reinforcing (water reward) trial tracking
+    # Reinforcing (water reward) trial tracking.
     reinforcing_guided_trials: int = 0
     """The remaining number of reinforcing trials for which to maintain the lick guidance mode."""
     reinforcing_failed_trials: int = 0
@@ -86,7 +86,7 @@ class _TrialState:
     reinforcing_rewards: tuple[tuple[float, int], ...] = ((0.0, 0),)
     """Stores the reward size (volume in μL) and tone duration (ms) for each reinforcing trial."""
 
-    # Aversive (gas puff) trial tracking
+    # Aversive (gas puff) trial tracking.
     aversive_guided_trials: int = 0
     """The remaining number of aversive trials for which to maintain the occupancy guidance mode."""
     aversive_failed_trials: int = 0
@@ -100,7 +100,7 @@ class _TrialState:
     aversive_puff_durations: tuple[int, ...] = (100,)
     """Stores the gas puff duration (ms) for each aversive trial."""
 
-    # Trial structure configuration
+    # Trial structure configuration.
     trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = field(default_factory=dict)
     """Maps trial structure names to their configuration objects."""
 

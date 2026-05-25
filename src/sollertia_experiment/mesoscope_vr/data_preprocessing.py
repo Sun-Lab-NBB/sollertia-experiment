@@ -17,6 +17,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
+from ataraxis_time import TimeUnits, convert_time
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
     SessionData,
@@ -59,7 +60,7 @@ _METADATA_SCHEMA: dict[str, tuple[type, type]] = {
     "dcOverVoltage": (np.int32, int),
 }
 """Defines the schema for the frame-variant ScanImage metadata expected by the _process_stack() function
-when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently 
+when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently
 used by the Mesoscope-VR system."""
 
 _IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
@@ -186,11 +187,11 @@ def purge_session(session_data: SessionData) -> None:
     if not deleted:
         return
 
-    # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
+    # Ensures that the mesoscope_data directory is reset, in case it has any lingering files from the purged runtime.
     for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
         file.unlink(missing_ok=True)
 
-    message = "Session data purging: Complete"
+    message = "Session data purging: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
@@ -367,7 +368,7 @@ def _process_stack(
                 value = value.strip()
 
                 # Raises errors if the metadata field is unexpected (unsupported).
-                if key in _METADATA_SCHEMA:  # Expected data fields
+                if key in _METADATA_SCHEMA:
                     # Uses the schema to parse and convert the value.
                     _, converter = _METADATA_SCHEMA[key]
                     arrays[key][frame_index] = converter(value)
@@ -375,19 +376,19 @@ def _process_stack(
                     # Parses the epoch [year month day hour minute second.microsecond] as microseconds elapsed since
                     # the UTC onset.
                     epoch_values = [float(component) for component in value[1:-1].split()]
+                    epoch_seconds = datetime(
+                        int(epoch_values[0]),
+                        int(epoch_values[1]),
+                        int(epoch_values[2]),
+                        int(epoch_values[3]),
+                        int(epoch_values[4]),
+                        int(epoch_values[5]),
+                        int((epoch_values[5] % 1) * 1_000_000),
+                        tzinfo=UTC,
+                    ).timestamp()
                     timestamp = int(
-                        datetime(
-                            int(epoch_values[0]),
-                            int(epoch_values[1]),
-                            int(epoch_values[2]),
-                            int(epoch_values[3]),
-                            int(epoch_values[4]),
-                            int(epoch_values[5]),
-                            int((epoch_values[5] % 1) * 1_000_000),
-                            tzinfo=UTC,
-                        ).timestamp()
-                        * 1_000_000
-                    )  # Converts to microseconds
+                        convert_time(time=epoch_seconds, from_units=TimeUnits.SECOND, to_units=TimeUnits.MICROSECOND)
+                    )
                     arrays["epochTimestamps_us"][frame_index] = timestamp
                 elif key in _IGNORED_METADATA_FIELDS:
                     # These fields are known but not currently used by the system. This section ensures these fields are
@@ -400,7 +401,7 @@ def _process_stack(
                         )
                         console.error(message=message, error=NotImplementedError)
                 else:
-                    # Unknown field - raise error to ensure schema is updated
+                    # Raises an error so the schema is updated to support the new metadata field.
                     message = (
                         f"Unknown field '{key}' found in the frame-variant ScanImage metadata associated with the tiff "
                         f"file {tiff_path}. Update the _process_stack() function with the logic for parsing the data "
@@ -496,7 +497,7 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
 
     # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
     # between frames.
-    flyback_pixels = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))  # Uses integer division
+    flyback_pixels = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))
 
     # Creates an array that stores the start and end row indices for each ROI.
     roi_rows = np.zeros(shape=(2, roi_number), dtype=np.int32)

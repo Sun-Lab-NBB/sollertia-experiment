@@ -11,7 +11,7 @@ import tempfile
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
     SessionData,
@@ -62,6 +62,13 @@ from .acquisition_components import (
 _RENDERING_SEPARATION_DELAY: int = 500
 """Specifies the number of milliseconds to delay between rendering console outputs (stderr) and non-console outputs
 (stdout) to prevent the two renders from overlapping."""
+
+_MICROLITERS_PER_MILLILITER: float = 1000.0
+"""Specifies the number of microliters in one milliliter, used to convert between the two water-volume units."""
+
+_MINIMUM_INCREASE_THRESHOLD_ML: float = 1e-12
+"""Specifies a near-zero water volume, in milliliters, used in place of a zero increase threshold to avoid a
+division-by-zero error while preserving the behavior of a disabled threshold increase."""
 
 
 # PyCharm does not narrow the Optional `zaber_motors` after assignment (the Optional is required for the finally
@@ -369,9 +376,9 @@ def lick_training_logic(
 
     # Converts maximum volume to uL and divides it by the reward size to get the number of delays to sample from
     # the delay distribution.
-    number_of_samples = np.floor((descriptor.maximum_water_volume_ml * 1000) / descriptor.water_reward_size_ul).astype(
-        np.uint64
-    )
+    number_of_samples = np.floor(
+        (descriptor.maximum_water_volume_ml * _MICROLITERS_PER_MILLILITER) / descriptor.water_reward_size_ul
+    ).astype(np.uint64)
 
     # Generates samples from a uniform distribution within delay bounds.
     random_generator = np.random.default_rng()
@@ -388,7 +395,13 @@ def lick_training_logic(
     # Finds the maximum number of samples that fits within the maximum training time. This handles the (expected) cases
     # where the total training time is insufficient to deliver the maximum allowed volume of water, so the reward
     # sequence needs to be clipped.
-    maximum_sample_index = np.searchsorted(a=cumulative_time, v=descriptor.maximum_training_time_min * 60, side="right")
+    maximum_sample_index = np.searchsorted(
+        a=cumulative_time,
+        v=convert_time(
+            time=descriptor.maximum_training_time_min, from_units=TimeUnits.MINUTE, to_units=TimeUnits.SECOND
+        ),
+        side="right",
+    )
 
     # Slices the samples array to make the total training time be roughly the maximum requested duration.
     reward_delays: NDArray[np.float64] = samples[:maximum_sample_index]
@@ -404,9 +417,17 @@ def lick_training_logic(
         )
         console.error(message=message, error=ValueError)
 
+    cumulative_runtime_min = float(
+        np.round(
+            convert_time(
+                time=cumulative_time[maximum_sample_index - 1], from_units=TimeUnits.SECOND, to_units=TimeUnits.MINUTE
+            ),
+            decimals=3,
+        )
+    )
     message = (
         f"Generated a sequence of {len(reward_delays)} rewards with the total cumulative runtime of "
-        f"{float(np.round(cumulative_time[maximum_sample_index - 1] / 60, decimals=3))} minutes."
+        f"{cumulative_runtime_min} minutes."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -414,7 +435,9 @@ def lick_training_logic(
     # total training time at the point where the maximum allowed water volume is delivered.
     if len(reward_delays) == len(cumulative_time):
         # Actual session time is the accumulated delay converted from seconds to minutes at the last index.
-        descriptor.maximum_training_time_min = int(np.ceil(cumulative_time[-1] / 60))
+        descriptor.maximum_training_time_min = int(
+            np.ceil(convert_time(time=cumulative_time[-1], from_units=TimeUnits.SECOND, to_units=TimeUnits.MINUTE))
+        )
 
     # If the maximum unconsumed reward count is below 1, disables the feature by setting the number to match the
     # number of rewards to be delivered.
@@ -686,7 +709,7 @@ def run_training_logic(
     # 0. So if a threshold of 0 is passed, the system sets it to a very small number instead, which functions similar
     # to it being 0, but does not produce an error. Specifically, this prevents the 'division by zero' error.
     if descriptor.increase_threshold_ml <= 0:
-        descriptor.increase_threshold_ml = 0.000000000001
+        descriptor.increase_threshold_ml = _MINIMUM_INCREASE_THRESHOLD_ML
 
     # Initializes the timers used during the session.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -695,9 +718,8 @@ def run_training_logic(
 
     # Initializes the assets used to guard against interrupting run epochs for animals that take many large steps. For
     # animals with a distinct walking pattern of many very large steps, the speed transiently dips below the threshold
-    # for a
-    # very brief moment of time, flagging the epoch as unrewarded. To avoid this issue, instead of interrupting the
-    # epoch outright, the system now allows the speed to be below the threshold for a short period of time. These
+    # for a very brief moment of time, flagging the epoch as unrewarded. To avoid this issue, instead of interrupting
+    # the epoch outright, the system allows the speed to be below the threshold for a short period of time. These
     # assets help with that task pattern.
     epoch_timer_engaged: bool = False
     # Ensures a positive value and converts the maximum idle time from seconds to milliseconds.
@@ -724,7 +746,9 @@ def run_training_logic(
     maximum_volume = np.float64(descriptor.maximum_water_volume_ml * 1000)  # In microliters
 
     # Converts the training time from minutes to seconds to make it compatible with the timer precision.
-    training_time = descriptor.maximum_training_time_min * 60
+    training_time = convert_time(
+        time=descriptor.maximum_training_time_min, from_units=TimeUnits.MINUTE, to_units=TimeUnits.SECOND
+    )
 
     # Initializes internal tracker variables:
     # Tracks the data necessary to update the training progress bar.
@@ -1049,14 +1073,15 @@ def experiment_logic(
     )
 
     # Verifies that all Mesoscope-VR states used during experiments are valid.
-    valid_states = {1, 2}
+    valid_states = (MesoscopeVRStates.REST, MesoscopeVRStates.RUN)
+    supported_state_codes = ", ".join(f"{state.value} ({state.name.lower()})" for state in valid_states)
     state: ExperimentState
     for state in experiment_config.experiment_states.values():
         if state.system_state_code not in valid_states:
             message = (
                 f"Invalid Mesoscope-VR system state code {state.system_state_code} encountered when verifying "
-                f"{experiment_name} experiment configuration. Currently, only codes 1 (rest) and 2 (run) are supported "
-                f"for the Mesoscope-VR system."
+                f"{experiment_name} experiment configuration. Currently, only codes {supported_state_codes} are "
+                f"supported for the Mesoscope-VR system."
             )
             console.error(message=message, error=ValueError)
 
@@ -1308,7 +1333,7 @@ def maintenance_logic() -> None:
                 message = "Zaber motors: Positioned for Mesoscope-VR system maintenance."
                 console.echo(message=message, level=LogLevel.SUCCESS)
 
-            # Initializes the maintenance GUI
+            # Initializes the maintenance GUI.
             # noinspection PyProtectedMember
             ui = MaintenanceControlUI(
                 valve_tracker=valve._valve_tracker,  # noqa: SLF001
@@ -1332,15 +1357,12 @@ def maintenance_logic() -> None:
                 if ui.valve_close_signal:
                     valve.set_state(state=False)
 
-                # Uses the valve to deliver a water reward.
                 if ui.valve_reward_signal:
                     valve.deliver_reward(volume=float(ui.reward_volume))
 
-                # References the valve.
                 if ui.valve_reference_signal:
                     valve.reference_valve()
 
-                # Performs the valve calibration procedure.
                 if ui.valve_calibrate_signal:
                     valve.calibrate_valve(pulse_duration=ui.calibration_pulse_duration)
 
@@ -1360,7 +1382,6 @@ def maintenance_logic() -> None:
                 if ui.gas_valve_close_signal:
                     gas_puff_valve.set_state(state=False)
 
-                # Delivers a gas puff.
                 if ui.gas_valve_pulse_signal:
                     gas_puff_valve.deliver_puff(duration_ms=ui.gas_valve_pulse_duration)
 
