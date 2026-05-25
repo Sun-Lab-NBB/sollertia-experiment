@@ -12,7 +12,7 @@ from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
     purge_session,
     preprocess_session_data,
-    get_system_configuration_data,
+    get_system_configuration,
     migrate_animal_between_projects,
 )
 
@@ -36,7 +36,7 @@ def manage() -> None:  # pragma: no cover
 )
 def preprocess_session(session_path: Path) -> None:
     """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
-    system_configuration = get_system_configuration_data()  # Retrieves the system configuration data.
+    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
 
     # Prevent using this command on sessions that are not stored on the local host-machine, but accessible to its
     # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
@@ -69,7 +69,7 @@ def delete_session(session_path: Path) -> None:
     removes the session's data from all machines of the data acquisition system and all long-term storage destinations
     accessible to the data acquisition system.
     """
-    system_configuration = get_system_configuration_data()  # Retrieves the system configuration data.
+    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
 
     # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
     # command safe, it reduces the risk of accidentally removing valid scientific data.

@@ -11,7 +11,7 @@ import tempfile
 
 from tqdm import tqdm
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
     SessionData,
@@ -43,8 +43,10 @@ from .data_preprocessing import purge_session, preprocess_session_data
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
+    from .system import MesoscopeSystemConfiguration
 
-from .system import MesoscopeVRStates
+
+from .system import RUN_TRAINING_THRESHOLD_LIMITS, MesoscopeVRStates
 from .system_controller import _MesoscopeVRSystem
 from .acquisition_components import (
     _RESPONSE_DELAY,
@@ -57,11 +59,17 @@ from .acquisition_components import (
     _generate_mesoscope_position_snapshot,
 )
 
-_RENDERING_SEPARATION_DELAY = 500
-"""Specifies the number of milliseconds to delay between rendering console outputs (stderr) and non-console outputs 
+_RENDERING_SEPARATION_DELAY: int = 500
+"""Specifies the number of milliseconds to delay between rendering console outputs (stderr) and non-console outputs
 (stdout) to prevent the two renders from overlapping."""
 
+_MICROLITERS_PER_MILLILITER: float = 1000.0
+"""Specifies the number of microliters in one milliliter, used to convert between the two water-volume units."""
 
+
+# PyCharm does not narrow the Optional `zaber_motors` after assignment (the Optional is required for the finally
+# guard) and resolves the descriptor union to its first member; both are false positives that mypy does not report.
+# noinspection PyTypeChecker
 def window_checking_logic(
     experimenter: str,
     project_name: str,
@@ -81,37 +89,19 @@ def window_checking_logic(
     # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
-    # Verifies that the specified project has been configured.
-    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
-    if not project_directory.exists():
-        message = (
-            f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
-            f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sle configure project' command to configure the project before running "
-            f"data acquisition sessions."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(
-        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    # Verifies that the specified project is configured and that the animal participates exclusively in it.
+    _verify_project_configured(
+        session_description="window checking session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
     )
-    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
-        message = (
-            f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is associated with multiple projects managed by the "
-            f"{system_configuration.name} data acquisition system, which is not allowed. The animal is associated with "
-            f"the following projects: {', '.join(animal_projects)}."
-        )
-        console.error(message=message, error=ValueError)
-    elif len(animal_projects) == 1 and animal_projects[0] != project_name:
-        message = (
-            f"Unable to execute the window checking session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
-            f"CLI command to transfer the animal to the desired project."
-        )
-        console.error(message=message, error=ValueError)
+    _verify_animal_project_membership(
+        session_description="window checking session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
+    )
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -146,15 +136,16 @@ def window_checking_logic(
         # If the animal has a snapshot of Zaber motor positions used during a previous runtime, loads and uses these
         # positions. Otherwise, uses the default positions hardcoded in the Zaber controller's non-volatile memory.
         zaber_positions = (
-            ZaberPositions.from_yaml(mesoscope_data.vrpc_data.zaber_positions_path)
+            ZaberPositions.from_yaml(file_path=mesoscope_data.vrpc_data.zaber_positions_path)
             if mesoscope_data.vrpc_data.zaber_positions_path.exists()
             else None
         )
 
-        # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class
+        # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class.
         logger: DataLogger = DataLogger(
             output_directory=session_data.raw_data_path,
-            instance_name="behavior",  # Creates behavior_log subdirectory under raw_data
+            # Creates the behavior_log subdirectory under raw_data.
+            instance_name="behavior",
             thread_count=10,
         )
         logger.start()
@@ -183,7 +174,7 @@ def window_checking_logic(
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
-        # Establishes communication with Zaber motors
+        # Establishes communication with Zaber motors.
         zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
 
         # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
@@ -199,7 +190,7 @@ def window_checking_logic(
         # Retrieves current motor positions and packages them into a ZaberPositions object.
         _generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
 
-        # Instructs the user to update the session descriptor file
+        # Instructs the user to update the session descriptor file.
         _verify_descriptor_update(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
 
         # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking.
@@ -208,10 +199,10 @@ def window_checking_logic(
         # Resets Zaber motors to their original positions.
         _reset_zaber_motors(zaber_motors=zaber_motors)
 
-        # Terminates the face camera
+        # Terminates the face camera.
         cameras.stop()
 
-        # Stops the data logger
+        # Stops the data logger.
         logger.stop()
 
         # Triggers preprocessing pipeline. In this case, since there is no data to preprocess, the pipeline primarily
@@ -228,17 +219,20 @@ def window_checking_logic(
                 f"to the {system_configuration.name} data acquisition system..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data)
+            purge_session(session_data=session_data)
 
         # If Zaber motors were connected, attempts to gracefully shut down the motors.
         if zaber_motors is not None:
             _reset_zaber_motors(zaber_motors=zaber_motors)
 
-        # Ends the runtime
+        # Ends the runtime.
         message = "Window checking session: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
 
+# PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
+# mis-infers some descriptor fields and numpy scalars; these are false positives that mypy does not report.
+# noinspection PyTypeChecker,PyUnresolvedReferences
 def lick_training_logic(
     experimenter: str,
     project_name: str,
@@ -286,37 +280,19 @@ def lick_training_logic(
     # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
-    # Verifies that the specified project has been configured.
-    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
-    if not project_directory.exists():
-        message = (
-            f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sle configure project' command to configure the project before running "
-            f"data acquisition sessions."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(
-        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    # Verifies that the specified project is configured and that the animal participates exclusively in it.
+    _verify_project_configured(
+        session_description="lick training session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
     )
-    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
-        message = (
-            f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is associated with multiple projects managed by the "
-            f"{system_configuration.name} data acquisition system, which is not allowed. The animal is associated with "
-            f"the following projects: {', '.join(animal_projects)}."
-        )
-        console.error(message=message, error=ValueError)
-    elif len(animal_projects) == 1 and animal_projects[0] != project_name:
-        message = (
-            f"Unable to execute the lick training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
-            f"CLI command to transfer the animal to the desired project."
-        )
-        console.error(message=message, error=ValueError)
+    _verify_animal_project_membership(
+        session_description="lick training session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
+    )
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -339,7 +315,7 @@ def lick_training_logic(
     previous_descriptor_path = mesoscope_data.vrpc_data.session_descriptor_path
     previous_descriptor: LickTrainingDescriptor | None = None
     if previous_descriptor_path.exists():
-        # Loads the previous descriptor's data from memory
+        # Loads the previous descriptor's data from memory.
         previous_descriptor = LickTrainingDescriptor.from_yaml(file_path=previous_descriptor_path)
 
         message = "Previous session's configuration parameters: Applied."
@@ -350,7 +326,7 @@ def lick_training_logic(
         )
         console.echo(message=message, level=LogLevel.INFO)
 
-    # Initializes the descriptor with the current session's experimenter and animal weight
+    # Initializes the descriptor with the current session's experimenter and animal weight.
     descriptor = LickTrainingDescriptor(
         experimenter=experimenter,
         animal_weight_g=animal_weight,
@@ -386,39 +362,49 @@ def lick_training_logic(
     # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
     # the feature by deferring the assignment until after the total number of rewards is calculated. This ensures that
     # the feature can be properly disabled by setting the limit equal to the total reward count.
-    _disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
+    disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
 
-    # Initializes the timer used to enforce reward delays
+    # Initializes the timer used to enforce reward delays.
     delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     message = "Generating the pseudorandom reward delay sequence..."
     console.echo(message=message, level=LogLevel.INFO)
 
     # Converts maximum volume to uL and divides it by the reward size to get the number of delays to sample from
-    # the delay distribution
-    num_samples = np.floor((descriptor.maximum_water_volume_ml * 1000) / descriptor.water_reward_size_ul).astype(
-        np.uint64
+    # the delay distribution.
+    number_of_samples = np.floor(
+        (descriptor.maximum_water_volume_ml * _MICROLITERS_PER_MILLILITER) / descriptor.water_reward_size_ul
+    ).astype(np.uint64)
+
+    # Generates samples from a uniform distribution within delay bounds.
+    random_generator = np.random.default_rng()
+    samples = random_generator.uniform(
+        low=descriptor.minimum_reward_delay_s,
+        high=descriptor.maximum_reward_delay_s,
+        size=number_of_samples,
     )
 
-    # Generates samples from a uniform distribution within delay bounds
-    rng = np.random.default_rng()
-    samples = rng.uniform(descriptor.minimum_reward_delay_s, descriptor.maximum_reward_delay_s, num_samples)
-
     # Calculates cumulative training time for each sampled delay. This communicates the total time passed when each
-    # reward is delivered to the animal
+    # reward is delivered to the animal.
     cumulative_time = np.cumsum(samples)
 
     # Finds the maximum number of samples that fits within the maximum training time. This handles the (expected) cases
     # where the total training time is insufficient to deliver the maximum allowed volume of water, so the reward
     # sequence needs to be clipped.
-    max_samples_idx = np.searchsorted(cumulative_time, descriptor.maximum_training_time_min * 60, side="right")
+    maximum_sample_index = np.searchsorted(
+        a=cumulative_time,
+        v=convert_time(
+            time=descriptor.maximum_training_time_min, from_units=TimeUnits.MINUTE, to_units=TimeUnits.SECOND
+        ),
+        side="right",
+    )
 
     # Slices the samples array to make the total training time be roughly the maximum requested duration.
-    reward_delays: NDArray[np.float64] = samples[:max_samples_idx]
+    reward_delays: NDArray[np.float64] = samples[:maximum_sample_index]
 
     # Aborts if no rewards fit in the requested training time. Raises an error before system initialization to allow
     # automatic session data purge.
-    if max_samples_idx == 0:
+    if maximum_sample_index == 0:
         message = (
             f"Unable to generate the lick training reward sequence. The requested maximum training time "
             f"({descriptor.maximum_training_time_min} minutes) is shorter than the minimum reward delay "
@@ -427,9 +413,17 @@ def lick_training_logic(
         )
         console.error(message=message, error=ValueError)
 
+    cumulative_runtime_min = float(
+        np.round(
+            convert_time(
+                time=cumulative_time[maximum_sample_index - 1], from_units=TimeUnits.SECOND, to_units=TimeUnits.MINUTE
+            ),
+            decimals=3,
+        )
+    )
     message = (
         f"Generated a sequence of {len(reward_delays)} rewards with the total cumulative runtime of "
-        f"{np.round(cumulative_time[max_samples_idx - 1] / 60, decimals=3)} minutes."
+        f"{cumulative_runtime_min} minutes."
     )
     console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -437,16 +431,18 @@ def lick_training_logic(
     # total training time at the point where the maximum allowed water volume is delivered.
     if len(reward_delays) == len(cumulative_time):
         # Actual session time is the accumulated delay converted from seconds to minutes at the last index.
-        descriptor.maximum_training_time_min = int(np.ceil(cumulative_time[-1] / 60))
+        descriptor.maximum_training_time_min = int(
+            np.ceil(convert_time(time=cumulative_time[-1], from_units=TimeUnits.SECOND, to_units=TimeUnits.MINUTE))
+        )
 
     # If the maximum unconsumed reward count is below 1, disables the feature by setting the number to match the
     # number of rewards to be delivered.
-    if _disable_unconsumed_limit:
+    if disable_unconsumed_limit:
         descriptor.maximum_unconsumed_rewards = len(reward_delays)
 
     system: _MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class
+        # Initializes the system class.
         system = _MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
 
         # Initializes all system assets and guides the user through hardware-specific session preparation steps.
@@ -455,8 +451,8 @@ def lick_training_logic(
         # If the user chose to terminate the session during initialization checkpoint, raises an error to jump to the
         # shutdown sequence, bypassing all other session preparation steps.
         if system.terminated:
-            # Note, this specific type of errors should not be raised by any other session component. Therefore, it is
-            # possible to handle this type of exceptions as a unique marker for early user-requested session
+            # Note, this specific type of error should not be raised by any other session component. Therefore, it is
+            # possible to handle this type of exception as a unique marker for early user-requested session
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
@@ -466,7 +462,7 @@ def lick_training_logic(
         # 'purge' runtimes.
         session_data.mark_runtime_initialized()
 
-        # Switches the system into lick-training mode
+        # Switches the system into lick-training mode.
         system.lick_train()
 
         message = "Lick training: Started."
@@ -485,7 +481,8 @@ def lick_training_logic(
             # pause is used to discount the delay. This is in contrast to other sessions, where pause time actually
             # INCREASES the overall session duration.
             while delay_timer.elapsed < (delay - system.paused_time):
-                system.runtime_cycle()  # Repeatedly calls the runtime cycle during the delay period
+                # Repeatedly calls the runtime cycle during the delay period.
+                system.runtime_cycle()
 
             # If the user sent the abort command, terminates the training early.
             if system.terminated:
@@ -494,16 +491,16 @@ def lick_training_logic(
                     "procedure..."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                break  # Breaks the for loop
+                break
 
-            # Resets the delay timer immediately after exiting the delay loop
+            # Resets the delay timer immediately after exiting the delay loop.
             delay_timer.reset()
 
             # Clears the paused time at the end of each delay cycle. This has to be done to prevent future delay
             # loops from ending earlier than expected unless the session is paused again as part of that loop.
             system.paused_time = 0
 
-            # Delivers the water reward to the animal or simulates the reward if the animal is not licking
+            # Delivers the water reward to the animal or simulates the reward if the animal is not licking.
             system.resolve_reward(
                 reward_size=descriptor.water_reward_size_ul, tone_duration=descriptor.reward_tone_duration_ms
             )
@@ -519,7 +516,7 @@ def lick_training_logic(
 
     # Ensures that the function always attempts the graceful shutdown procedure, even if it encounters session errors.
     finally:
-        # If the system was initialized, attempts to gracefully terminate system assets
+        # If the system was initialized, attempts to gracefully terminate system assets.
         if system is not None:
             system.stop()
 
@@ -531,12 +528,15 @@ def lick_training_logic(
                 "assets. Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data)
+            purge_session(session_data=session_data)
 
         message = "Lick training session: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
 
+# PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
+# mis-infers some descriptor fields; these are false positives that mypy does not report.
+# noinspection PyTypeChecker,PyUnresolvedReferences
 def run_training_logic(
     experimenter: str,
     project_name: str,
@@ -603,37 +603,19 @@ def run_training_logic(
     # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
-    # Verifies that the specified project has been configured.
-    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
-    if not project_directory.exists():
-        message = (
-            f"Unable to execute the run training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sle configure project' command to configure the project before running "
-            f"data acquisition sessions."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(
-        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    # Verifies that the specified project is configured and that the animal participates exclusively in it.
+    _verify_project_configured(
+        session_description="run training session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
     )
-    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
-        message = (
-            f"Unable to execute the run training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is associated with multiple projects managed by the "
-            f"{system_configuration.name} data acquisition system, which is not allowed. The animal is associated with "
-            f"the following projects: {', '.join(animal_projects)}."
-        )
-        console.error(message=message, error=ValueError)
-    elif len(animal_projects) == 1 and animal_projects[0] != project_name:
-        message = (
-            f"Unable to execute the run training session for the animal {animal_id} participating in the project "
-            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
-            f"CLI command to transfer the animal to the desired project."
-        )
-        console.error(message=message, error=ValueError)
+    _verify_animal_project_membership(
+        session_description="run training session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
+    )
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -656,7 +638,7 @@ def run_training_logic(
     previous_descriptor_path = mesoscope_data.vrpc_data.session_descriptor_path
     previous_descriptor: RunTrainingDescriptor | None = None
     if previous_descriptor_path.exists():
-        # Loads the previous descriptor's data from memory
+        # Loads the previous descriptor's data from memory.
         previous_descriptor = RunTrainingDescriptor.from_yaml(file_path=previous_descriptor_path)
 
         message = "Previous session's configuration parameters: Applied."
@@ -667,7 +649,7 @@ def run_training_logic(
         )
         console.echo(message=message, level=LogLevel.INFO)
 
-    # Initializes the descriptor with the current session's experimenter and animal weight
+    # Initializes the descriptor with the current session's experimenter and animal weight.
     descriptor = RunTrainingDescriptor(
         experimenter=experimenter,
         animal_weight_g=animal_weight,
@@ -717,31 +699,30 @@ def run_training_logic(
     # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
     # the feature by deferring the assignment until after the maximum number of deliverable rewards is calculated. This
     # ensures that the feature can be properly disabled by setting the limit equal to the total reward count.
-    _disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
+    disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
 
-    # Validates the increase threshold parameter. The way 'increase_threshold' is used requires it to be greater than
-    # 0. So if a threshold of 0 is passed, the system sets it to a very small number instead, which functions similar
-    # to it being 0, but does not produce an error. Specifically, this prevents the 'division by zero' error.
-    if descriptor.increase_threshold_ml <= 0:
-        descriptor.increase_threshold_ml = 0.000000000001
+    # Determines whether the volume-driven threshold increase is disabled. A non-positive increase threshold holds the
+    # speed and duration thresholds at their initial values for the entire session, while a positive threshold enables
+    # the dynamic increase computed during the runtime loop.
+    increase_disabled = descriptor.increase_threshold_ml <= 0
 
-    # Initializes the timers used during the session
+    # Initializes the timers used during the session.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
     running_duration_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
     epoch_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
     # Initializes the assets used to guard against interrupting run epochs for animals that take many large steps. For
     # animals with a distinct walking pattern of many very large steps, the speed transiently dips below the threshold
-    # for a
-    # very brief moment of time, flagging the epoch as unrewarded. To avoid this issue, instead of interrupting the
-    # epoch outright, the system now allows the speed to be below the threshold for a short period of time. These
+    # for a very brief moment of time, flagging the epoch as unrewarded. To avoid this issue, instead of interrupting
+    # the epoch outright, the system allows the speed to be below the threshold for a short period of time. These
     # assets help with that task pattern.
     epoch_timer_engaged: bool = False
-    maximum_idle_time_ms = max(0.0, descriptor.maximum_idle_time_s) * 1000  # Ensures positive values and converts to ms
+    # Ensures a positive value and converts the maximum idle time from seconds to milliseconds.
+    maximum_idle_time_ms = max(0.0, descriptor.maximum_idle_time_s) * 1000
 
     # If the maximum unconsumed reward count is below 1, disables the feature by setting the number to match the
     # maximum number of rewards that can be delivered during the session.
-    if _disable_unconsumed_limit:
+    if disable_unconsumed_limit:
         descriptor.maximum_unconsumed_rewards = int(
             np.ceil(descriptor.maximum_water_volume_ml / (descriptor.water_reward_size_ul / 1000))
         )
@@ -749,25 +730,27 @@ def run_training_logic(
     # Converts all arguments used to determine the speed and duration threshold over time into numpy variables to
     # optimize the main session's runtime loop:
     initial_speed = np.float64(descriptor.initial_run_speed_threshold_cm_s)  # In centimeters per second
-    maximum_speed = np.float64(5)  # In centimeters per second
+    maximum_speed = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_speed_cm_s)  # In centimeters per second
     speed_step = np.float64(descriptor.run_speed_increase_step_cm_s)  # In centimeters per second
 
     initial_duration = np.float64(descriptor.initial_run_duration_threshold_s * 1000)  # In milliseconds
-    maximum_duration = np.float64(5000)  # In milliseconds
+    maximum_duration = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_duration_s * 1000)  # In milliseconds
     duration_step = np.float64(descriptor.run_duration_increase_step_s * 1000)  # In milliseconds
 
     water_threshold = np.float64(descriptor.increase_threshold_ml * 1000)  # In microliters
     maximum_volume = np.float64(descriptor.maximum_water_volume_ml * 1000)  # In microliters
 
     # Converts the training time from minutes to seconds to make it compatible with the timer precision.
-    training_time = descriptor.maximum_training_time_min * 60
+    training_time = convert_time(
+        time=descriptor.maximum_training_time_min, from_units=TimeUnits.MINUTE, to_units=TimeUnits.SECOND
+    )
 
     # Initializes internal tracker variables:
-    # Tracks the data necessary to update the training progress bar
+    # Tracks the data necessary to update the training progress bar.
     previous_time = 0
 
     # Tracks when speed and / or duration thresholds are updated. This is necessary to redraw the threshold lines in
-    # the visualizer plot
+    # the visualizer plot.
     previous_speed_threshold = copy.copy(initial_speed)
     previous_duration_threshold = copy.copy(initial_duration)
 
@@ -781,7 +764,7 @@ def run_training_logic(
 
     system: _MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class
+        # Initializes the system class.
         system = _MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
 
         # Initializes all system assets and guides the user through hardware-specific session preparation steps.
@@ -790,8 +773,8 @@ def run_training_logic(
         # If the user chose to terminate the session during initialization checkpoint, raises an error to jump to the
         # shutdown sequence, bypassing all other session preparation steps.
         if system.terminated:
-            # Note, this specific type of errors should not be raised by any other session component. Therefore, it is
-            # possible to handle this type of exceptions as a unique marker for early user-requested session
+            # Note, this specific type of error should not be raised by any other session component. Therefore, it is
+            # possible to handle this type of exception as a unique marker for early user-requested session
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
@@ -801,7 +784,7 @@ def run_training_logic(
         # 'purge' runtimes.
         session_data.mark_runtime_initialized()
 
-        # Switches the system into the run-training mode
+        # Switches the system into the run-training mode.
         system.run_train()
 
         message = "Run training: Started."
@@ -819,7 +802,8 @@ def run_training_logic(
         )
 
         runtime_timer.reset()
-        running_duration_timer.reset()  # It is critical to reset both timers at the same time.
+        # It is critical to reset both timers at the same time.
+        running_duration_timer.reset()
 
         # Pre-initializes the threshold trackers to avoid MyPy errors.
         speed_threshold: np.float64 = np.float64(0.0)
@@ -827,7 +811,8 @@ def run_training_logic(
 
         # This is the main session loop of the run training mode.
         while runtime_timer.elapsed < (training_time + system.paused_time):
-            system.runtime_cycle()  # Repeatedly calls the runtime cycle during training
+            # Repeatedly calls the runtime cycle during training.
+            system.runtime_cycle()
 
             # If the user sent the abort command, terminates the training early.
             if system.terminated:
@@ -836,24 +821,35 @@ def run_training_logic(
                     "procedure..."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                break  # Breaks the while loop
+                break
 
             # Determines how many times the speed and duration thresholds have been increased based on the difference
             # between the total delivered water volume and the increase threshold. This dynamically adjusts the running
             # speed and duration thresholds with delivered water volume, ensuring the animal has to try progressively
             # harder to keep receiving water.
-            increase_steps: np.float64 = np.floor(system.dispensed_water_volume / water_threshold)
+            increase_steps: np.float64 = (
+                np.float64(0) if increase_disabled else np.floor(system.dispensed_water_volume / water_threshold)
+            )
 
-            # Determines the speed and duration thresholds for each cycle. This factors in the user input via the
-            # session control GUI. Note, user input has a static resolution of 0.01 cm/s and 0.01 s (10 ms) per step.
+            # Computes the automatic (runtime-driven) component of each threshold, which combines the initial threshold
+            # with the volume-driven increments but excludes the user-defined GUI modifier. Publishing these values to
+            # the control GUI lets it display the current effective threshold and back-compute the modifier needed to
+            # match user-requested absolute values.
+            auto_speed: np.float64 = initial_speed + (increase_steps * speed_step)
+            auto_duration: np.float64 = initial_duration + (increase_steps * duration_step)
+            system.publish_runtime_thresholds(speed_threshold=auto_speed, duration_threshold=auto_duration)
+
+            # Determines the effective speed and duration thresholds for each cycle by adding the user input from the
+            # session control GUI on top of the automatic component. User input has a static resolution of 0.01 cm/s
+            # and 0.01 s (10 ms) per step.
             speed_threshold = np.clip(
-                a=initial_speed + (increase_steps * speed_step) + (system.speed_modifier * 0.01),
-                a_min=0.1,  # Minimum value
+                a=auto_speed + (system.speed_modifier * 0.01),
+                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_speed_cm_s,  # Minimum value
                 a_max=maximum_speed,  # Maximum value
             )
             duration_threshold = np.clip(
-                a=initial_duration + (increase_steps * duration_step) + (system.duration_modifier * 10),
-                a_min=50,  # Minimum value (0.05 seconds == 50 milliseconds)
+                a=auto_duration + (system.duration_modifier * 10),
+                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_duration_s * 1000,  # Minimum value, converted to ms
                 a_max=maximum_duration,  # Maximum value
             )
 
@@ -863,7 +859,9 @@ def run_training_logic(
             if once or (
                 duration_threshold != previous_duration_threshold or previous_speed_threshold != speed_threshold
             ):
-                system.update_visualizer_thresholds(speed_threshold, duration_threshold)
+                system.update_visualizer_thresholds(
+                    speed_threshold=speed_threshold, duration_threshold=duration_threshold
+                )
                 previous_speed_threshold = speed_threshold
                 previous_duration_threshold = duration_threshold
 
@@ -889,11 +887,11 @@ def run_training_logic(
                 # timer, this guards against animals that carry on running without consuming water rewards.
                 running_duration_timer.reset()
 
-                # If the epoch timer was active for the current epoch, resets the timer
+                # If the epoch timer was active for the current epoch, resets the timer.
                 epoch_timer_engaged = False
 
             # If the current speed is below the speed threshold, acts depending on whether the session is configured to
-            # allow dipping below the threshold
+            # allow dipping below the threshold.
             elif system.running_speed < speed_threshold:
                 # If the user did not allow dipping below the speed threshold, resets the run duration timer.
                 if maximum_idle_time_ms == 0:
@@ -925,16 +923,16 @@ def run_training_logic(
             # track of elapsed training time. Accounts for any additional time spent in the 'paused' state.
             elapsed_time = runtime_timer.elapsed - system.paused_time
             if elapsed_time > previous_time:
-                previous_time = elapsed_time  # Updates previous time
+                previous_time = elapsed_time
 
-                # Updates the time display without advancing the progress bar
+                # Updates the time display without advancing the progress bar.
                 elapsed_minutes = int(elapsed_time // 60)
                 elapsed_seconds = int(elapsed_time % 60)
                 progress_bar.set_postfix_str(
                     f"Time: {elapsed_minutes:02d}:{elapsed_seconds:02d}/{descriptor.maximum_training_time_min:02d}:00"
                 )
 
-                # Refreshes the display to show updated time without changing progress
+                # Refreshes the display to show updated time without changing progress.
                 progress_bar.refresh()
 
             # If the total volume of water dispensed during the session exceeds the maximum allowed volume, aborts the
@@ -947,7 +945,7 @@ def run_training_logic(
                 console.echo(message=message, level=LogLevel.SUCCESS)
                 break
 
-        # Closes the progress bar if the session ends as expected
+        # Closes the progress bar if the session ends as expected.
         progress_bar.close()
 
         # Updates the descriptor with the final thresholds reached during the session. These will be used as the
@@ -962,7 +960,7 @@ def run_training_logic(
 
     # Ensures that the function always attempts the graceful shutdown procedure, even if it encounters session errors.
     finally:
-        # If the system was initialized, attempts to gracefully terminate system assets
+        # If the system was initialized, attempts to gracefully terminate system assets.
         if system is not None:
             system.stop()
 
@@ -974,12 +972,15 @@ def run_training_logic(
                 "assets. Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data)
+            purge_session(session_data=session_data)
 
         message = "Run training session: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
 
+# PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
+# mis-infers a descriptor field; these are false positives that mypy does not report.
+# noinspection PyTypeChecker,PyUnresolvedReferences
 def experiment_logic(
     experimenter: str,
     project_name: str,
@@ -994,7 +995,7 @@ def experiment_logic(
     Notes:
         Each experiment is conceptualized as a sequence of experiment states (phases), which define the task and the
         types of data being collected while the system maintains the state. During the session, the system executes the
-        predefined sequence of states defines in the experiment's configuration file. Once all states are executed, the
+        predefined sequence of states defined in the experiment's configuration file. Once all states are executed, the
         experiment session ends.
 
         During the session's runtime, the task logic and the Virtual Reality world are resolved by the Unity game
@@ -1019,18 +1020,15 @@ def experiment_logic(
     # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
-    # Verifies that the specified project has been configured.
-    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
-    if not project_directory.exists():
-        message = (
-            f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
-            f"the project {project_name}. The {system_configuration.name} data acquisition system is not configured to "
-            f"acquire data for this project. Use the 'sle configure project' command to configure the project before "
-            f"running data acquisition sessions."
-        )
-        console.error(message=message, error=FileNotFoundError)
+    # Verifies that the specified project is configured.
+    project_directory = _verify_project_configured(
+        session_description=f"{experiment_name} experiment session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
+    )
 
-    # Prevents the user from executing the session if the project is not configured to run the requested experiment
+    # Prevents the user from executing the session if the project is not configured to run the requested experiment.
     project_experiments = get_project_experiments(project_directory=project_directory)
     if experiment_name not in project_experiments:
         message = (
@@ -1042,25 +1040,12 @@ def experiment_logic(
         console.error(message=message, error=FileNotFoundError)
 
     # Verifies that the animal participates exclusively in the specified project.
-    animal_projects = get_animal_project(
-        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    _verify_animal_project_membership(
+        session_description=f"{experiment_name} experiment session",
+        system_configuration=system_configuration,
+        project_name=project_name,
+        animal_id=animal_id,
     )
-    if len(animal_projects) > 1:  # Rare case, often indicative of old migration pipeline use
-        message = (
-            f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
-            f"the project {project_name}. The animal is associated with multiple projects managed by the "
-            f"{system_configuration.name} data acquisition system, which is not allowed. The animal is associated with "
-            f"the following projects: {', '.join(animal_projects)}."
-        )
-        console.error(message=message, error=ValueError)
-    elif len(animal_projects) == 1 and animal_projects[0] != project_name:
-        message = (
-            f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
-            f"the project {project_name}. The animal is already associated with a different project "
-            f"'{animal_projects[0]}' managed by the {system_configuration.name} data acquisition system. If necessary, "
-            f"use the 'sle manage migrate' CLI command to transfer the animal to the desired project."
-        )
-        console.error(message=message, error=ValueError)
 
     # Queries the current Python and library version information. This is then used to initialize the SessionData
     # instance.
@@ -1079,20 +1064,21 @@ def experiment_logic(
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
-    # Uses initialized SessionData instance to load the experiment configuration data
+    # Uses initialized SessionData instance to load the experiment configuration data.
     experiment_config: MesoscopeExperimentConfiguration = MesoscopeExperimentConfiguration.from_yaml(
         file_path=session_data.raw_data.experiment_configuration_path
     )
 
-    # Verifies that all Mesoscope-VR states used during experiments are valid
-    valid_states = {1, 2}
+    # Verifies that all Mesoscope-VR states used during experiments are valid.
+    valid_states = (MesoscopeVRStates.REST, MesoscopeVRStates.RUN)
+    supported_state_codes = ", ".join(f"{state.value} ({state.name.lower()})" for state in valid_states)
     state: ExperimentState
     for state in experiment_config.experiment_states.values():
         if state.system_state_code not in valid_states:
             message = (
                 f"Invalid Mesoscope-VR system state code {state.system_state_code} encountered when verifying "
-                f"{experiment_name} experiment configuration. Currently, only codes 1 (rest) and 2 (run) are supported "
-                f"for the Mesoscope-VR system."
+                f"{experiment_name} experiment configuration. Currently, only codes {supported_state_codes} are "
+                f"supported for the Mesoscope-VR system."
             )
             console.error(message=message, error=ValueError)
 
@@ -1101,7 +1087,7 @@ def experiment_logic(
     previous_descriptor_path = mesoscope_data.vrpc_data.session_descriptor_path
     previous_descriptor: MesoscopeExperimentDescriptor | None = None
     if previous_descriptor_path.exists():
-        # Loads the previous descriptor's data from memory
+        # Loads the previous descriptor's data from memory.
         previous_descriptor = MesoscopeExperimentDescriptor.from_yaml(file_path=previous_descriptor_path)
 
         message = "Previous session's configuration parameters: Applied."
@@ -1112,7 +1098,7 @@ def experiment_logic(
         )
         console.echo(message=message, level=LogLevel.INFO)
 
-    # Initializes the descriptor with the current session's experimenter and animal weight
+    # Initializes the descriptor with the current session's experimenter and animal weight.
     descriptor = MesoscopeExperimentDescriptor(
         experimenter=experimenter,
         animal_weight_g=animal_weight,
@@ -1127,12 +1113,12 @@ def experiment_logic(
     if maximum_unconsumed_rewards is not None:
         descriptor.maximum_unconsumed_rewards = maximum_unconsumed_rewards
 
-    # Initializes the timer to enforce experiment state durations
+    # Initializes the timer to enforce experiment state durations.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
     system: _MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class
+        # Initializes the system class.
         system = _MesoscopeVRSystem(
             session_data=session_data, session_descriptor=descriptor, experiment_configuration=experiment_config
         )
@@ -1143,8 +1129,8 @@ def experiment_logic(
         # If the user chose to terminate the session during initialization checkpoint, raises an error to jump to the
         # shutdown sequence, bypassing all other session preparation steps.
         if system.terminated:
-            # Note, this specific type of errors should not be raised by any other session component. Therefore, it is
-            # possible to handle this type of exceptions as a unique marker for early user-requested session
+            # Note, this specific type of error should not be raised by any other session component. Therefore, it is
+            # possible to handle this type of exception as a unique marker for early user-requested session
             # termination.
             message = "The session was terminated early due to user request."
             console.echo(message=message, level=LogLevel.SUCCESS)
@@ -1155,17 +1141,17 @@ def experiment_logic(
         session_data.mark_runtime_initialized()
 
         # Main session loop. It loops over all submitted experiment states and ends the session after executing the
-        # last state
+        # last state.
         for state in experiment_config.experiment_states.values():
-            runtime_timer.reset()  # Resets the timer
+            runtime_timer.reset()
 
-            # Sets the Experiment state
-            system.change_runtime_state(state.experiment_state_code)
+            # Sets the Experiment state.
+            system.change_runtime_state(new_state=state.experiment_state_code)
 
-            # Resets the tracker used to update the progress bar every second
+            # Resets the tracker used to update the progress bar every second.
             previous_seconds = 0
 
-            # Resolves and sets the Mesoscope-VR system state
+            # Resolves and sets the Mesoscope-VR system state.
             if state.system_state_code == MesoscopeVRStates.REST:
                 system.rest()
             elif state.system_state_code == MesoscopeVRStates.RUN:
@@ -1174,7 +1160,7 @@ def experiment_logic(
                 message = (
                     f"Unsupported Mesoscope-VR system state code {state.system_state_code} encountered when executing "
                     f"the {state.experiment_state_code} state. Currently, only the following system state codes are "
-                    f"supported {','.join(tuple(MesoscopeVRStates))}."
+                    f"supported {supported_state_codes}."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -1199,12 +1185,13 @@ def experiment_logic(
                 total=state.state_duration_s,
                 desc=f"Executing experiment state {state.experiment_state_code}",
                 bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}s",
-            ) as pbar:
-                # Cycles until the state duration of seconds passes
+            ) as progress_bar:
+                # Cycles until the state duration of seconds passes.
                 while runtime_timer.elapsed < (state.state_duration_s + system.paused_time):
                     # Since experiment logic is resolved by the Unity game engine, the session logic function only
                     # needs to call the runtime cycle and handle runtime termination cases.
-                    system.runtime_cycle()  # Repeatedly calls the runtime cycle as part of the experiment state cycle
+                    # Repeatedly calls the runtime cycle as part of the experiment state cycle.
+                    system.runtime_cycle()
 
                     # If the user has terminated the session, breaks the while loop. The termination is also handled at
                     # the level of the 'for' loop. The error message is generated at that level, rather than here.
@@ -1215,11 +1202,12 @@ def experiment_logic(
                     # in the paused state.
                     delta_seconds = runtime_timer.elapsed - (previous_seconds + system.paused_time)
                     if delta_seconds > 0:
-                        # While it is unlikely that delta ever exceeds 1, supports this rare case
-                        pbar.update(delta_seconds)
+                        # While it is unlikely that delta ever exceeds 1, supports this rare case.
+                        progress_bar.update(delta_seconds)
                         previous_seconds = runtime_timer.elapsed - system.paused_time
 
-                system.paused_time = 0  # Resets the paused time before entering the next experiment state's cycle
+                # Resets the paused time before entering the next experiment state's cycle.
+                system.paused_time = 0
 
                 # If the user sent the abort command, terminates the experiment early.
                 if system.terminated:
@@ -1228,7 +1216,7 @@ def experiment_logic(
                         "procedure..."
                     )
                     console.echo(message=message, level=LogLevel.ERROR)
-                    break  # Breaks the for loop
+                    break
 
     # RecursionErrors should not be raised by any session component except in the case that the user wants to terminate
     # the session as part of the startup checkpoint. Therefore, silences the error.
@@ -1237,7 +1225,7 @@ def experiment_logic(
 
     # Ensures that the function always attempts the graceful shutdown procedure, even if it encounters session errors.
     finally:
-        # If the system was initialized, attempts to gracefully terminate system assets
+        # If the system was initialized, attempts to gracefully terminate system assets.
         if system is not None:
             system.stop()
 
@@ -1249,7 +1237,7 @@ def experiment_logic(
                 "assets. Removing all leftover data from the uninitialized session from all destinations..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data)
+            purge_session(session_data=session_data)
 
         message = "Experiment session: Complete."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -1259,7 +1247,7 @@ def maintenance_logic() -> None:
     """Encapsulates the logic used to maintain a subset of the Mesoscope-VR system's hardware components."""
     console.echo(message="Initializing Mesoscope-VR system maintenance runtime...", level=LogLevel.INFO)
 
-    # Queries the data acquisition system runtime parameters
+    # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
     # Initializes a timer used to optimize the main runtime cycling.
@@ -1275,21 +1263,23 @@ def maintenance_logic() -> None:
         user_input = input("Enter 'yes' or 'no': ").strip().lower()
         move_zaber_motors = user_input[0] if user_input else ""
 
-    # All calibration procedures are executed in a temporary directory deleted after runtime
-    with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_dir:
+    # All calibration procedures are executed in a temporary directory deleted after runtime.
+    with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:
         try:
             console.echo(message="Initializing the maintenance assets...", level=LogLevel.INFO)
 
             # Initializes the data logger. All log entries recorded by the logger during runtime are discarded at the
             # end of runtime, hence the name 'temporary'.
             logger = DataLogger(
-                output_directory=Path(output_dir),
+                output_directory=Path(output_directory),
                 instance_name="temporary",
                 thread_count=10,
             )
             logger.start()
 
-            # Initializes the interface for the Actor MicroController.
+            # Initializes the interface for the Actor MicroController. The calibration data union is narrower than the
+            # interface's declared parameter type; the mismatch is already acknowledged with the type: ignore below.
+            # noinspection PyTypeChecker
             valve: WaterValveInterface = WaterValveInterface(
                 valve_calibration_data=(
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
@@ -1340,7 +1330,7 @@ def maintenance_logic() -> None:
                 message = "Zaber motors: Positioned for Mesoscope-VR system maintenance."
                 console.echo(message=message, level=LogLevel.SUCCESS)
 
-            # Initializes the maintenance GUI
+            # Initializes the maintenance GUI.
             # noinspection PyProtectedMember
             ui = MaintenanceControlUI(
                 valve_tracker=valve._valve_tracker,  # noqa: SLF001
@@ -1356,50 +1346,46 @@ def maintenance_logic() -> None:
 
             # Enters the main control loop, relinquishing control to the maintenance GUI.
             while not ui.exit_signal:
-                # Opens the valve
+                # Opens the valve.
                 if ui.valve_open_signal:
                     valve.set_state(state=True)
 
-                # Closes the valve
+                # Closes the valve.
                 if ui.valve_close_signal:
                     valve.set_state(state=False)
 
-                # Uses the valve to deliver a water reward
                 if ui.valve_reward_signal:
                     valve.deliver_reward(volume=float(ui.reward_volume))
 
-                # References the valve
                 if ui.valve_reference_signal:
                     valve.reference_valve()
 
-                # Performs the valve calibration procedure
                 if ui.valve_calibrate_signal:
                     valve.calibrate_valve(pulse_duration=ui.calibration_pulse_duration)
 
-                # Locks the wheel brake
+                # Locks the wheel brake.
                 if ui.brake_lock_signal:
                     wheel.set_state(state=True)
 
-                # Unlocks the wheel brake
+                # Unlocks the wheel brake.
                 if ui.brake_unlock_signal:
                     wheel.set_state(state=False)
 
-                # Opens the gas puff valve
+                # Opens the gas puff valve.
                 if ui.gas_valve_open_signal:
                     gas_puff_valve.set_state(state=True)
 
-                # Closes the gas puff valve
+                # Closes the gas puff valve.
                 if ui.gas_valve_close_signal:
                     gas_puff_valve.set_state(state=False)
 
-                # Delivers a gas puff
                 if ui.gas_valve_pulse_signal:
                     gas_puff_valve.deliver_puff(duration_ms=ui.gas_valve_pulse_duration)
 
-                # Delays for 5 milliseconds to avoid busy-waiting
+                # Delays for 5 milliseconds to avoid busy-waiting.
                 delay_timer.delay(delay=5, block=False)
 
-        # Ensures that the runtime always attempts to terminate all assets gracefully
+        # Ensures that the runtime always attempts to terminate all assets gracefully.
         finally:
             message = "Terminating Mesoscope-VR maintenance runtime..."
             console.echo(message=message, level=LogLevel.INFO)
@@ -1425,11 +1411,78 @@ def maintenance_logic() -> None:
             message = "Actor MicroController interface: Terminated."
             console.echo(message=message, level=LogLevel.SUCCESS)
 
-            # Stops the data logger
+            # Stops the data logger.
             logger.stop()
 
-            # Shuts down the UI
+            # Shuts down the UI.
             ui.shutdown()
 
             message = "Mesoscope-VR system maintenance runtime: Terminated."
             console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _verify_project_configured(
+    session_description: str,
+    system_configuration: MesoscopeSystemConfiguration,
+    project_name: str,
+    animal_id: str,
+) -> Path:
+    """Verifies that the target project is configured on the local data acquisition system.
+
+    Args:
+        session_description: A short phrase naming the session being prepared, embedded into the error message
+            (for example, "window checking session").
+        system_configuration: The resolved Mesoscope-VR system configuration instance.
+        project_name: The name of the project for which the session is prepared.
+        animal_id: The unique identifier of the animal for which the session is prepared.
+
+    Returns:
+        The path to the configured project's root directory.
+    """
+    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
+    if not project_directory.exists():
+        message = (
+            f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
+            f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
+            f"data for this project. Use the 'sle configure project' command to configure the project before running "
+            f"data acquisition sessions."
+        )
+        console.error(message=message, error=FileNotFoundError)
+    return project_directory
+
+
+def _verify_animal_project_membership(
+    session_description: str,
+    system_configuration: MesoscopeSystemConfiguration,
+    project_name: str,
+    animal_id: str,
+) -> None:
+    """Verifies that the target animal participates exclusively in the specified project.
+
+    Args:
+        session_description: A short phrase naming the session being prepared, embedded into error messages
+            (for example, "window checking session").
+        system_configuration: The resolved Mesoscope-VR system configuration instance.
+        project_name: The name of the project for which the session is prepared.
+        animal_id: The unique identifier of the animal for which the session is prepared.
+    """
+    animal_projects = get_animal_project(
+        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
+    )
+    # Rare case, often indicative of old migration pipeline use.
+    if len(animal_projects) > 1:
+        message = (
+            f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
+            f"{project_name}. The animal is associated with multiple projects managed by the "
+            f"{system_configuration.name} data acquisition system, which is not allowed. The animal is associated with "
+            f"the following projects: {', '.join(animal_projects)}."
+        )
+        console.error(message=message, error=ValueError)
+    elif len(animal_projects) == 1 and animal_projects[0] != project_name:
+        message = (
+            f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
+            f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
+            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
+            f"CLI command to transfer the animal to the desired project."
+        )
+        console.error(message=message, error=ValueError)

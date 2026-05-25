@@ -6,9 +6,8 @@ assets. See the `source code repository <https://github.com/Sun-Lab-NBB/sollerti
 Authors: Ivan Kondratyev (Inkaros), Kushaan Gupta, Natalie Yeung, Katlynn Ryu, Jasmine Si
 """
 
-# Unlike most other libraries, all of this library's features are realized via the click-based CLI commands
-# automatically exposed by installing the library into a conda environment. Therefore, it currently does not contain
-# any explicit API exports.
+# All of this library's features are realized via the click-based CLI commands automatically exposed by installing the
+# library into a conda environment. Therefore, it currently does not contain any explicit API exports.
 
 from ataraxis_base_utilities import console
 

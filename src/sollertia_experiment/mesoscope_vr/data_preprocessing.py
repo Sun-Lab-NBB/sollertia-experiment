@@ -5,7 +5,7 @@ session's runtime and moving it to the long-term storage destinations.
 from __future__ import annotations
 
 import json
-import shutil as sh
+import shutil
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from datetime import UTC, datetime
@@ -17,6 +17,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import tifffile
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
+from ataraxis_time import TimeUnits, convert_time
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
     SessionData,
@@ -30,7 +31,7 @@ from sollertia_shared_assets import (
 )
 from ataraxis_data_structures import delete_directory, transfer_directory
 
-from .system import MesoscopeData, mesoscope_vr_sessions, get_system_configuration
+from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
 from ..cross_system import (
     WaterLog,
     push_session_data,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from .system import MesoscopeGoogleSheets
     from ..cross_system import SurgeryLog
 
-_METADATA_SCHEMA = {
+_METADATA_SCHEMA: dict[str, tuple[type, type]] = {
     "frameNumbers": (np.int32, int),
     "acquisitionNumbers": (np.int32, int),
     "frameNumberAcquisition": (np.int32, int),
@@ -59,11 +60,237 @@ _METADATA_SCHEMA = {
     "dcOverVoltage": (np.int32, int),
 }
 """Defines the schema for the frame-variant ScanImage metadata expected by the _process_stack() function
-when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently 
+when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently
 used by the Mesoscope-VR system."""
 
-_IGNORED_METADATA_FIELDS = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
+_IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
 """Stores the frame-invariant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
+
+
+def preprocess_session_data(session_data: SessionData) -> None:
+    """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
+    all configured long-term storage destinations, and removes the local data copy from the VRPC.
+
+    Notes:
+        If no long-term storage destinations are configured for the host-machine, the data transfer and the local data
+        removal are skipped, and the preprocessing is limited to on-premises data conversion and aggregation steps.
+
+    Args:
+        session_data: The SessionData instance that defines the processed session.
+    """
+    message = f"Initializing session {session_data.session_name} data preprocessing..."
+    console.echo(message=message, level=LogLevel.INFO)
+
+    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
+    system_configuration = get_system_configuration()
+
+    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+
+    # Warns about any long-term storage destinations that are not configured for the host-machine. The session's data
+    # is not backed up to these destinations during the data transfer step.
+    for destination_name in mesoscope_data.unconfigured_destinations:
+        message = (
+            f"The {destination_name} long-term storage destination is not configured for the host-machine. The "
+            f"session {session_data.session_name} data is not backed up to this destination."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+
+    # If necessary, ensures that the mesoscope_data ScanImagePC directory is renamed to include the processed session
+    # name.
+    rename_mesoscope_directory(mesoscope_data=mesoscope_data)
+
+    # Assembles all log .npy entries into archive .npz files.
+    assemble_session_logs(session_data=session_data, processes=31)
+
+    # Renames all videos to use human-friendly names.
+    rename_session_videos(session_data=session_data)
+
+    # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
+    _pull_mesoscope_data(
+        session_data=session_data,
+        mesoscope_data=mesoscope_data,
+        threads=31,
+    )
+
+    # Compresses all mesoscope-acquired frames and extracts their metadata.
+    _preprocess_mesoscope_directory(
+        session_data=session_data,
+        mesoscope_data=mesoscope_data,
+        processes=31,
+    )
+
+    # Extracts and saves the animal's surgery data to the session's data directory and updates the water restriction
+    # log to reflect the processed session.
+    _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
+
+    # Sends preprocessed data to all configured long-term storage destinations.
+    push_session_data(session_data=session_data, destinations=mesoscope_data.destinations, threads=15)
+
+    message = f"Session {session_data.session_name} data preprocessing: Complete."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
+    """Renames the shared 'mesoscope_data' ScanImagePC directory to include the target session's name.
+
+    Args:
+        mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
+            Mesoscope-VR data acquisition system.
+    """
+    # If necessary, renames the 'shared' mesoscope_data directory to use the name specific to the preprocessed session.
+    # It is essential that this is done before preprocessing, as the preprocessing pipeline uses this semantic for
+    # finding and pulling the mesoscope data for the processed session.
+    general_path = mesoscope_data.scanimagepc_data.mesoscope_data_path
+    session_specific_path = mesoscope_data.scanimagepc_data.session_specific_path
+
+    # Note, the renaming only happens if the session-specific cache does not exist, the general mesoscope_frames cache
+    # exists, and it is not empty (has files inside).
+    if not session_specific_path.exists() and general_path.exists() and list(general_path.glob("*")):
+        general_path.rename(session_specific_path)
+        # Generates a new empty mesoscope_frames directory to support future runtimes.
+        ensure_directory_exists(general_path)
+
+
+def purge_session(session_data: SessionData) -> None:
+    """Removes all data and directories associated with the input session from all Mesoscope-VR system machines and
+    long-term storage destinations.
+
+    Notes:
+        This function is extremely dangerous and should be used with caution. It is designed to remove all data from
+        failed or no longer necessary sessions from all storage locations. Never use this function on sessions that
+        contain valid scientific data.
+
+    Args:
+        session_data: The SessionData instance that defines the session whose data needs to be removed.
+    """
+    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
+    system_configuration = get_system_configuration()
+
+    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+
+    # Queries the paths to all known session data directories, including the long-term storage destinations.
+    deletion_candidates = [session_data.raw_data_path.parent]
+    deletion_candidates.extend(destination.session_path for destination in mesoscope_data.destinations.destinations)
+    deletion_candidates.append(mesoscope_data.scanimagepc_data.session_specific_path)
+
+    # Sessions without the nk.bin marker successfully initialized their runtime and likely contain valid data, so the
+    # deletion requires explicit user confirmation. Sessions with the nk.bin marker are considered safe to remove.
+    deleted = delete_session_directories(
+        candidates=tuple(deletion_candidates),
+        session_name=session_data.session_name,
+        require_confirmation=not session_data.raw_data.nk_path.exists(),
+    )
+
+    # Aborts without further changes if the user declined the deletion.
+    if not deleted:
+        return
+
+    # Ensures that the mesoscope_data directory is reset, in case it has any lingering files from the purged runtime.
+    for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
+        file.unlink(missing_ok=True)
+
+    message = "Session data purging: Complete."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
+    """Transfers all sessions performed by the specified animal from the source project to the target project across
+    all storage locations.
+
+    Notes:
+        The migration strategy depends on whether the host-machine is configured with any long-term storage
+        destinations. Systems with at least one configured destination treat the preferred (first configured)
+        destination as the source of truth and pull, re-preprocess, and purge each session. Systems without any
+        configured destination keep all data on the acquisition host machine, so the migration reduces to an
+        on-premises operation that relocates each locally stored session to the target project directory and reassigns
+        it. The persistent data relocation and the cleanup of redundant directories apply to both modes.
+
+    Args:
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+    """
+    console.echo(message=f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
+
+    # Queries the system configuration parameters, which includes the filesystem configuration.
+    system_configuration = get_system_configuration()
+    filesystem = system_configuration.filesystem
+
+    # Resolves the paths to the key local root directories used in the migration process.
+    destination_local_root = filesystem.root_directory.joinpath(target_project, animal)
+    source_local_root = filesystem.root_directory.joinpath(source_project, animal)
+
+    # If the target project does not exist, aborts with an error.
+    if not destination_local_root.parent.exists():
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"target project does not exist. Use the 'sle configure project' command to create the project before "
+            f"migrating animals to this project."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Ensures that the root directory for the processed animal exists on the local machine.
+    ensure_directory_exists(destination_local_root)
+
+    # Resolves the configured long-term storage destinations in preference order (configuration order). The first
+    # configured destination is treated as the source of truth from which the session data is pulled.
+    configured_destinations = [(name, root) for name, root in filesystem.storage_directories.items() if root != Path()]
+
+    # Systems without any configured long-term storage destination keep all data on the acquisition host machine, so
+    # the session migration reduces to a local relocation. Systems with at least one destination pull from the
+    # preferred (first configured) destination.
+    if not configured_destinations:
+        _migrate_sessions_on_premises(
+            source_local_root=source_local_root,
+            destination_local_root=destination_local_root,
+            target_project=target_project,
+        )
+    else:
+        preferred_name, preferred_root = configured_destinations[0]
+        _migrate_sessions_via_destination(
+            destination_name=preferred_name,
+            destination_root=preferred_root.joinpath(source_project, animal),
+            source_local_root=source_local_root,
+            destination_local_root=destination_local_root,
+            animal=animal,
+            source_project=source_project,
+            target_project=target_project,
+        )
+
+    console.echo(message="Migrating persistent data directories...")
+    # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
+    # data, if any was resolved for any processed session.
+    old_path = filesystem.mesoscope_directory.joinpath(source_project, animal)
+    new_path = filesystem.mesoscope_directory.joinpath(target_project, animal)
+    if new_path.exists():
+        shutil.rmtree(new_path)
+    shutil.move(src=old_path, dst=new_path)
+
+    # Also moves the VRPC persistent data for the animal between projects.
+    old_path = source_local_root.joinpath("persistent_data")
+    new_path = destination_local_root.joinpath("persistent_data")
+    if new_path.exists():
+        shutil.rmtree(new_path)
+    shutil.move(src=old_path, dst=new_path)
+
+    # Removes the old animal directory from the acquisition host machine and all configured long-term storage
+    # destinations. This also removes any lingering data not moved during the migration process, ensuring that each
+    # animal is found under at most a single project directory everywhere. Unconfigured destinations are skipped, since
+    # their unset roots resolve to relative paths that are unsafe to delete.
+    deletion_root_candidates = [
+        filesystem.mesoscope_directory,
+        filesystem.root_directory,
+        *filesystem.storage_directories.values(),
+    ]
+    deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
+    ):
+        delete_directory(directory_path=candidate)
+
+    console.echo(message="Migration: Complete.", level=LogLevel.SUCCESS)
 
 
 def _verify_and_get_stack_size(file: Path) -> int:
@@ -78,14 +305,13 @@ def _verify_and_get_stack_size(file: Path) -> int:
         returns 0 to indicate that the file is not a valid mesoscope stack.
     """
     with tifffile.TiffFile(file) as tiff:
-        # Gets the number of pages (frames) from the tiff file's header
-        n_frames = len(tiff.pages)
+        frame_count = len(tiff.pages)
 
         # Considers all files with more than one page, a 2-dimensional (monochrome) image layout, and ScanImage metadata
         # a candidate stack for further processing. For these stacks, returns the discovered stack size
         # (number of frames).
-        if n_frames > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:  # noqa: PLR2004
-            return n_frames
+        if frame_count > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:  # noqa: PLR2004
+            return frame_count
         # Otherwise, returns 0 to indicate that the file is not a valid mesoscope frame stack.
         return 0
 
@@ -93,18 +319,14 @@ def _verify_and_get_stack_size(file: Path) -> int:
 def _process_stack(
     tiff_path: Path, first_frame_number: int, output_directory: Path, batch_size: int = 100
 ) -> dict[str, Any]:
-    """Recompresses the target mesoscope frame stack TIFF file using the Limited Error Raster Coding (LERC) scheme and
-    extracts its frame-variant ScanImage metadata.
+    """Recompresses the target mesoscope frame stack TIFF file using the Limited Error Raster Compression (LERC)
+    scheme and extracts its frame-variant ScanImage metadata.
 
     Notes:
         This function is designed to be parallelized to work on multiple TIFF files at the same time.
 
         As part of its runtime, the function strips the extracted metadata from the recompressed frame stack to reduce
         its size.
-
-    Raises:
-        NotImplementedError: If the extracted frame-variant ScanImage metadata cannot be processed due to a mismatch
-            between the ScanImage version and the version of the sollertia-experiment library.
 
     Args:
         tiff_path: The path to the TIFF file that stores the stack of the mesoscope-acquired frames to process.
@@ -115,25 +337,29 @@ def _process_stack(
 
     Returns:
         A dictionary containing the extracted frame-variant ScanImage metadata for the processed mesoscope frame stack.
+
+    Raises:
+        NotImplementedError: If the extracted frame-variant ScanImage metadata cannot be processed due to a mismatch
+            between the ScanImage version and the version of the sollertia-experiment library.
     """
-    # Generates the file handle for the current stack
     with tifffile.TiffFile(tiff_path) as stack:
-        # Determines the size of the stack
         stack_size = len(stack.pages)
 
-        # Initializes arrays for storing the extracted metadata using the schema
-        arrays = {key: np.zeros(stack_size, dtype=dtype) for key, (dtype, _) in _METADATA_SCHEMA.items()}
+        # Initializes arrays for storing the extracted metadata using the schema.
+        arrays: dict[str, NDArray[Any]] = {
+            key: np.zeros(stack_size, dtype=dtype) for key, (dtype, _) in _METADATA_SCHEMA.items()
+        }
 
         # Also initializes the array for storing the converted frame acquisition timestamps.
         arrays["epochTimestamps_us"] = np.zeros(stack_size, dtype=np.uint64)
 
-        # Loops over each page in the stack and extracts the metadata associated with each frame
-        for i, page in enumerate(stack.pages):
+        # Loops over each page in the stack and extracts the metadata associated with each frame.
+        for frame_index, page in enumerate(stack.pages):
             metadata = page.tags["ImageDescription"].value  # type: ignore[union-attr]
 
             # The metadata is returned as a 'newline'-delimited string of key=value pairs. This preprocessing header
             # splits the string into separate key=value pairs. Then, each pair is further separated and processed as
-            # necessary
+            # necessary.
             for line in metadata.splitlines():
                 if "=" not in line:
                     continue
@@ -142,28 +368,28 @@ def _process_stack(
                 value = value.strip()
 
                 # Raises errors if the metadata field is unexpected (unsupported).
-                if key in _METADATA_SCHEMA:  # Expected data fields
-                    # Use the schema to parse and convert the value
+                if key in _METADATA_SCHEMA:
+                    # Uses the schema to parse and convert the value.
                     _, converter = _METADATA_SCHEMA[key]
-                    arrays[key][i] = converter(value)
+                    arrays[key][frame_index] = converter(value)
                 elif key == "epoch":  # Epoch data is converted to the Sollertia platform's timestamp format.
                     # Parses the epoch [year month day hour minute second.microsecond] as microseconds elapsed since
                     # the UTC onset.
-                    epoch_vals = [float(x) for x in value[1:-1].split()]
+                    epoch_values = [float(component) for component in value[1:-1].split()]
+                    epoch_seconds = datetime(
+                        int(epoch_values[0]),
+                        int(epoch_values[1]),
+                        int(epoch_values[2]),
+                        int(epoch_values[3]),
+                        int(epoch_values[4]),
+                        int(epoch_values[5]),
+                        int((epoch_values[5] % 1) * 1_000_000),
+                        tzinfo=UTC,
+                    ).timestamp()
                     timestamp = int(
-                        datetime(
-                            int(epoch_vals[0]),
-                            int(epoch_vals[1]),
-                            int(epoch_vals[2]),
-                            int(epoch_vals[3]),
-                            int(epoch_vals[4]),
-                            int(epoch_vals[5]),
-                            int((epoch_vals[5] % 1) * 1_000_000),
-                            tzinfo=UTC,
-                        ).timestamp()
-                        * 1_000_000
-                    )  # Converts to microseconds
-                    arrays["epochTimestamps_us"][i] = timestamp
+                        convert_time(time=epoch_seconds, from_units=TimeUnits.SECOND, to_units=TimeUnits.MICROSECOND)
+                    )
+                    arrays["epochTimestamps_us"][frame_index] = timestamp
                 elif key in _IGNORED_METADATA_FIELDS:
                     # These fields are known but not currently used by the system. This section ensures these fields are
                     # empty to prevent accidental data loss.
@@ -175,7 +401,7 @@ def _process_stack(
                         )
                         console.error(message=message, error=NotImplementedError)
                 else:
-                    # Unknown field - raise error to ensure schema is updated
+                    # Raises an error so the schema is updated to support the new metadata field.
                     message = (
                         f"Unknown field '{key}' found in the frame-variant ScanImage metadata associated with the tiff "
                         f"file {tiff_path}. Update the _process_stack() function with the logic for parsing the data "
@@ -183,59 +409,60 @@ def _process_stack(
                     )
                     console.error(message=message, error=NotImplementedError)
 
-        # Computes the starting and ending frame numbers
+        # Computes the starting and ending frame numbers. The ending frame number is the stack length minus one plus
+        # the starting frame number.
         start_frame = first_frame_number
-        end_frame = first_frame_number + stack_size - 1  # The ending frame number is length - 1 + start
+        end_frame = first_frame_number + stack_size - 1
 
-        # Creates the output path for the compressed stack. Uses configured digit padding for frame numbering
+        # Creates the output path for the compressed stack, using configured digit padding for frame numbering.
         output_path = output_directory.joinpath(f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff")
 
-        # Calculates the total number of batches required to fully process the stack
-        num_batches = int(np.ceil(stack_size / batch_size))
+        # Calculates the total number of batches required to fully process the stack.
+        batch_count = int(np.ceil(stack_size / batch_size))
 
         # Creates a TiffWriter to iteratively process and append each batch to the output file. Note, if the file
         # already exists, it will be overwritten.
         with tifffile.TiffWriter(output_path, bigtiff=False) as writer:
-            for batch_idx in range(num_batches):
-                # Calculates start and end indices for this batch
-                start_idx = batch_idx * batch_size
-                end_idx = min((batch_idx + 1) * batch_size, stack_size)
+            for batch_index in range(batch_count):
+                # Calculates the start and end indices for this batch.
+                start_index = batch_index * batch_size
+                end_index = min((batch_index + 1) * batch_size, stack_size)
 
-                # Reads a batch of original frames
-                original_batch = np.array([stack.pages[i].asarray() for i in range(start_idx, end_idx)])
+                original_batch = np.array(
+                    [stack.pages[page_index].asarray() for page_index in range(start_index, end_index)]
+                )
 
-                # Writes the entire batch to the output file using LERC compression
+                # Writes the entire batch to the output file using LERC compression.
                 writer.write(
-                    original_batch,
+                    data=original_batch,
                     compression="lerc",
                     compressionargs={"level": 0.0},  # Lossless compression
                     predictor=True,
                 )
 
-    # Returns extracted metadata dictionary to caller (all keys from the arrays' dict)
     return arrays
 
 
-def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata_path: Path) -> None:
+def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: Path, metadata_path: Path) -> None:
     """Extracts the frame-invariant ScanImage metadata from the target mesoscope frame stack TIFF file and uses it to
-    generate the metadata.json and suite2p_parameters.json files.
+    generate the metadata.json and cindra_parameters.json files.
 
     Args:
         frame_stack_path: The path to the TIFF file that stores a stack of the mesoscope-acquired frames.
-        ops_path: The path to the suite2p_parameters.json file to be created.
+        cindra_parameters_path: The path to the cindra_parameters.json file to be created.
         metadata_path: The path to the metadata.json file to be created.
     """
     # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
     # all frames and stacks.
     with tifffile.TiffFile(frame_stack_path) as tiff:
         metadata = tiff.scanimage_metadata
-        # Loads the data for the first frame in the stack to generate suite2p_parameters.json
+        # Loads the data for the first frame in the stack to generate cindra_parameters.json.
         frame_data = tiff.asarray(key=0)
 
     # Writes the metadata as a JSON file.
     with metadata_path.open(mode="w") as json_file:
         # noinspection PyTypeChecker
-        json.dump(metadata, json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
+        json.dump(obj=metadata, fp=json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
     # Extracts the mesoscope frame_rate from metadata.
     frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])  # type: ignore[index]
@@ -256,42 +483,49 @@ def _process_invariant_metadata(frame_stack_path: Path, ops_path: Path, metadata
     roi_sizes = np.array([roi["scanfields"]["sizeXY"][::-1] for roi in rois])
 
     # Transforms ROI coordinates into pixel-units, while maintaining accurate relative positions for each ROI.
-    roi_centers -= roi_sizes / 2  # Shifts ROI coordinates to mark the top left corner
-    roi_centers -= np.min(roi_centers, axis=0)  # Normalizes ROI coordinates to leftmost/topmost ROI
-    # Calculates pixels-per-unit scaling factor from ROI dimensions
+    # Shifts ROI coordinates to mark the top left corner.
+    roi_centers -= roi_sizes / 2
+    # Normalizes ROI coordinates to the leftmost and topmost ROI.
+    roi_centers -= np.min(roi_centers, axis=0)
+    # Calculates the pixels-per-unit scaling factor from ROI dimensions.
     scale_factor = np.median(np.column_stack([roi_heights, roi_widths]) / roi_sizes, axis=0)
-    min_positions = np.ceil(roi_centers * scale_factor)  # Converts ROI positions to pixel coordinates
+    # Converts ROI positions to pixel coordinates.
+    min_positions = np.ceil(roi_centers * scale_factor)
 
-    # Calculates the total number of rows across all ROIs (rows of pixels acquired while imaging ROIs)
+    # Calculates the total number of rows across all ROIs (rows of pixels acquired while imaging ROIs).
     total_rows = np.sum(roi_heights)
 
     # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
     # between frames.
-    n_flyback = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))  # Uses integer division
+    flyback_pixels = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))
 
-    # Creates an array that stores the start and end row indices for each ROI
+    # Creates an array that stores the start and end row indices for each ROI.
     roi_rows = np.zeros(shape=(2, roi_number), dtype=np.int32)
     # noinspection PyTypeChecker
-    temp = np.concatenate([[0], np.cumsum(roi_heights + n_flyback)])
-    roi_rows[0] = temp[:-1]  # Stores the first line index for each ROI
-    roi_rows[1] = roi_rows[0] + roi_heights  # Stores the last line index for each ROI
+    cumulative_row_indices = np.concatenate([[0], np.cumsum(roi_heights + flyback_pixels)])
+    # Stores the first line index for each ROI.
+    roi_rows[0] = cumulative_row_indices[:-1]
+    # Stores the last line index for each ROI.
+    roi_rows[1] = roi_rows[0] + roi_heights
 
-    # Extracts the invariant data necessary for the suite2p processing pipeline to be able to load and work with the
+    # Extracts the invariant data necessary for the cindra processing pipeline to be able to load and work with the
     # stack.
     data: dict[str, int | float | list[Any]] = {
         "frame_rate": frame_rate,
         "plane_number": plane_number,
         "channel_number": channel_number,
         "roi_number": roi_rows.shape[1],
-        "roi_x_coordinates": [round(min_positions[i, 1]) for i in range(roi_number)],
-        "roi_y_coordinates": [round(min_positions[i, 0]) for i in range(roi_number)],
-        "roi_lines": [list(range(int(roi_rows[0, i]), int(roi_rows[1, i]))) for i in range(roi_number)],
+        "roi_x_coordinates": [round(min_positions[roi_index, 1]) for roi_index in range(roi_number)],
+        "roi_y_coordinates": [round(min_positions[roi_index, 0]) for roi_index in range(roi_number)],
+        "roi_lines": [
+            list(range(int(roi_rows[0, roi_index]), int(roi_rows[1, roi_index]))) for roi_index in range(roi_number)
+        ],
     }
 
-    # Saves the generated config as a JSON file (suite2p_parameters)
-    with ops_path.open(mode="w") as f:
+    # Saves the generated config as a JSON file (cindra_parameters).
+    with cindra_parameters_path.open(mode="w") as parameters_file:
         # noinspection PyTypeChecker
-        json.dump(data, f, separators=(",", ":"), indent=None)  # Maximizes data compression
+        json.dump(obj=data, fp=parameters_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
 def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeData, threads: int = 30) -> None:
@@ -330,7 +564,7 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     # Verifies that all required files are present in the source directory.
 
     # Extracts the names of files stored in the source directory.
-    files: tuple[Path, ...] = tuple(path for ext in _extensions for path in source.glob(ext))
+    files: tuple[Path, ...] = tuple(path for extension in _extensions for path in source.glob(extension))
     file_names: set[str] = {file.name for file in files}
 
     # Checks which required files are missing.
@@ -406,21 +640,21 @@ def _preprocess_mesoscope_directory(
     # If necessary, persists the MotionEstimator and the fov.roi files to the 'persistent data' directory of the
     # processed animal on the ScanImagePC.
     if not mesoscope_data.scanimagepc_data.roi_path.exists():
-        sh.copy2(fov_roi_file, mesoscope_data.scanimagepc_data.roi_path)
+        shutil.copy2(src=fov_roi_file, dst=mesoscope_data.scanimagepc_data.roi_path)
     if not mesoscope_data.scanimagepc_data.motion_estimator_path.exists():
-        sh.copy2(motion_estimator_file, mesoscope_data.scanimagepc_data.motion_estimator_path)
+        shutil.copy2(src=motion_estimator_file, dst=mesoscope_data.scanimagepc_data.motion_estimator_path)
 
     # Copies all files to the session's mesoscope_data (preprocessed) directory.
     output_directory = session_data.system_raw_data.mesoscope_data_path
     ensure_directory_exists(output_directory)
-    sh.copy2(motion_estimator_file, output_directory.joinpath("MotionEstimator.me"))
-    sh.copy2(fov_roi_file, output_directory.joinpath("fov.roi"))
-    sh.copy2(zstack_file, output_directory.joinpath("zstack.tiff"))
+    shutil.copy2(src=motion_estimator_file, dst=output_directory.joinpath("MotionEstimator.me"))
+    shutil.copy2(src=fov_roi_file, dst=output_directory.joinpath("fov.roi"))
+    shutil.copy2(src=zstack_file, dst=output_directory.joinpath("zstack.tiff"))
 
     # Resolves the paths to the output directories and files used during mesoscope frame stack processing.
     frame_invariant_metadata_path = output_directory.joinpath("frame_invariant_metadata.json")
     frame_variant_metadata_path = output_directory.joinpath("frame_variant_metadata.npz")
-    ops_path = output_directory.joinpath("suite2p_parameters.json")
+    cindra_parameters_path = output_directory.joinpath("cindra_parameters.json")
 
     # Pre-creates the dictionary to store frame-variant metadata extracted from all TIFF frames.
     all_metadata: defaultdict[str, list[NDArray[Any]]] = defaultdict(list)
@@ -430,7 +664,7 @@ def _preprocess_mesoscope_directory(
 
     # Sorts files naturally. Since all files use the _acquisition#_stack# format, this procedure should naturally
     # sort the data in the order of acquisition.
-    tiff_files = natsorted(tiff_files, key=lambda p: p.name)
+    tiff_files = natsorted(tiff_files, key=lambda path: path.name)
 
     # Validates and prepares TIFF stacks for processing. Filters out invalid files and determines frame numbering.
     valid_stacks: list[tuple[Path, int]] = []  # List of (file_path, starting_frame_number) tuples
@@ -442,11 +676,11 @@ def _preprocess_mesoscope_directory(
             continue
         stack_size = _verify_and_get_stack_size(file)
         if stack_size > 0:
-            # Records the file and its starting frame number
+            # Records the file and its starting frame number.
             valid_stacks.append((file, starting_frame))
             starting_frame += stack_size
 
-    # Ends the runtime early if there are no valid TIFF files to process
+    # Ends the runtime early if there are no valid TIFF files to process.
     if not valid_stacks:
         delete_directory(directory_path=image_directory)
         return
@@ -455,7 +689,9 @@ def _preprocess_mesoscope_directory(
     # same for all stacks, it is safe to use any available stack.
     first_tiff_file = valid_stacks[0][0]
     _process_invariant_metadata(
-        frame_stack_path=first_tiff_file, ops_path=ops_path, metadata_path=frame_invariant_metadata_path
+        frame_stack_path=first_tiff_file,
+        cindra_parameters_path=cindra_parameters_path,
+        metadata_path=frame_invariant_metadata_path,
     )
 
     # Uses partial to bind the constant arguments to the processing function.
@@ -477,11 +713,11 @@ def _preprocess_mesoscope_directory(
             total=len(valid_stacks),
             description=f"Processing TIFF stacks for {progress_path}",
             unit="stack",
-        ) as pbar:
+        ) as progress_bar:
             for future in as_completed(futures):
                 for key, value in future.result().items():
                     all_metadata[key].append(value)
-                pbar.update(1)
+                progress_bar.update(1)
 
     # Saves concatenated metadata as an uncompressed numpy archive.
     metadata_dict = {key: np.concatenate(value) for key, value in all_metadata.items()}
@@ -496,10 +732,11 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     surgical intervention record to the session's data directory as the surgery_data.yaml file.
 
     Notes:
-        Every Google Sheets interaction in this function is optional. If no Google service account credentials are
-        configured for the host-machine, the function skips all Google Sheets processing with a warning. If a specific
-        Google Sheet is not configured in the system configuration, the function skips only the processing that depends
-        on that sheet with a warning. This allows operating systems that do not use some or all of the Google Sheets.
+        Google Sheets processing is optional and gated on the configured sheet identifiers. If neither sheet identifier
+        is set, the function skips all Google Sheets processing with a warning and does not require Google service
+        account credentials. If at least one sheet identifier is set, the host-machine must provide valid credentials,
+        and a missing or invalid credentials file aborts preprocessing. When credentials are available, a sheet whose
+        identifier is unset is skipped individually with a warning.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -508,19 +745,23 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
 
     Raises:
         ValueError: If the session_type attribute of the input SessionData instance is not one of the supported options.
+        FileNotFoundError: If at least one Google Sheet is configured for the host-machine, but the Google service
+            account credentials are not configured or the configured credentials file does not exist.
     """
-    # Resolves the path to the Google service account credentials. If no credentials are configured for the
-    # host-machine, gracefully skips all Google Sheets processing instead of aborting the preprocessing pipeline.
-    try:
-        credentials_path = get_google_credentials_path()
-    except FileNotFoundError:
+    # Skips all Google Sheets processing without requiring credentials when neither Google Sheet is configured for the
+    # host-machine. This supports systems that do not use the Google Sheets integration at all.
+    if not sheets_data.surgery_sheet_id and not sheets_data.water_log_sheet_id:
         message = (
-            f"No Google service account credentials are configured for the host-machine. Skipping all Google Sheets "
-            f"processing (surgery data snapshot and water restriction log update) for the session "
-            f"{session_data.session_name}."
+            f"No Google Sheets are configured for the host-machine. Skipping all Google Sheets processing (surgery "
+            f"data snapshot and water restriction log update) for the session {session_data.session_name}."
         )
         console.echo(message=message, level=LogLevel.WARNING)
         return
+
+    # At least one Google Sheet is configured, so the host-machine is expected to provide valid Google service account
+    # credentials. Resolving the path raises a FileNotFoundError if the credentials are missing or invalid, aborting
+    # preprocessing.
+    credentials_path = get_google_credentials_path()
 
     # Resolves the animal's unique identifier code and loads the session's descriptor file based on the session's type.
     animal_id = int(session_data.animal_id)
@@ -540,9 +781,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         message = (
             f"Unable to extract the water restriction data from the {session_data.session_name} session's descriptor "
             f"file, as the session's type {session_type} is not one of the valid Mesoscope-VR sessions: "
-            f"{', '.join(mesoscope_vr_sessions)}."
+            f"{', '.join(MESOSCOPE_VR_SESSIONS)}."
         )
-        console.error(message, error=ValueError)
+        console.error(message=message, error=ValueError)
 
     # Loads the session's descriptor data.
     descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
@@ -601,13 +842,13 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     total_water = training_water + experimenter_water
 
     # Updates the Water Restriction log to reflect the processed session's data.
-    wr_sheet = WaterLog(
+    water_log_sheet = WaterLog(
         session_date=session_data.session_name,
         animal_id=animal_id,
         credentials_path=credentials_path,
         sheet_id=sheets_data.water_log_sheet_id,
     )
-    wr_sheet.update_water_log(
+    water_log_sheet.update_water_log(
         weight=descriptor.animal_weight_g,
         water_ml=total_water,
         experimenter_id=descriptor.experimenter,
@@ -615,232 +856,6 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     )
     message = "Water restriction log entry: Written."
     console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
-    """Renames the shared 'mesoscope_data' ScanImagePC directory to include the target session's name.
-
-    Args:
-        mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
-            Mesoscope-VR data acquisition system.
-    """
-    # If necessary, renames the 'shared' mesoscope_data directory to use the name specific to the preprocessed session.
-    # It is essential that this is done before preprocessing, as the preprocessing pipeline uses this semantic for
-    # finding and pulling the mesoscope data for the processed session.
-    general_path = mesoscope_data.scanimagepc_data.mesoscope_data_path
-    session_specific_path = mesoscope_data.scanimagepc_data.session_specific_path
-
-    # Note, the renaming only happens if the session-specific cache does not exist, the general mesoscope_frames cache
-    # exists, and it is not empty (has files inside).
-    if not session_specific_path.exists() and general_path.exists() and len(list(general_path.glob("*"))) > 0:
-        general_path.rename(session_specific_path)
-        # Generates a new empty mesoscope_frames directory to support future runtimes.
-        ensure_directory_exists(general_path)
-
-
-def preprocess_session_data(session_data: SessionData) -> None:
-    """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
-    all configured long-term storage destinations, and removes the local data copy from the VRPC.
-
-    Notes:
-        If no long-term storage destinations are configured for the host-machine, the data transfer and the local data
-        removal are skipped, and the preprocessing is limited to on-premises data conversion and aggregation steps.
-
-    Args:
-        session_data: The SessionData instance that defines the processed session.
-    """
-    message = f"Initializing session {session_data.session_name} data preprocessing..."
-    console.echo(message=message, level=LogLevel.INFO)
-
-    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
-    system_configuration = get_system_configuration()
-
-    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
-    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
-
-    # Warns about any long-term storage destinations that are not configured for the host-machine. The session's data
-    # is not backed up to these destinations during the data transfer step.
-    for destination_name in mesoscope_data.unconfigured_destinations:
-        message = (
-            f"The {destination_name} long-term storage destination is not configured for the host-machine. The "
-            f"session {session_data.session_name} data is not backed up to this destination."
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
-
-    # If necessary, ensures that the mesoscope_data ScanImagePC directory is renamed to include the processed session
-    # name.
-    rename_mesoscope_directory(mesoscope_data=mesoscope_data)
-
-    # Assembles all log .npy entries into archive .npz files.
-    assemble_session_logs(session_data=session_data, processes=31)
-
-    # Renames all videos to use human-friendly names.
-    rename_session_videos(session_data=session_data)
-
-    # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
-    _pull_mesoscope_data(
-        session_data=session_data,
-        mesoscope_data=mesoscope_data,
-        threads=31,
-    )
-
-    # Compresses all mesoscope-acquired frames and extracts their metadata.
-    _preprocess_mesoscope_directory(
-        session_data=session_data,
-        mesoscope_data=mesoscope_data,
-        processes=31,
-    )
-
-    # Extracts and saves the animal's surgery data to the session's data directory and updates the water restriction
-    # log to reflect the processed session.
-    _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
-
-    # Sends preprocessed data to all configured long-term storage destinations.
-    push_session_data(session_data=session_data, destinations=mesoscope_data.destinations, threads=15)
-
-    message = f"Session {session_data.session_name} data preprocessing: Complete."
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def purge_session(session_data: SessionData) -> None:
-    """Removes all data and directories associated with the input session from all Mesoscope-VR system machines and
-    long-term storage destinations.
-
-    Notes:
-        This function is extremely dangerous and should be used with caution. It is designed to remove all data from
-        failed or no longer necessary sessions from all storage locations. Never use this function on sessions that
-        contain valid scientific data.
-
-    Args:
-        session_data: The SessionData instance that defines the session whose data needs to be removed.
-    """
-    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
-    system_configuration = get_system_configuration()
-
-    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
-    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
-
-    # Queries the paths to all known session data directories, including the long-term storage destinations.
-    deletion_candidates = [session_data.raw_data_path.parent]
-    deletion_candidates.extend(destination.session_path for destination in mesoscope_data.destinations.destinations)
-    deletion_candidates.append(mesoscope_data.scanimagepc_data.session_specific_path)
-
-    # Sessions without the nk.bin marker successfully initialized their runtime and likely contain valid data, so the
-    # deletion requires explicit user confirmation. Sessions with the nk.bin marker are considered safe to remove.
-    deleted = delete_session_directories(
-        candidates=tuple(deletion_candidates),
-        session_name=session_data.session_name,
-        require_confirmation=not session_data.raw_data.nk_path.exists(),
-    )
-
-    # Aborts without further changes if the user declined the deletion.
-    if not deleted:
-        return
-
-    # Ensures that the mesoscope_data directory is reset, in case it has any lingering from the purged runtime.
-    for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
-        file.unlink(missing_ok=True)
-
-    message = "Session data purging: Complete"
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
-    """Transfers all sessions performed by the specified animal from the source project to the target project across
-    all storage locations.
-
-    Notes:
-        The migration strategy depends on whether the host-machine is configured with any long-term storage
-        destinations. Systems with at least one configured destination treat the preferred (first configured)
-        destination as the source of truth and pull, re-preprocess, and purge each session. Systems without any
-        configured destination keep all data on the acquisition host machine, so the migration reduces to an
-        on-premises operation that relocates each locally stored session to the target project directory and reassigns
-        it. The persistent data relocation and the cleanup of redundant directories apply to both modes.
-
-    Args:
-        animal: The animal for which to migrate the data.
-        source_project: The name of the project from which to migrate the data.
-        target_project: The name of the project to which the data should be migrated.
-    """
-    console.echo(f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
-
-    # Queries the system configuration parameters, which includes the filesystem configuration.
-    system_configuration = get_system_configuration()
-    filesystem = system_configuration.filesystem
-
-    # Resolves the paths to the key local root directories used in the migration process.
-    destination_local_root = filesystem.root_directory.joinpath(target_project, animal)
-    source_local_root = filesystem.root_directory.joinpath(source_project, animal)
-
-    # If the target project does not exist, aborts with an error.
-    if not destination_local_root.parent.exists():
-        message = (
-            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sle configure project' command to create the project before "
-            f"migrating animals to this project."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Ensures that the root directory for the processed animal exists on the local machine.
-    ensure_directory_exists(destination_local_root)
-
-    # Resolves the configured long-term storage destinations in preference order (configuration order). The first
-    # configured destination is treated as the source of truth from which the session data is pulled.
-    configured_destinations = [(name, root) for name, root in filesystem.storage_directories.items() if root != Path()]
-
-    # Systems without any configured long-term storage destination keep all data on the acquisition host machine, so
-    # the session migration reduces to a local relocation. Systems with at least one destination pull from the
-    # preferred (first configured) destination.
-    if not configured_destinations:
-        _migrate_sessions_on_premises(
-            source_local_root=source_local_root,
-            destination_local_root=destination_local_root,
-            target_project=target_project,
-        )
-    else:
-        preferred_name, preferred_root = configured_destinations[0]
-        _migrate_sessions_via_destination(
-            destination_name=preferred_name,
-            destination_root=preferred_root.joinpath(source_project, animal),
-            source_local_root=source_local_root,
-            destination_local_root=destination_local_root,
-            animal=animal,
-            source_project=source_project,
-            target_project=target_project,
-        )
-
-    console.echo("Migrating persistent data directories...")
-    # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
-    # data, if any was resolved for any processed session.
-    old = filesystem.mesoscope_directory.joinpath(source_project, animal)
-    new = filesystem.mesoscope_directory.joinpath(target_project, animal)
-    if new.exists():
-        sh.rmtree(new)
-    sh.move(src=old, dst=new)
-
-    # Also moves the VRPC persistent data for the animal between projects.
-    old = source_local_root.joinpath("persistent_data")
-    new = destination_local_root.joinpath("persistent_data")
-    if new.exists():
-        sh.rmtree(new)
-    sh.move(src=old, dst=new)
-
-    # Removes the old animal directory from the acquisition host machine and all configured long-term storage
-    # destinations. This also removes any lingering data not moved during the migration process, ensuring that each
-    # animal is found under at most a single project directory everywhere. Unconfigured destinations are skipped, since
-    # their unset roots resolve to relative paths that are unsafe to delete.
-    deletion_root_candidates = [
-        filesystem.mesoscope_directory,
-        filesystem.root_directory,
-        *filesystem.storage_directories.values(),
-    ]
-    deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]
-    for candidate in console.track(
-        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
-    ):
-        delete_directory(directory_path=candidate)
-
-    console.echo("Migration: Complete.", level=LogLevel.SUCCESS)
 
 
 def _migrate_sessions_via_destination(
@@ -870,7 +885,9 @@ def _migrate_sessions_via_destination(
         source_project: The name of the project from which to migrate the data.
         target_project: The name of the project to which the data should be migrated.
     """
-    console.echo(f"Using the {destination_name} long-term storage destination as the migration source of truth.")
+    console.echo(
+        message=f"Using the {destination_name} long-term storage destination as the migration source of truth."
+    )
 
     # Ensures that all locally stored sessions have been processed and moved to a long-term storage destination. This
     # guarantees that the destination holds the authoritative copy of every session before the migration relocates it.
@@ -886,7 +903,7 @@ def _migrate_sessions_via_destination(
     # Loops over all sessions stored on the long-term storage destination and processes them sequentially.
     sessions = discover_sessions(root_path=destination_root)
     for session in sessions:
-        console.echo(f"Migrating session {session.name}...")
+        console.echo(message=f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
         old_session_data_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
 
@@ -930,9 +947,9 @@ def _migrate_sessions_on_premises(
     # Relocates each locally stored session directory to the target project and reassigns it. Reassigning the project
     # name and saving the SessionData instance applies the filesystem changes resulting from the project change.
     for session in discover_sessions(root_path=source_local_root):
-        console.echo(f"Migrating session {session.name}...")
+        console.echo(message=f"Migrating session {session.name}...")
         target_session_path = destination_local_root.joinpath(session.name)
-        sh.move(src=source_local_root.joinpath(session.name), dst=target_session_path)
+        shutil.move(src=source_local_root.joinpath(session.name), dst=target_session_path)
 
         session_data = SessionData.load(session_path=target_session_path)
         session_data.project_name = target_project

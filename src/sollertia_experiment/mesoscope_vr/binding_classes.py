@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from ataraxis_data_structures import DataLogger
 
-    from .system import MesoscopeCameras, MesoscopeExternalAssets, MesoscopeMicroControllers
+    from .system import MesoscopeCameras, MesoscopeVRAssets, MesoscopeMicroControllers
 
 
 class ZaberMotors:
@@ -51,12 +51,12 @@ class ZaberMotors:
     Args:
         zaber_positions: The ZaberPositions instance that stores the positions of Zaber motors used during a
             previous runtime or None if there is no previous position data to use.
-        zaber_configuration: The MesoscopeExternalAssets instance that stores the configuration parameters for the
+        zaber_configuration: The MesoscopeVRAssets instance that stores the configuration parameters for the
             managed Zaber devices.
 
     Attributes:
         _headbar: The ZaberConnection instance that manages the headbar holder motor group.
-        _headbar_z: The ZaberAxis instance that interfaces with the headbar's z-axis motor.
+        _headbar_z: The ZaberAxis instance that interfaces with the headbar's Z-axis motor.
         _headbar_pitch: The ZaberAxis instance that interfaces with the headbar's pitch-axis motor.
         _headbar_roll: The ZaberAxis instance that interfaces with the headbar's roll-axis motor.
         _wheel: The ZaberConnection instance that manages the wheel motor group.
@@ -66,11 +66,11 @@ class ZaberMotors:
         _lickport_x: The ZaberAxis instance that interfaces with the lickport's X-axis motor.
         _lickport_y: The ZaberAxis instance that interfaces with the lickport's Y-axis motor.
         _previous_positions: A ZaberPositions instance that stores the positions of Zaber motors used during a
-           previous runtime or None if there is no previous position data to use.
+            previous runtime or None if there is no previous position data to use.
     """
 
-    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeExternalAssets) -> None:
-        # Initializes the ZaberConnection instances for all zaber controller groups.
+    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeVRAssets) -> None:
+        # Initializes the ZaberConnection instances for all Zaber controller groups.
         self._headbar: ZaberConnection = ZaberConnection(port=zaber_configuration.headbar_port)
         self._wheel: ZaberConnection = ZaberConnection(port=zaber_configuration.wheel_port)
         self._lickport: ZaberConnection = ZaberConnection(port=zaber_configuration.lickport_port)
@@ -99,7 +99,11 @@ class ZaberMotors:
                 "runtime. Configuring all Zaber motors to use the default positions cached in the non-volatile memory "
                 "of each motor controller. Proceed with caution."
             )
-            console.echo(message=message, level=LogLevel.ERROR)
+            console.echo(message=message, level=LogLevel.WARNING)
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the ZaberMotors instance."""
+        return f"ZaberMotors(is_connected={self.is_connected})"
 
     def restore_position(self) -> None:
         """Restores the managed Zaber motors to the positions used during the previous runtime in parallel.
@@ -194,7 +198,6 @@ class ZaberMotors:
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
-        # Moves all Zaber motors to their parking positions
         self._headbar_z.move(position=self._headbar_z.park_position)
         self._headbar_pitch.move(position=self._headbar_pitch.park_position)
         self._headbar_roll.move(position=self._headbar_roll.park_position)
@@ -214,7 +217,6 @@ class ZaberMotors:
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
-        # Moves all motors to their maintenance positions
         self._headbar_z.move(position=self._headbar_z.maintenance_position)
         self._headbar_pitch.move(position=self._headbar_pitch.maintenance_position)
         self._headbar_roll.move(position=self._headbar_roll.maintenance_position)
@@ -237,12 +239,11 @@ class ZaberMotors:
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
-        # Moves all lickport motors to the mount position
         self._lickport_z.move(position=self._lickport_z.mount_position)
         self._lickport_x.move(position=self._lickport_x.mount_position)
         self._lickport_y.move(position=self._lickport_y.mount_position)
 
-        # If previous positions are not available, moves the rest of the motors to the default mounting positions
+        # If previous positions are not available, moves the rest of the motors to the default mounting positions.
         if self._previous_positions is None:
             self._headbar_z.move(position=self._headbar_z.mount_position)
             self._headbar_pitch.move(position=self._headbar_pitch.mount_position)
@@ -273,7 +274,7 @@ class ZaberMotors:
         # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
-        # Moves the lick-port back to the mount position, while keeping all other motors in their current positions.
+        # Moves the LickPort back to the mount position, while keeping all other motors in their current positions.
         self._lickport_y.move(position=self._lickport_y.mount_position)
         self._lickport_z.move(position=self._lickport_z.mount_position)
         self._lickport_x.move(position=self._lickport_x.mount_position)
@@ -285,10 +286,8 @@ class ZaberMotors:
         self.park_motors()
 
     def generate_position_snapshot(self) -> ZaberPositions:
-        """Queries the current positions of all managed Zaber motors and returns the data as a ZaberPositions
-        instance.
-        """
-        self._previous_positions = ZaberPositions(
+        """Queries and returns the current positions of all managed Zaber motors."""
+        position_snapshot = ZaberPositions(
             headbar_z=int(self._headbar_z.get_position()),
             headbar_pitch=int(self._headbar_pitch.get_position()),
             headbar_roll=int(self._headbar_roll.get_position()),
@@ -297,7 +296,18 @@ class ZaberMotors:
             lickport_x=int(self._lickport_x.get_position()),
             lickport_y=int(self._lickport_y.get_position()),
         )
-        return self._previous_positions
+        self._previous_positions = position_snapshot
+        return position_snapshot
+
+    def unpark_motors(self) -> None:
+        """Unparks all managed motor groups, allowing them to be moved via this library or the Zaber GUI."""
+        self._headbar_pitch.unpark()
+        self._headbar_roll.unpark()
+        self._headbar_z.unpark()
+        self._wheel_x.unpark()
+        self._lickport_x.unpark()
+        self._lickport_y.unpark()
+        self._lickport_z.unpark()
 
     def wait_until_idle(self) -> None:
         """Blocks in-place while at least one motor in the managed motor groups is moving."""
@@ -314,12 +324,6 @@ class ZaberMotors:
         ):
             pass
 
-    def disconnect(self) -> None:
-        """Shuts down all managed motors and disconnects from the motor groups."""
-        self._headbar.disconnect()
-        self._wheel.disconnect()
-        self._lickport.disconnect()
-
     def park_motors(self) -> None:
         """Parks all managed Zaber motors, preventing them from being moved via this library or Zaber GUI until
         they are unparked.
@@ -332,15 +336,11 @@ class ZaberMotors:
         self._lickport_y.park()
         self._lickport_z.park()
 
-    def unpark_motors(self) -> None:
-        """Unparks all managed motor groups, allowing them to be moved via this library or the Zaber GUI."""
-        self._headbar_pitch.unpark()
-        self._headbar_roll.unpark()
-        self._headbar_z.unpark()
-        self._wheel_x.unpark()
-        self._lickport_x.unpark()
-        self._lickport_y.unpark()
-        self._lickport_z.unpark()
+    def disconnect(self) -> None:
+        """Shuts down all managed motors and disconnects from the motor groups."""
+        self._headbar.disconnect()
+        self._wheel.disconnect()
+        self._lickport.disconnect()
 
     @property
     def is_connected(self) -> bool:
@@ -379,7 +379,7 @@ class MicroControllerInterfaces:
         screens: The interface that controls the power state of the Virtual Reality display screens.
         _actor: The main interface for the 'Actor' Ataraxis Micro Controller (AMC) device.
         mesoscope_frame: The interface that monitors frame acquisition timestamp signals sent by the mesoscope.
-        lick: The interface that monitors animal's interactions with the lick sensor.
+        lick: The interface that monitors the animal's interactions with the lick sensor.
         torque: The interface that monitors the torque applied by the animal to the running wheel when the brakes are
             on.
         _sensor: The main interface for the 'Sensor' Ataraxis Micro Controller (AMC) device.
@@ -401,22 +401,22 @@ class MicroControllerInterfaces:
                 time=self._configuration.sensor_polling_delay_ms,
                 from_units=TimeUnits.MILLISECOND,
                 to_units=TimeUnits.MICROSECOND,
-            )
+            ),
         )
 
         # ACTOR. Actor AMC controls the hardware that needs to be triggered by PC at irregular intervals. Most of such
         # hardware is designed to produce some form of an output: deliver water reward, engage wheel brake, etc.
 
         # Module interfaces:
-        self.brake = BrakeInterface(
+        self.brake: BrakeInterface = BrakeInterface(
             minimum_brake_strength=self._configuration.minimum_brake_strength_g_cm,
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
-        self.valve = WaterValveInterface(
+        self.valve: WaterValveInterface = WaterValveInterface(
             valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
-        self.gas_puff_valve = GasPuffValveInterface()
-        self.screens = ScreenInterface()
+        self.gas_puff_valve: GasPuffValveInterface = GasPuffValveInterface()
+        self.screens: ScreenInterface = ScreenInterface()
 
         # Main interface:
         self._actor: MicroControllerInterface = MicroControllerInterface(
@@ -435,7 +435,7 @@ class MicroControllerInterfaces:
 
         # Module interfaces:
         self.mesoscope_frame: MesoscopeFrameTTLInterface = MesoscopeFrameTTLInterface(
-            polling_frequency=_sensor_polling_delay
+            polling_frequency=_sensor_polling_delay,
         )
         self.lick: LickInterface = LickInterface(
             lick_threshold=self._configuration.lick_threshold_adc,
@@ -485,6 +485,10 @@ class MicroControllerInterfaces:
         """Ensures that all communication processes are terminated when the instance is garbage-collected."""
         self.stop()
 
+    def __repr__(self) -> str:
+        """Returns a string representation of the MicroControllerInterfaces instance."""
+        return f"MicroControllerInterfaces(started={self._started})"
+
     def start(self) -> None:
         """Starts the communication processes for all managed microcontrollers and configures all interfaced hardware
         modules to use the runtime parameters loaded from the acquisition system's configuration file.
@@ -496,13 +500,13 @@ class MicroControllerInterfaces:
         message = "Initializing Ataraxis Micro Controller (AMC) Interfaces..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts all microcontroller interfaces
         self._actor.start()
         self._sensor.start()
         self._encoder.start()
 
         self.wheel_encoder.initialize_local_assets()
         self.valve.initialize_local_assets()
+        self.gas_puff_valve.initialize_local_assets()
         self.mesoscope_frame.initialize_local_assets()
         self.lick.initialize_local_assets()
 
@@ -516,8 +520,8 @@ class MicroControllerInterfaces:
         # Screen Interface
         screen_pulse_duration: np.float64 = convert_time(  # type: ignore[assignment]
             time=self._configuration.screen_trigger_pulse_duration_ms,
-            from_units="ms",
-            to_units="us",
+            from_units=TimeUnits.MILLISECOND,
+            to_units=TimeUnits.MICROSECOND,
         )
         self.screens.set_parameters(pulse_duration=np.uint32(round(screen_pulse_duration)))
 
@@ -539,10 +543,9 @@ class MicroControllerInterfaces:
 
         # Mesoscope Frame TTL Recorder
         self.mesoscope_frame.set_parameters(
-            averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size)
+            averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size),
         )
 
-        # The setup procedure is complete.
         self._started = True
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Initialized."
@@ -550,14 +553,13 @@ class MicroControllerInterfaces:
 
     def stop(self) -> None:
         """Stops all microcontroller communication processes and releases all reserved resources."""
-        # Prevents stopping an already stopped VR process.
+        # Prevents stopping already-stopped microcontroller communication processes.
         if not self._started:
             return
 
         message = "Terminating Ataraxis Micro Controller (AMC) Interfaces..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Resets the _started tracker
         self._started = False
 
         # Stops all microcontroller interfaces. This also shuts down and resets all managed hardware modules.
@@ -594,7 +596,7 @@ class VideoSystems:
 
     Attributes:
         _face_camera_started: Tracks whether the face camera frame acquisition is running.
-        _body_camera_started: Tracks whether the body cameras frame acquisition is running.
+        _body_camera_started: Tracks whether the body camera frame acquisition is running.
         _face_camera: The interface that captures and saves the frames acquired by the camera aimed at the animal's face
             and eye.
         _body_camera: The interface that captures and saves the frames acquired by the camera aimed at the animal's
@@ -624,7 +626,8 @@ class VideoSystems:
             video_encoder=VideoEncoders.H265,
             gpu=0,
             encoder_speed_preset=camera_configuration.face_camera_preset,
-            output_pixel_format=OutputPixelFormats.YUV420,  # Mesoscope-VR cameras are monochrome.
+            # Mesoscope-VR cameras are monochrome.
+            output_pixel_format=OutputPixelFormats.YUV420,
             quantization_parameter=camera_configuration.face_camera_quantization,
         )
 
@@ -640,13 +643,21 @@ class VideoSystems:
             video_encoder=VideoEncoders.H265,
             gpu=0,
             encoder_speed_preset=camera_configuration.body_camera_preset,
-            output_pixel_format=OutputPixelFormats.YUV420,  # Mesoscope-VR cameras are monochrome.
+            # Mesoscope-VR cameras are monochrome.
+            output_pixel_format=OutputPixelFormats.YUV420,
             quantization_parameter=camera_configuration.body_camera_quantization,
         )
 
     def __del__(self) -> None:
         """Ensures that all consumer and producer processes are terminated when the instance is garbage-collected."""
         self.stop()
+
+    def __repr__(self) -> str:
+        """Returns a string representation of the VideoSystems instance."""
+        return (
+            f"VideoSystems(face_camera_started={self._face_camera_started}, "
+            f"body_camera_started={self._body_camera_started})"
+        )
 
     def start_face_camera(self) -> None:
         """Starts acquiring frames from the face camera.
@@ -655,14 +666,13 @@ class VideoSystems:
             Does not start saving the acquired frames to disk. Call the save_face_camera_frames() method to start
             saving the acquired frames to disk.
         """
-        # Prevents executing this method if the face camera frame acquisition is already running
+        # Prevents executing this method if the face camera frame acquisition is already running.
         if self._face_camera_started:
             return
 
         message = "Initializing face camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._face_camera.start()
         self._face_camera_started = True
 
@@ -676,14 +686,13 @@ class VideoSystems:
             Does not start saving the acquired frames to disk. Call the save_body_camera_frames() method to start
             saving the acquired frames to disk.
         """
-        # Prevents executing this method if the body camera frame acquisition is already running
+        # Prevents executing this method if the body camera frame acquisition is already running.
         if self._body_camera_started:
             return
 
         message = "Initializing body camera frame acquisition..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Starts frame acquisition. Note: this does NOT start frame saving.
         self._body_camera.start()
         self._body_camera_started = True
 
@@ -711,7 +720,6 @@ class VideoSystems:
         message = "Stopping camera frame acquisition and saving..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        # Instructs all active cameras to stop saving frames
         if self._face_camera_started:
             self._face_camera.stop_frame_saving()
         if self._body_camera_started:
@@ -720,11 +728,9 @@ class VideoSystems:
         message = "Camera frame saving: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
-        # Stops all cameras
         self._face_camera.stop()
         self._body_camera.stop()
 
-        # Marks all cameras as stopped
         self._face_camera_started = False
         self._body_camera_started = False
 

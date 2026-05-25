@@ -1,14 +1,16 @@
-"""Provides the Visualizer class that renders the animal's task performance data in real time during training and
-experiment runtimes.
+"""Provides the BehaviorVisualizer class that renders the animal's task performance data in real time during training
+and experiment runtimes.
 """
 
+from __future__ import annotations
+
 from enum import IntEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import matplotlib as mpl
 
-mpl.use("QtAgg")  # Uses QT backend for performance and compatibility with Linux
+mpl.use("QtAgg")  # Uses the Qt backend for performance and compatibility with Linux.
 
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 import matplotlib.pyplot as plt
@@ -23,17 +25,23 @@ if TYPE_CHECKING:
     from matplotlib.text import Text
     from matplotlib.lines import Line2D
     from matplotlib.figure import Figure
+    from matplotlib.backend_bases import Event
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-# Updates plotting dictionaries to preferentially use Arial text style and specific sizes for different text elements
-# in plots. General parameters and the font size for axes' tick numbers.
+# Updates the plotting parameters to preferentially use the Arial text style and specific sizes for different text
+# elements in plots, including the font size for the axes' tick numbers.
 plt.rcParams.update({"font.family": "Arial", "font.weight": "normal", "xtick.labelsize": 16, "ytick.labelsize": 16})
-_fontdict_axis_label = {"family": "Arial", "weight": "normal", "size": 18}  # Axis label fonts.
-_fontdict_title = {"family": "Arial", "weight": "normal", "size": 20}  # Title fonts.
-_fontdict_legend = {"family": "Arial", "weight": "normal", "size": 14}  # Legend fonts.
 
-# Initializes dictionaries to map colloquial names to specific linestyle and color parameters.
-_line_style_dict = {"solid": "-", "dashed": "--", "dotdashed": "_.", "dotted": ":"}
-_palette_dict = {
+_FONTDICT_AXIS_LABEL: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 18}
+"""The font properties used for axis labels."""
+_FONTDICT_TITLE: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 20}
+"""The font properties used for plot titles."""
+_FONTDICT_LEGEND: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 14}
+"""The font properties used for legend and annotation text."""
+
+_LINE_STYLE_DICT: dict[str, str] = {"solid": "-", "dashed": "--", "dotdashed": "-.", "dotted": ":"}
+"""Maps colloquial line style names to pyplot linestyle string-codes."""
+_PALETTE_DICT: dict[str, tuple[float, float, float]] = {
     "green": (0.000, 0.639, 0.408),
     "blue": (0.000, 0.525, 0.749),
     "red": (0.769, 0.008, 0.137),
@@ -45,9 +53,20 @@ _palette_dict = {
     "white": (1.000, 1.000, 1.000),
     "gray": (0.500, 0.500, 0.500),
 }
+"""Maps colloquial color names to RGB color codes."""
 
-# The number of trials to display in the trial performance panel.
 _TRIAL_HISTORY_SIZE: int = 20
+"""The number of trials to display in the trial performance panel."""
+
+_SPEED_AXIS_YLIM: tuple[float, float] = (-2.0, 42.0)
+"""The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
+_BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
+"""The lower and upper Y-axis bounds for the binary state plots (lick, valve, and air puff)."""
+
+_TRIAL_RECTANGLE_WIDTH: float = 0.35
+"""The width, in trial-axis data units, of each trial outcome rectangle in the trial performance panel."""
+_TRIAL_RECTANGLE_OFFSET: float = _TRIAL_RECTANGLE_WIDTH / 2
+"""The horizontal offset used to center each trial rectangle on its integer trial position."""
 
 
 class VisualizerMode(IntEnum):
@@ -58,64 +77,18 @@ class VisualizerMode(IntEnum):
     RUN_TRAINING = 1
     """Displays lick, valve, and running speed plots."""
     EXPERIMENT = 2
-    """Displays all plots including the trial performance panel."""
-
-
-def _plt_palette(color: str) -> tuple[float, float, float]:
-    """Converts colloquial color names to pyplot RGB color codes.
-
-    Args:
-        color: The colloquial name of the color to be retrieved. Available options are: 'green', 'blue', 'red',
-            'yellow', 'purple', 'orange', 'pink', 'black', 'white', 'gray'.
-
-    Returns:
-        A list of R, G, and B values for the requested color.
-
-    Raises:
-        KeyError: If the input color name is not recognized.
-    """
-    try:
-        return _palette_dict[color]
-    except KeyError:
-        message = (
-            f"Unexpected color name '{color}' encountered when converting the colloquial color name to RGB array. "
-            f"Provide one of the supported color arguments: {', '.join(_palette_dict.keys())}."
-        )
-        console.error(message=message, error=KeyError)
-
-
-def _plt_line_styles(line_style: str) -> str:
-    """Converts colloquial line style names to pyplot's 'linestyle' string-codes.
-
-    Args:
-        line_style: The colloquial name for the line style to be used. Available options are: 'solid', 'dashed',
-            'dotdashed' and 'dotted'.
-
-    Returns:
-        The string-code for the requested line style.
-
-    Raises:
-        KeyError: If the input line style is not recognized.
-    """
-    try:
-        return str(_line_style_dict[line_style])
-    except KeyError:
-        message = (
-            f"Unexpected line style name '{line_style}' encountered when converting the colloquial line style name to "
-            f"the pyplot linestyle string. Provide one of the supported line style arguments: "
-            f"{', '.join(_line_style_dict.keys())}."
-        )
-        console.error(message=message, error=KeyError)
+    """Displays the lick, valve, and running speed plots plus the trial performance panel, and the air puff plot when
+    aversive trials are enabled."""
 
 
 class BehaviorVisualizer:
-    """Visualizes lick, valve, and running speed data in real time.
+    """Visualizes lick, valve, air puff, running speed, and trial performance data in real time.
 
     Notes:
         This class is designed to run in the main thread of the runtime control process. To update the visualized data,
-        call the 'update' class method as part of the runtime cycle method.
+        call the 'update' method as part of the runtime cycle method.
 
-        Calling this initializer does not open the visualizer plot window. Call the open() class method to finalize
+        Calling this initializer does not open the visualizer plot window. Call the open() method to finalize
         the visualizer initialization before starting runtime.
 
     Attributes:
@@ -147,6 +120,7 @@ class BehaviorVisualizer:
         _running_speed: The current running speed of the animal, in cm / s, averaged over a time-window of 50 ms.
         _once: Limits certain visualizer setup operations to only be called once during runtime.
         _is_open: Tracks whether the visualizer plot has been created.
+        _blit_manager: The _BlitManager that performs partial figure redraws during runtime updates.
         _speed_threshold_text: The text object that communicates the speed threshold value to the user.
         _duration_threshold_text: The text object that communicates the running epoch duration value to the user.
         _mode: The runtime mode that determines the visualizer layout.
@@ -154,6 +128,7 @@ class BehaviorVisualizer:
         _trial_types: Stores the most recent trial types with values -1=empty, 0=reinforcing, 1=aversive.
             Newest at the rightmost index.
         _trial_outcomes: Stores the most recent trial outcomes with values -1=empty, 0=failed, 1=success, 2=guided.
+            Newest at the rightmost index.
         _total_trials: The total number of trials recorded, used for x-axis labeling.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
@@ -161,17 +136,18 @@ class BehaviorVisualizer:
         _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
     """
 
-    # Pre-initializes NumPy event ticks to slightly reduce cyclic visualizer update speed.
+    # Pre-initializes the NumPy event ticks to slightly reduce the per-update processing overhead.
     _event_tick_true = np.uint8(1)
     _event_tick_false = np.uint8(0)
 
+    # noinspection PyTypeChecker
     def __init__(
         self,
     ) -> None:
         # Currently, the class is statically configured to visualize the sliding window of 10 seconds updated every
-        # 25 ms.
+        # 16 ms (~60 Hz). Blitting keeps each update well under this budget, so the runtime cycle is not stalled.
         self._time_window: int = 10
-        self._time_step: int = 25
+        self._time_step: int = 16
         self._update_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # Pre-creates the structures used to store the displayed data during visualization runtime.
@@ -187,18 +163,21 @@ class BehaviorVisualizer:
         self._lick_event: bool = False
         self._running_speed: np.float64 = np.float64(0)
 
-        # Line objects (to be created during open())
+        # Line objects (to be created during open()).
         self._lick_line: Line2D | None = None
         self._valve_line: Line2D | None = None
         self._puff_line: Line2D | None = None
         self._speed_line: Line2D | None = None
 
-        # Figure objects (to be created during open())
+        # Figure objects (to be created during open()).
         self._figure: Figure | None = None
         self._lick_axis: Axes | None = None
         self._valve_axis: Axes | None = None
         self._puff_axis: Axes | None = None
         self._speed_axis: Axes | None = None
+
+        # Manages blitting-based partial redraws; created when the visualizer window is opened.
+        self._blit_manager: _BlitManager | None = None
 
         # Running speed threshold and duration threshold lines.
         self._speed_threshold_line: Line2D | None = None
@@ -227,6 +206,7 @@ class BehaviorVisualizer:
         self._has_reinforcing_trials: bool = True
         self._has_aversive_trials: bool = True
 
+    # noinspection PyTypeChecker,PyUnresolvedReferences
     def open(
         self,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
@@ -298,27 +278,27 @@ class BehaviorVisualizer:
 
             if has_reinforcing_trials and has_aversive_trials:
                 # Both trial types: larger figure with 2-row trial panel and puff axis.
-                fig_height = 10.5
+                figure_height = 10.5
                 trial_height_ratio = 2.3
                 top_margin = 0.97
                 bottom_margin = 0.07
                 height_ratios = [1, 1, 1, 3, spacer_ratio, trial_height_ratio]
             elif has_aversive_trials:
                 # Aversive only: includes puff axis with 1-row trial panel.
-                fig_height = 9.5
+                figure_height = 9.5
                 trial_height_ratio = 1.5
                 top_margin = 0.96
                 bottom_margin = 0.08
                 height_ratios = [1, 1, 1, 3, spacer_ratio, trial_height_ratio]
             else:
                 # Reinforcing only: no puff axis, 1-row trial panel.
-                fig_height = 8.5
+                figure_height = 8.5
                 trial_height_ratio = 1.5
                 top_margin = 0.96
                 bottom_margin = 0.08
                 height_ratios = [1, 1, 3, spacer_ratio, trial_height_ratio]
 
-            self._figure = plt.figure(num="Runtime Behavior Visualizer", figsize=(10, fig_height))
+            self._figure = plt.figure(num="Runtime Behavior Visualizer", figsize=(10, figure_height))
             grid_spec = GridSpec(
                 nrows=len(height_ratios),
                 ncols=1,
@@ -345,15 +325,15 @@ class BehaviorVisualizer:
                 self._speed_axis = self._figure.add_subplot(grid_spec[2])
                 self._trial_axis = self._figure.add_subplot(grid_spec[4])
 
-        self._lick_axis.set_title(label="Lick Sensor State", fontdict=_fontdict_title)
-        self._lick_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._lick_axis.set_title(label="Lick Sensor State", fontdict=_FONTDICT_TITLE)
+        self._lick_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
         self._lick_axis.set_xlim(left=-self._time_window, right=0)
         self._lick_axis.set_xlabel(xlabel="")
         self._lick_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
         self._lick_axis.yaxis.set_major_formatter(FixedFormatter(seq=["No Lick", "Lick"]))
 
-        self._valve_axis.set_title(label="Reward Valve State", fontdict=_fontdict_title)
-        self._valve_axis.set_ylim(bottom=-0.05, top=1.05)
+        self._valve_axis.set_title(label="Reward Valve State", fontdict=_FONTDICT_TITLE)
+        self._valve_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
         self._valve_axis.set_xlim(left=-self._time_window, right=0)
         self._valve_axis.set_xlabel(xlabel="")
         self._valve_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
@@ -361,8 +341,8 @@ class BehaviorVisualizer:
 
         # Configures the air puff axis, which only exists in EXPERIMENT mode with aversive trials.
         if self._puff_axis is not None:
-            self._puff_axis.set_title(label="Air Puff Valve State", fontdict=_fontdict_title)
-            self._puff_axis.set_ylim(bottom=-0.05, top=1.05)
+            self._puff_axis.set_title(label="Air Puff Valve State", fontdict=_FONTDICT_TITLE)
+            self._puff_axis.set_ylim(bottom=_BINARY_AXIS_YLIM[0], top=_BINARY_AXIS_YLIM[1])
             self._puff_axis.set_xlim(left=-self._time_window, right=0)
             self._puff_axis.set_xlabel(xlabel="")
             self._puff_axis.yaxis.set_major_locator(FixedLocator(locs=[0, 1]))
@@ -370,12 +350,12 @@ class BehaviorVisualizer:
 
         # Configures the speed axis, which only exists in RUN_TRAINING and EXPERIMENT modes.
         if self._speed_axis is not None:
-            self._speed_axis.set_title(label="Average Running Speed", fontdict=_fontdict_title)
-            self._speed_axis.set_ylim(bottom=-2, top=42)
+            self._speed_axis.set_title(label="Average Running Speed", fontdict=_FONTDICT_TITLE)
+            self._speed_axis.set_ylim(bottom=_SPEED_AXIS_YLIM[0], top=_SPEED_AXIS_YLIM[1])
             self._speed_axis.set_xlim(left=-self._time_window, right=0)
-            self._speed_axis.set_ylabel(ylabel="Speed (cm / s)", fontdict=_fontdict_axis_label)
+            self._speed_axis.set_ylabel(ylabel="Speed (cm / s)", fontdict=_FONTDICT_AXIS_LABEL)
             self._speed_axis.yaxis.labelpad = 10
-            self._speed_axis.set_xlabel(xlabel="Time (s)", fontdict=_fontdict_axis_label)
+            self._speed_axis.set_xlabel(xlabel="Time (s)", fontdict=_FONTDICT_AXIS_LABEL)
             self._speed_axis.yaxis.set_major_locator(MaxNLocator(nbins="auto", integer=False))
             self._speed_axis.xaxis.set_major_locator(MaxNLocator(nbins="auto", integer=True))
             plt.setp(self._lick_axis.get_xticklabels(), visible=False)
@@ -384,7 +364,7 @@ class BehaviorVisualizer:
                 plt.setp(self._puff_axis.get_xticklabels(), visible=False)
         else:
             # In LICK_TRAINING mode, the valve axis is the bottom plot and shows the x-axis labels.
-            self._valve_axis.set_xlabel(xlabel="Time (s)", fontdict=_fontdict_axis_label)
+            self._valve_axis.set_xlabel(xlabel="Time (s)", fontdict=_FONTDICT_AXIS_LABEL)
             self._valve_axis.xaxis.set_major_locator(MaxNLocator(nbins="auto", integer=True))
             plt.setp(self._lick_axis.get_xticklabels(), visible=False)
 
@@ -392,7 +372,7 @@ class BehaviorVisualizer:
             self._timestamps,
             self._lick_data,
             drawstyle="steps-post",
-            color=_plt_palette("red"),
+            color=_plt_palette(color="red"),
             linewidth=2,
             alpha=1.0,
             linestyle="solid",
@@ -402,7 +382,7 @@ class BehaviorVisualizer:
             self._timestamps,
             self._valve_data,
             drawstyle="steps-post",
-            color=_plt_palette("blue"),
+            color=_plt_palette(color="blue"),
             linewidth=2,
             alpha=1.0,
             linestyle="solid",
@@ -414,55 +394,81 @@ class BehaviorVisualizer:
                 self._timestamps,
                 self._puff_data,
                 drawstyle="steps-post",
-                color=_plt_palette("gray"),
+                color=_plt_palette(color="gray"),
                 linewidth=2,
                 alpha=1.0,
                 linestyle="solid",
             )
 
-        # Creates the speed plot and threshold lines for RUN_TRAINING and experiment modes.
+        # Creates the speed plot for the RUN_TRAINING and EXPERIMENT modes, which both display running speed.
         if self._speed_axis is not None:
             (self._speed_line,) = self._speed_axis.plot(
                 self._timestamps,
                 self._speed_data,
-                color=_plt_palette("green"),
+                color=_plt_palette(color="green"),
                 linewidth=2,
                 alpha=1.0,
                 linestyle="solid",
             )
 
-            self._speed_threshold_line = self._speed_axis.axhline(
-                y=0.05, color=_plt_palette("black"), linestyle="dashed", linewidth=1.5, alpha=0.5, visible=False
-            )
-            self._duration_threshold_line = self._speed_axis.axvline(
-                x=-0.05, color=_plt_palette("black"), linestyle="dashed", linewidth=1.5, alpha=0.5, visible=False
-            )
+            # The running speed and epoch duration threshold lines and labels are exclusive to RUN_TRAINING. The
+            # EXPERIMENT mode displays running speed but does not enforce or show speed or duration thresholds.
+            if mode == VisualizerMode.RUN_TRAINING:
+                self._speed_threshold_line = self._speed_axis.axhline(
+                    y=0.05,
+                    color=_plt_palette(color="black"),
+                    linestyle="dashed",
+                    linewidth=1.5,
+                    alpha=0.5,
+                    visible=False,
+                )
+                self._duration_threshold_line = self._speed_axis.axvline(
+                    x=-0.05,
+                    color=_plt_palette(color="black"),
+                    linestyle="dashed",
+                    linewidth=1.5,
+                    alpha=0.5,
+                    visible=False,
+                )
 
-            self._speed_threshold_text = self._speed_axis.text(
-                -self._time_window + 0.5,  # x position: left edge and padding
-                40,  # y position: near top of plot
-                f"Target speed: {0:.2f} cm/s",
-                fontdict=_fontdict_legend,
-                verticalalignment="top",
-                bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
-            )
+                self._speed_threshold_text = self._speed_axis.text(
+                    -self._time_window + 0.5,  # x position: left edge and padding.
+                    40,  # y position: near top of plot.
+                    f"Target speed: {0:.2f} cm/s",
+                    fontdict=_FONTDICT_LEGEND,
+                    verticalalignment="top",
+                    bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
+                )
 
-            self._duration_threshold_text = self._speed_axis.text(
-                -self._time_window + 0.5,  # x position: left edge and padding
-                35.5,  # y position: below speed text
-                f"Target duration: {0:.2f} s",
-                fontdict=_fontdict_legend,
-                verticalalignment="top",
-                bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
-            )
+                self._duration_threshold_text = self._speed_axis.text(
+                    -self._time_window + 0.5,  # x position: left edge and padding.
+                    35.5,  # y position: below speed text.
+                    f"Target duration: {0:.2f} s",
+                    fontdict=_FONTDICT_LEGEND,
+                    verticalalignment="top",
+                    bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
+                )
 
         # Sets up the trial performance panel, which only exists in experiment modes.
         if self._trial_axis is not None:
             self._setup_trial_axis()
 
+        # Collects the data lines re-rendered on every update cycle. Only the lines for the axes
+        # present in the active display mode are created.
+        animated_lines: list[Line2D] = [self._lick_line, self._valve_line]
+        if self._puff_line is not None:
+            animated_lines.append(self._puff_line)
+        if self._speed_line is not None:
+            animated_lines.append(self._speed_line)
+
+        # Enables blitting so runtime updates re-render only the data lines instead of the whole figure.
+        self._blit_manager = _BlitManager(
+            canvas=cast("FigureCanvasAgg", self._figure.canvas), animated_artists=animated_lines
+        )
+
         plt.show(block=False)
         self._figure.canvas.draw()
-        self._figure.canvas.flush_events()
+        self._blit_manager.update()
 
         self._is_open = True
 
@@ -478,7 +484,7 @@ class BehaviorVisualizer:
             The method has an internal update frequency limiter and is designed to be called without any external
             update frequency control.
         """
-        # Does not do anything until the figure is opened (created)
+        # Does not do anything until the figure is opened (created).
         if not self._is_open:
             return
 
@@ -499,9 +505,8 @@ class BehaviorVisualizer:
         if self._speed_line is not None:
             self._speed_line.set_data(self._timestamps, self._speed_data)
 
-        # Renders the changes.
-        self._figure.canvas.draw()  # type: ignore[union-attr]
-        self._figure.canvas.flush_events()  # type: ignore[union-attr]
+        # Re-renders only the data lines over the cached background instead of redrawing the figure.
+        self._blit_manager.update()  # type: ignore[union-attr]
 
     def update_run_training_thresholds(self, speed_threshold: np.float64, duration_threshold: np.float64) -> None:
         """Updates the running speed and duration threshold lines to use the input anchor values.
@@ -511,15 +516,16 @@ class BehaviorVisualizer:
             duration_threshold: The duration, in milliseconds, the animal has to maintain the above-threshold speed to
                 get water rewards.
         """
-        # Does not do anything until the figure is opened (created) or if speed axis doesn't exist.
-        if not self._is_open or self._speed_axis is None:
+        # Does not do anything until the figure is opened, or when the threshold artists do not exist. The threshold
+        # artists are only created in RUN_TRAINING mode, so this method is a no-op in the other display modes.
+        if not self._is_open or self._speed_threshold_line is None:
             return
 
         # Converts from milliseconds to seconds.
         duration_threshold /= 1000
 
         # Updates line positions.
-        self._speed_threshold_line.set_ydata([speed_threshold, speed_threshold])  # type: ignore[union-attr]
+        self._speed_threshold_line.set_ydata([speed_threshold, speed_threshold])
         self._duration_threshold_line.set_xdata([-duration_threshold, -duration_threshold])  # type: ignore[union-attr]
 
         # Updates text annotations with current threshold values.
@@ -530,60 +536,13 @@ class BehaviorVisualizer:
 
         # Ensures the visibility is only changed once during runtime.
         if self._once:
-            self._speed_threshold_line.set_visible(True)  # type: ignore[union-attr]
+            self._speed_threshold_line.set_visible(True)
             self._duration_threshold_line.set_visible(True)  # type: ignore[union-attr]
             self._once = False
 
-        # Renders the changes.
-        self._figure.canvas.draw()  # type: ignore[union-attr]
-        self._figure.canvas.flush_events()  # type: ignore[union-attr]
-
-    def close(self) -> None:
-        """Closes the visualized figure and cleans up the resources used by the instance during runtime."""
-        if self._is_open and self._figure is not None:
-            plt.close(self._figure)
-            self._is_open = False
-
-    def _sample_data(self) -> None:
-        """Updates the visualization data arrays with the data accumulated since the last visualization update."""
-        # Rolls arrays by one position to the left, so the first element becomes the last.
-        self._valve_data = np.roll(self._valve_data, shift=-1)
-        self._lick_data = np.roll(self._lick_data, shift=-1)
-
-        # Replaces the last element (previously the first or 'oldest' value) with new data.
-
-        # If the runtime has detected at least one lick event since the last visualizer update, emits a lick tick.
-        if self._lick_event:
-            self._lick_data[-1] = self._event_tick_true
-        else:
-            self._lick_data[-1] = self._event_tick_false
-        self._lick_event = False  # Resets the lick event flag.
-
-        # If the runtime has detected at least one water reward (valve) event since the last visualizer update, emits a
-        # valve activation tick.
-        if self._valve_event:
-            self._valve_data[-1] = self._event_tick_true
-        else:
-            self._valve_data[-1] = self._event_tick_false
-        self._valve_event = False  # Resets the valve event flag.
-
-        # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
-        # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).
-        if self._puff_axis is not None:
-            self._puff_data = np.roll(self._puff_data, shift=-1)
-            if self._puff_event:
-                self._puff_data[-1] = self._event_tick_true
-            else:
-                self._puff_data[-1] = self._event_tick_false
-            self._puff_event = False  # Resets the puff event flag.
-
-        # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
-        # update cycle the last speed point is overwritten with the previous speed point. This generates a
-        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
-        # exists (not in LICK_TRAINING mode).
-        if self._speed_axis is not None:
-            self._speed_data = np.roll(self._speed_data, shift=-1)
-            self._speed_data[-1] = self._running_speed
+        # Rebuilds the cached background to capture the repositioned threshold lines and text, then
+        # redraws the data lines on top.
+        self._blit_manager.refresh()  # type: ignore[union-attr]
 
     def add_lick_event(self) -> None:
         """Instructs the visualizer to render a new lick event during the next update cycle."""
@@ -600,98 +559,6 @@ class BehaviorVisualizer:
     def update_running_speed(self, running_speed: np.float64) -> None:
         """Instructs the visualizer to render the provided running speed datapoint during the next update cycle."""
         self._running_speed = running_speed
-
-    def _setup_trial_axis(self) -> None:
-        """Initializes the trial performance panel with empty rectangle patches.
-
-        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
-        types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
-        with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
-        a single-row layout is used.
-        """
-        if self._trial_axis is None:
-            return
-
-        self._trial_axis.set_title(label="Trial Performance", fontdict=_fontdict_title)
-        self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
-        self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_fontdict_axis_label)
-        self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
-        self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
-
-        # Configures the Y-axis layout based on which trial types are enabled.
-        if self._has_reinforcing_trials and self._has_aversive_trials:
-            # Two-row layout: reinforcing on bottom, aversive on top.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.25, 0.75])
-            self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
-            self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
-            reinforcing_y = 0.05
-            aversive_y = 0.55
-            rect_height = 0.4
-        elif self._has_reinforcing_trials:
-            # Single-row layout: reinforcing only.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.45])
-            self._trial_axis.set_yticklabels(labels=["Reinforcing"])
-            reinforcing_y = 0.15
-            aversive_y = 0.0  # Not used.
-            rect_height = 0.6
-        else:
-            # Single-row layout: aversive only.
-            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
-            self._trial_axis.set_yticks(ticks=[0.45])
-            self._trial_axis.set_yticklabels(labels=["Aversive"])
-            reinforcing_y = 0.0  # Not used.
-            aversive_y = 0.15
-            rect_height = 0.6
-
-        # Adds color legend for trial outcomes.
-        legend_elements = [
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
-            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="gray"), label="Guided"),
-        ]
-        self._trial_axis.legend(
-            handles=legend_elements,
-            loc="lower right",
-            ncol=3,
-            fontsize=10,
-            framealpha=0.9,
-            edgecolor="none",
-            bbox_to_anchor=(1.0, -0.02),
-        )
-
-        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
-        self._reinforcing_rectangles = []
-        if self._has_reinforcing_trials:
-            for i in range(_TRIAL_HISTORY_SIZE):
-                rect = Rectangle(
-                    xy=(i + 1 - 0.175, reinforcing_y),
-                    width=0.35,
-                    height=rect_height,
-                    facecolor=_plt_palette("gray"),
-                    edgecolor="none",
-                    alpha=0.3,
-                    visible=False,
-                )
-                self._trial_axis.add_patch(rect)
-                self._reinforcing_rectangles.append(rect)
-
-        # Creates the aversive trial rectangles if aversive trials are enabled.
-        self._aversive_rectangles = []
-        if self._has_aversive_trials:
-            for i in range(_TRIAL_HISTORY_SIZE):
-                rect = Rectangle(
-                    xy=(i + 1 - 0.175, aversive_y),
-                    width=0.35,
-                    height=rect_height,
-                    facecolor=_plt_palette("gray"),
-                    edgecolor="none",
-                    alpha=0.3,
-                    visible=False,
-                )
-                self._trial_axis.add_patch(rect)
-                self._aversive_rectangles.append(rect)
 
     def add_trial_outcome(self, *, is_aversive: bool, succeeded: bool, was_guided: bool) -> None:
         """Records a trial outcome and updates the trial performance visualization.
@@ -761,27 +628,277 @@ class BehaviorVisualizer:
                 labels.append(str(start_trial_number + index - (_TRIAL_HISTORY_SIZE - num_displayed)))
         self._trial_axis.set_xticklabels(labels=labels)
 
+        # Rebuilds the cached background so the updated trial rectangles and tick labels persist
+        # across subsequent blitted updates.
+        self._blit_manager.refresh()  # type: ignore[union-attr]
+
+    def close(self) -> None:
+        """Closes the visualized figure and cleans up the resources used by the instance during runtime."""
+        if self._is_open and self._figure is not None:
+            plt.close(self._figure)
+            self._is_open = False
+
+    def _sample_data(self) -> None:
+        """Updates the visualization data arrays with the data accumulated since the last visualization update."""
+        # Rolls arrays by one position to the left, so the first element becomes the last.
+        self._valve_data = np.roll(a=self._valve_data, shift=-1)
+        self._lick_data = np.roll(a=self._lick_data, shift=-1)
+
+        # Replaces the last element (previously the first or 'oldest' value) with new data.
+
+        # If the runtime has detected at least one lick event since the last visualizer update, emits a lick tick.
+        if self._lick_event:
+            self._lick_data[-1] = self._event_tick_true
+        else:
+            self._lick_data[-1] = self._event_tick_false
+        self._lick_event = False  # Resets the lick event flag.
+
+        # If the runtime has detected at least one water reward (valve) event since the last visualizer update, emits a
+        # valve activation tick.
+        if self._valve_event:
+            self._valve_data[-1] = self._event_tick_true
+        else:
+            self._valve_data[-1] = self._event_tick_false
+        self._valve_event = False  # Resets the valve event flag.
+
+        # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
+        # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).
+        if self._puff_axis is not None:
+            self._puff_data = np.roll(a=self._puff_data, shift=-1)
+            if self._puff_event:
+                self._puff_data[-1] = self._event_tick_true
+            else:
+                self._puff_data[-1] = self._event_tick_false
+            self._puff_event = False  # Resets the puff event flag.
+
+        # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
+        # update cycle the last speed point is overwritten with the previous speed point. This generates a
+        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
+        # exists (not in LICK_TRAINING mode).
+        if self._speed_axis is not None:
+            self._speed_data = np.roll(a=self._speed_data, shift=-1)
+            self._speed_data[-1] = self._running_speed
+
+    def _setup_trial_axis(self) -> None:
+        """Initializes the trial performance panel with empty rectangle patches.
+
+        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
+        types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
+        with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
+        a single-row layout is used.
+        """
+        if self._trial_axis is None:
+            return
+
+        self._trial_axis.set_title(label="Trial Performance", fontdict=_FONTDICT_TITLE)
+        self._trial_axis.set_xlim(left=0.5, right=_TRIAL_HISTORY_SIZE + 0.5)
+        self._trial_axis.set_xlabel(xlabel="Trial Number", fontdict=_FONTDICT_AXIS_LABEL)
+        self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
+        self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
+
+        # Configures the Y-axis layout based on which trial types are enabled.
+        if self._has_reinforcing_trials and self._has_aversive_trials:
+            # Two-row layout: reinforcing on bottom, aversive on top.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.25, 0.75])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing", "Aversive"])
+            self._trial_axis.axhline(y=0.5, color=_plt_palette(color="gray"), linestyle="-", linewidth=0.5, alpha=0.5)
+            reinforcing_y = 0.05
+            aversive_y = 0.55
+            rectangle_height = 0.4
+        elif self._has_reinforcing_trials:
+            # Single-row layout: reinforcing only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Reinforcing"])
+            reinforcing_y = 0.15
+            aversive_y = 0.0  # Not used.
+            rectangle_height = 0.6
+        else:
+            # Single-row layout: aversive only.
+            self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
+            self._trial_axis.set_yticks(ticks=[0.45])
+            self._trial_axis.set_yticklabels(labels=["Aversive"])
+            reinforcing_y = 0.0  # Not used.
+            aversive_y = 0.15
+            rectangle_height = 0.6
+
+        # Adds color legend for trial outcomes.
+        legend_elements = [
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
+            Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="gray"), label="Guided"),
+        ]
+        self._trial_axis.legend(
+            handles=legend_elements,
+            loc="lower right",
+            ncol=3,
+            fontsize=10,
+            framealpha=0.9,
+            edgecolor="none",
+            bbox_to_anchor=(1.0, -0.02),
+        )
+
+        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
+        self._reinforcing_rectangles = []
+        if self._has_reinforcing_trials:
+            for index in range(_TRIAL_HISTORY_SIZE):
+                rectangle = Rectangle(
+                    xy=(index + 1 - _TRIAL_RECTANGLE_OFFSET, reinforcing_y),
+                    width=_TRIAL_RECTANGLE_WIDTH,
+                    height=rectangle_height,
+                    facecolor=_plt_palette(color="gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rectangle)
+                self._reinforcing_rectangles.append(rectangle)
+
+        # Creates the aversive trial rectangles if aversive trials are enabled.
+        self._aversive_rectangles = []
+        if self._has_aversive_trials:
+            for index in range(_TRIAL_HISTORY_SIZE):
+                rectangle = Rectangle(
+                    xy=(index + 1 - _TRIAL_RECTANGLE_OFFSET, aversive_y),
+                    width=_TRIAL_RECTANGLE_WIDTH,
+                    height=rectangle_height,
+                    facecolor=_plt_palette(color="gray"),
+                    edgecolor="none",
+                    alpha=0.3,
+                    visible=False,
+                )
+                self._trial_axis.add_patch(rectangle)
+                self._aversive_rectangles.append(rectangle)
+
     @staticmethod
     def _update_trial_rectangle(rectangles: list[Rectangle], index: int, outcome: np.int8) -> None:
         """Updates a single trial rectangle based on the outcome value.
 
         Args:
             rectangles: The list of rectangle patches (either reinforcing or aversive).
-            index: The index of the trial in the circular buffer (0-19).
+            index: The index of the trial in the circular buffer (0 to _TRIAL_HISTORY_SIZE - 1).
             outcome: The outcome value (-1=empty, 0=failure, 1=success, 2=guided).
         """
         if index >= len(rectangles):
             return
 
-        rect = rectangles[index]
+        rectangle = rectangles[index]
 
         # Sets rectangle color based on outcome: green=success, red=failure, gray=guided.
         if outcome == 1:
-            rect.set_facecolor(_plt_palette("green"))
+            rectangle.set_facecolor(_plt_palette(color="green"))
         elif outcome == 0:
-            rect.set_facecolor(_plt_palette("red"))
+            rectangle.set_facecolor(_plt_palette(color="red"))
         else:
-            rect.set_facecolor(_plt_palette("gray"))
+            rectangle.set_facecolor(_plt_palette(color="gray"))
 
-        rect.set_alpha(1.0)
-        rect.set_visible(True)
+        rectangle.set_alpha(1.0)
+        rectangle.set_visible(True)
+
+
+def _plt_palette(color: str) -> tuple[float, float, float]:
+    """Converts colloquial color names to pyplot RGB color codes.
+
+    Args:
+        color: The colloquial name of the color to be retrieved. Available options are: 'green', 'blue', 'red',
+            'yellow', 'purple', 'orange', 'pink', 'black', 'white', 'gray'.
+
+    Returns:
+        The red, green, and blue components of the requested color.
+
+    Raises:
+        KeyError: If the input color name is not recognized.
+    """
+    try:
+        return _PALETTE_DICT[color]
+    except KeyError:
+        message = (
+            f"Unexpected color name '{color}' encountered when converting the colloquial color name to RGB array. "
+            f"Provide one of the supported color arguments: {', '.join(_PALETTE_DICT.keys())}."
+        )
+        console.error(message=message, error=KeyError)
+
+
+def _plt_line_styles(line_style: str) -> str:
+    """Converts colloquial line style names to pyplot's 'linestyle' string-codes.
+
+    Args:
+        line_style: The colloquial name for the line style to be used. Available options are: 'solid', 'dashed',
+            'dotdashed' and 'dotted'.
+
+    Returns:
+        The string-code for the requested line style.
+
+    Raises:
+        KeyError: If the input line style is not recognized.
+    """
+    try:
+        return str(_LINE_STYLE_DICT[line_style])
+    except KeyError:
+        message = (
+            f"Unexpected line style name '{line_style}' encountered when converting the colloquial line style name to "
+            f"the pyplot linestyle string. Provide one of the supported line style arguments: "
+            f"{', '.join(_LINE_STYLE_DICT.keys())}."
+        )
+        console.error(message=message, error=KeyError)
+
+
+class _BlitManager:
+    """Renders the real-time behavior plots using blitting to minimize the per-update rendering cost.
+
+    Only the data lines change between visualizer updates during runtime. Blitting caches the static figure background
+    and re-renders just these lines on each update, avoiding the cost of rasterizing the entire figure (axes, ticks,
+    labels, and panels) on every cycle.
+
+    Notes:
+        The cached background is recaptured after every full canvas redraw, which keeps it valid across window resizes.
+        Calling refresh() after modifying a static artist, such as a threshold line or a trial rectangle, rebuilds the
+        background and restores the data lines on top of it.
+
+    Args:
+        canvas: The Agg-based figure canvas that renders the managed figure.
+        animated_artists: The data line artists that are re-rendered on every update cycle.
+
+    Attributes:
+        _canvas: The Agg-based figure canvas that renders the managed figure.
+        _figure: The figure whose background is cached and whose data lines are blitted.
+        _animated_artists: The data line artists that are re-rendered on every update cycle.
+        _background: The cached pixel buffer of the static figure background. Set to None until the first full canvas
+            redraw populates it.
+        _connection_id: The identifier for the 'draw_event' callback that recaptures the cached background.
+    """
+
+    def __init__(self, canvas: FigureCanvasAgg, animated_artists: list[Line2D]) -> None:
+        self._canvas = canvas
+        self._figure = canvas.figure
+        self._animated_artists = animated_artists
+        self._background: Any = None
+
+        # Marks each data line as animated so full canvas redraws exclude it from the cached background, leaving the
+        # line to be drawn on top during blitting.
+        for artist in self._animated_artists:
+            artist.set_animated(True)
+
+        self._connection_id = canvas.mpl_connect("draw_event", self._on_draw)
+
+    def update(self) -> None:
+        """Restores the cached background, redraws the data lines on top, and blits the result to the canvas."""
+        # Captures the background on the first update if no full redraw has populated it yet.
+        if self._background is None:
+            self._canvas.draw()
+
+        self._canvas.restore_region(self._background)
+        for artist in self._animated_artists:
+            self._figure.draw_artist(artist)
+        self._canvas.blit(self._figure.bbox)
+        self._canvas.flush_events()
+
+    def refresh(self) -> None:
+        """Rebuilds the cached background after static artists change, then redraws the data lines on top."""
+        self._canvas.draw()
+        self.update()
+
+    def _on_draw(self, _event: Event) -> None:
+        """Caches the static figure background after each full canvas redraw."""
+        self._background = self._canvas.copy_from_bbox(self._figure.bbox)
