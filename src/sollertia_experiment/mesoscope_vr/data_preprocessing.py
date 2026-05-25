@@ -319,8 +319,8 @@ def _verify_and_get_stack_size(file: Path) -> int:
 def _process_stack(
     tiff_path: Path, first_frame_number: int, output_directory: Path, batch_size: int = 100
 ) -> dict[str, Any]:
-    """Recompresses the target mesoscope frame stack TIFF file using the Limited Error Raster Coding (LERC) scheme and
-    extracts its frame-variant ScanImage metadata.
+    """Recompresses the target mesoscope frame stack TIFF file using the Limited Error Raster Compression (LERC)
+    scheme and extracts its frame-variant ScanImage metadata.
 
     Notes:
         This function is designed to be parallelized to work on multiple TIFF files at the same time.

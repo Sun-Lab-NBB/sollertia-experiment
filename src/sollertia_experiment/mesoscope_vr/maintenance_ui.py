@@ -110,7 +110,7 @@ class MaintenanceControlUI:
         valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
         gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
-            count to other processes.
+            count and valve open/close state to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer data between the UI process
@@ -118,7 +118,7 @@ class MaintenanceControlUI:
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
-            count to other processes.
+            count and valve open/close state to other processes.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
@@ -834,7 +834,9 @@ class _MaintenanceUIWindow(QMainWindow):
         """)
 
     def _setup_monitoring(self) -> None:
-        """Sets up a QTimer to monitor the runtime termination status and valve's state."""
+        """Sets up a QTimer to monitor the runtime termination status and the water valve, calibration, and gas puff
+        valve states.
+        """
         self._monitor_timer = QTimer(self)
         # noinspection PyUnresolvedReferences
         self._monitor_timer.timeout.connect(self._check_external_state)

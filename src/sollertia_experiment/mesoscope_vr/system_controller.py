@@ -132,7 +132,7 @@ class _MesoscopeVRSystem:
         _running_speed: The animal's running speed, in centimeters per second, computed over the last 50 milliseconds.
         _speed_timer: The PrecisionTimer instance used to compute the animal's running speed in 50-millisecond
             intervals.
-        _paused_water_volume: Tracks the total volume of water, in milliliters, dispensed by the water delivery valve
+        _paused_water_volume: Tracks the total volume of water, in microliters, dispensed by the water delivery valve
             when the session's data acquisition was paused.
         _logger: The DataLogger instance that logs the data from all sources managed by the Mesoscope-VR instance.
         _microcontrollers: The MicroControllerInterfaces instance that interfaces with the Actor, Sensor, and Encoder
@@ -636,7 +636,7 @@ class _MesoscopeVRSystem:
 
         Notes:
             In the rest state, the brake is engaged and the screens are turned off. The encoder sensor is
-            disabled, and the torque sensor is enabled.
+            disabled, the torque sensor is enabled, and the lick sensor is enabled.
         """
         # Enables lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
@@ -659,8 +659,8 @@ class _MesoscopeVRSystem:
         """Switches the Mesoscope-VR system to the run state.
 
         Notes:
-            In the run state, the brake is disengaged and the screens are turned off. The encoder sensor is
-            enabled, and the torque sensor is disabled.
+            In the run state, the brake is disengaged and the screens are turned on. The encoder sensor is
+            enabled, the torque sensor is disabled, and the lick sensor is enabled.
         """
         # Enables lick monitoring.
         self._microcontrollers.lick.set_monitoring_state(state=True)
@@ -1059,7 +1059,7 @@ class _MesoscopeVRSystem:
                 # Adds delay to prevent CPU spinning.
                 _response_delay_timer.delay(delay=10, block=False)
 
-                if self._microcontrollers.mesoscope_frame.pulse_count > _EXPECTED_FRAME_PULSES:
+                if self._microcontrollers.mesoscope_frame.pulse_count >= _EXPECTED_FRAME_PULSES:
                     message = "Mesoscope frame acquisition: Started."
                     console.echo(message=message, level=LogLevel.SUCCESS)
 

@@ -40,8 +40,8 @@ _DURATION_THRESHOLD_SCALE: int = 1000
 inside the integer shared memory array.
 """
 _MODIFIER_STEP_CM_S: float = 0.01
-"""The running speed resolution, in centimeters per second, represented by a single increment of the user-defined
-speed and duration threshold modifiers.
+"""The resolution represented by a single increment of the threshold modifiers: 0.01 cm/s for the speed modifier and
+0.01 s (10 ms) for the duration modifier.
 """
 _UI_REFRESH_INTERVAL_MS: int = 100
 """The interval, in milliseconds, between consecutive checks of the externally addressable UI state."""
@@ -124,7 +124,7 @@ class RuntimeControlUI:
         valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
         gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
-            count to other processes.
+            state to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
@@ -132,7 +132,7 @@ class RuntimeControlUI:
         _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
             processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
-            count to other processes.
+            state to other processes.
         _mode: The VisualizerMode that determines which UI elements are enabled.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
@@ -146,7 +146,7 @@ class RuntimeControlUI:
         prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance.
         prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance.
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards.
-        prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100
+        prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100  # Preconfigures gas puff delivery to use 100 ms puffs.
 
         self._data_array: SharedMemoryArray = SharedMemoryArray.create_array(
             name="runtime_control_ui", prototype=prototype, exists_ok=True

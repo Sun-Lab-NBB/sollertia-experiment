@@ -53,8 +53,8 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
     AVERSIVE_GUIDANCE_STATE = 4
     """The system has changed the aversive (gas puff) trial guidance state."""
     DISTANCE_SNAPSHOT = 5
-    """The system has taken a snapshot of the total distance traveled by the animal due to changing the VR wall cue
-    sequence."""
+    """The system has taken a snapshot of the total distance traveled by the animal at the time Unity signaled runtime
+    termination (emergency pause)."""
 
 
 @dataclass(slots=True)
@@ -84,7 +84,8 @@ class _TrialState:
     reinforcing_rewarded: bool = False
     """Tracks whether the current reinforcing trial has been rewarded."""
     reinforcing_rewards: tuple[tuple[float, int], ...] = ((0.0, 0),)
-    """Stores the reward size (volume in μL) and tone duration (ms) for each reinforcing trial."""
+    """Stores the reward size (volume in μL) and tone duration (ms) for each trial, with 0 for trials of the other
+    type."""
 
     # Aversive (gas puff) trial tracking.
     aversive_guided_trials: int = 0
@@ -98,7 +99,7 @@ class _TrialState:
     aversive_succeeded: bool = False
     """Tracks whether the animal met the occupancy requirement for the current aversive trial."""
     aversive_puff_durations: tuple[int, ...] = (100,)
-    """Stores the gas puff duration (ms) for each aversive trial."""
+    """Stores the gas puff duration (ms) for each trial, with 0 for trials of the other type."""
 
     # Trial structure configuration.
     trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = field(default_factory=dict)
@@ -136,10 +137,15 @@ class _TrialState:
         return self.aversive_puff_durations[self.completed]
 
     def is_current_trial_aversive(self) -> bool:
-        """Determines whether the current trial is an aversive (gas puff) trial.
+        """Determines whether the current trial is an aversive (gas puff) trial from its nonzero per-trial puff
+        duration.
+
+        Notes:
+            The accessor indexes the per-trial puff duration array at the current trial position, so it is only valid
+            while trial_completed() returns False.
 
         Returns:
-            True if the current trial is a GasPuffTrial, False otherwise.
+            True if the current trial stores a nonzero gas puff duration, False otherwise.
         """
         return self.aversive_puff_durations[self.completed] > 0
 
@@ -171,8 +177,8 @@ class _TrialState:
 
 
 def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_data: MesoscopeData) -> None:
-    """Generates a precursor mesoscope_positions.yaml file and forces the user to update it to reflect
-    the current mesoscope's imaging position coordinates.
+    """Forces the user to update the mesoscope_positions.yaml file to reflect the current mesoscope's imaging position
+    coordinates and copies the validated file into the animal's persistent directory.
 
     Args:
         session_data: The SessionData instance that defines the session for which the snapshot is generated.
@@ -481,7 +487,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
     while True:
         screenshots = list(mesoscope_data.scanimagepc_data.mesoscope_root_path.glob("*.png"))
 
-        if screenshots:
+        if len(screenshots) == 1:
             break
 
         message = (
@@ -493,7 +499,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
-    # Transfers the screenshot to the session's mesoscope_frames directory.
+    # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
 
     # Moves the screenshot from the ScanImagePC to the VRPC.

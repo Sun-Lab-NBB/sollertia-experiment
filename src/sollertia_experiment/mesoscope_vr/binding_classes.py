@@ -506,6 +506,7 @@ class MicroControllerInterfaces:
 
         self.wheel_encoder.initialize_local_assets()
         self.valve.initialize_local_assets()
+        self.gas_puff_valve.initialize_local_assets()
         self.mesoscope_frame.initialize_local_assets()
         self.lick.initialize_local_assets()
 

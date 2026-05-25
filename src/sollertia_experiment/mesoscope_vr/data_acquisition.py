@@ -66,10 +66,6 @@ _RENDERING_SEPARATION_DELAY: int = 500
 _MICROLITERS_PER_MILLILITER: float = 1000.0
 """Specifies the number of microliters in one milliliter, used to convert between the two water-volume units."""
 
-_MINIMUM_INCREASE_THRESHOLD_ML: float = 1e-12
-"""Specifies a near-zero water volume, in milliliters, used in place of a zero increase threshold to avoid a
-division-by-zero error while preserving the behavior of a disabled threshold increase."""
-
 
 # PyCharm does not narrow the Optional `zaber_motors` after assignment (the Optional is required for the finally
 # guard) and resolves the descriptor union to its first member; both are false positives that mypy does not report.
@@ -705,11 +701,10 @@ def run_training_logic(
     # ensures that the feature can be properly disabled by setting the limit equal to the total reward count.
     disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
 
-    # Validates the increase threshold parameter. The way 'increase_threshold' is used requires it to be greater than
-    # 0. So if a threshold of 0 is passed, the system sets it to a very small number instead, which functions similar
-    # to it being 0, but does not produce an error. Specifically, this prevents the 'division by zero' error.
-    if descriptor.increase_threshold_ml <= 0:
-        descriptor.increase_threshold_ml = _MINIMUM_INCREASE_THRESHOLD_ML
+    # Determines whether the volume-driven threshold increase is disabled. A non-positive increase threshold holds the
+    # speed and duration thresholds at their initial values for the entire session, while a positive threshold enables
+    # the dynamic increase computed during the runtime loop.
+    increase_disabled = descriptor.increase_threshold_ml <= 0
 
     # Initializes the timers used during the session.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -832,7 +827,9 @@ def run_training_logic(
             # between the total delivered water volume and the increase threshold. This dynamically adjusts the running
             # speed and duration thresholds with delivered water volume, ensuring the animal has to try progressively
             # harder to keep receiving water.
-            increase_steps: np.float64 = np.floor(system.dispensed_water_volume / water_threshold)
+            increase_steps: np.float64 = (
+                np.float64(0) if increase_disabled else np.floor(system.dispensed_water_volume / water_threshold)
+            )
 
             # Computes the automatic (runtime-driven) component of each threshold, which combines the initial threshold
             # with the volume-driven increments but excludes the user-defined GUI modifier. Publishing these values to
@@ -1163,7 +1160,7 @@ def experiment_logic(
                 message = (
                     f"Unsupported Mesoscope-VR system state code {state.system_state_code} encountered when executing "
                     f"the {state.experiment_state_code} state. Currently, only the following system state codes are "
-                    f"supported {','.join(str(state.value) for state in MesoscopeVRStates)}."
+                    f"supported {supported_state_codes}."
                 )
                 console.error(message=message, error=ValueError)
 

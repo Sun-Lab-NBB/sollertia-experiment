@@ -77,11 +77,12 @@ class VisualizerMode(IntEnum):
     RUN_TRAINING = 1
     """Displays lick, valve, and running speed plots."""
     EXPERIMENT = 2
-    """Displays all plots including the trial performance panel."""
+    """Displays the lick, valve, and running speed plots plus the trial performance panel, and the air puff plot when
+    aversive trials are enabled."""
 
 
 class BehaviorVisualizer:
-    """Visualizes lick, valve, and running speed data in real time.
+    """Visualizes lick, valve, air puff, running speed, and trial performance data in real time.
 
     Notes:
         This class is designed to run in the main thread of the runtime control process. To update the visualized data,
@@ -127,6 +128,7 @@ class BehaviorVisualizer:
         _trial_types: Stores the most recent trial types with values -1=empty, 0=reinforcing, 1=aversive.
             Newest at the rightmost index.
         _trial_outcomes: Stores the most recent trial outcomes with values -1=empty, 0=failed, 1=success, 2=guided.
+            Newest at the rightmost index.
         _total_trials: The total number of trials recorded, used for x-axis labeling.
         _reinforcing_rectangles: The rectangle patches for visualizing reinforcing trial outcomes.
         _aversive_rectangles: The rectangle patches for visualizing aversive trial outcomes.
@@ -775,7 +777,7 @@ class BehaviorVisualizer:
 
         Args:
             rectangles: The list of rectangle patches (either reinforcing or aversive).
-            index: The index of the trial in the circular buffer (0-19).
+            index: The index of the trial in the circular buffer (0 to _TRIAL_HISTORY_SIZE - 1).
             outcome: The outcome value (-1=empty, 0=failure, 1=success, 2=guided).
         """
         if index >= len(rectangles):
