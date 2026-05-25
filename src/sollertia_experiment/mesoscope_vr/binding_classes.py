@@ -13,15 +13,15 @@ from ataraxis_communication_interface import MicroControllerInterface
 from .system import ZaberPositions
 from ..cross_system import (
     ZaberAxis,
-    TTLInterface,
     LickInterface,
     BrakeInterface,
-    ValveInterface,
     ScreenInterface,
     TorqueInterface,
     ZaberConnection,
     EncoderInterface,
+    WaterValveInterface,
     GasPuffValveInterface,
+    MesoscopeFrameTTLInterface,
 )
 
 if TYPE_CHECKING:
@@ -412,7 +412,7 @@ class MicroControllerInterfaces:
             minimum_brake_strength=self._configuration.minimum_brake_strength_g_cm,
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
         )
-        self.valve = ValveInterface(
+        self.valve = WaterValveInterface(
             valve_calibration_data=self._configuration.valve_calibration_data,  # type: ignore[arg-type]
         )
         self.gas_puff_valve = GasPuffValveInterface()
@@ -434,7 +434,9 @@ class MicroControllerInterfaces:
         # logic to maintain the necessary precision.
 
         # Module interfaces:
-        self.mesoscope_frame: TTLInterface = TTLInterface(polling_frequency=_sensor_polling_delay)
+        self.mesoscope_frame: MesoscopeFrameTTLInterface = MesoscopeFrameTTLInterface(
+            polling_frequency=_sensor_polling_delay
+        )
         self.lick: LickInterface = LickInterface(
             lick_threshold=self._configuration.lick_threshold_adc,
             polling_frequency=_sensor_polling_delay,

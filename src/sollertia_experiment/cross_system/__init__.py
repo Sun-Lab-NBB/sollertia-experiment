@@ -14,14 +14,14 @@ from .zaber_bindings import (
     validate_zaber_device_configuration,
 )
 from .module_interfaces import (
-    TTLInterface,
     LickInterface,
     BrakeInterface,
-    ValveInterface,
     ScreenInterface,
     TorqueInterface,
     EncoderInterface,
+    WaterValveInterface,
     GasPuffValveInterface,
+    MesoscopeFrameTTLInterface,
 )
 from .data_preprocessing import (
     StorageDestination,
@@ -41,14 +41,14 @@ __all__ = [
     "EncoderInterface",
     "GasPuffValveInterface",
     "LickInterface",
+    "MesoscopeFrameTTLInterface",
     "ScreenInterface",
     "StorageDestination",
     "StorageDestinations",
     "SurgeryLog",
-    "TTLInterface",
     "TorqueInterface",
-    "ValveInterface",
     "WaterLog",
+    "WaterValveInterface",
     "ZaberAxis",
     "ZaberConnection",
     "ZaberDeviceSettings",

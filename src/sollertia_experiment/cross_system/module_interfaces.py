@@ -513,8 +513,9 @@ class TorqueInterface(ModuleInterface):
         return self._torque_per_adc_unit
 
 
-class TTLInterface(ModuleInterface):
-    """Interfaces with TTLModule instances running on the Sensor MicroController.
+class MesoscopeFrameTTLInterface(ModuleInterface):
+    """Interfaces with the TTLModule instance that monitors the Mesoscope frame-acquisition pulses, running on the
+    Sensor MicroController.
 
     Args:
         polling_frequency: The frequency, in microseconds, at which to check for incoming TTL signals when monitoring
@@ -742,8 +743,8 @@ class BrakeInterface(ModuleInterface):
         return self._minimum_brake_strength
 
 
-class ValveInterface(ModuleInterface):
-    """Interfaces with ValveModule instances running on the Actor MicroController.
+class WaterValveInterface(ModuleInterface):
+    """Interfaces with the ValveModule instance that controls the water reward valve on the Actor MicroController.
 
     Notes:
         Type code 5.

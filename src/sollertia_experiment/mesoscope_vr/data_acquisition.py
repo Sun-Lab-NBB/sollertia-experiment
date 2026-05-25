@@ -30,7 +30,7 @@ from ataraxis_communication_interface import MicroControllerInterface
 from .system import MesoscopeData, ZaberPositions, MesoscopePositions, get_system_configuration
 from ..cross_system import (
     BrakeInterface,
-    ValveInterface,
+    WaterValveInterface,
     GasPuffValveInterface,
     get_version_data,
     get_animal_project,
@@ -1290,7 +1290,7 @@ def maintenance_logic() -> None:
             logger.start()
 
             # Initializes the interface for the Actor MicroController.
-            valve: ValveInterface = ValveInterface(
+            valve: WaterValveInterface = WaterValveInterface(
                 valve_calibration_data=(
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
                 ),
