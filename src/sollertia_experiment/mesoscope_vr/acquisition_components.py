@@ -5,7 +5,7 @@ Mesoscope-VR data acquisition runtime.
 from __future__ import annotations
 
 from enum import IntEnum
-import shutil as sh
+import shutil
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
@@ -35,7 +35,7 @@ _RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires 
 user interaction."""
 
-_response_delay_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+_response_delay_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 """The PrecisionTimer instance used to support the proper rendering of all terminal outputs used during runtime."""
 
 
@@ -57,7 +57,7 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
     sequence."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _TrialState:
     """Tracks the state of the Mesoscope-VR-acquired session's task trials.
 
@@ -136,7 +136,7 @@ class _TrialState:
         return self.aversive_puff_durations[self.completed]
 
     def is_current_trial_aversive(self) -> bool:
-        """Checks whether the current trial is an aversive (gas puff) trial.
+        """Determines whether the current trial is an aversive (gas puff) trial.
 
         Returns:
             True if the current trial is a GasPuffTrial, False otherwise.
@@ -184,7 +184,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
 
     # Loads the previous position data into memory.
     previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-        file_path=mesoscope_data.vrpc_data.mesoscope_positions_path
+        file_path=mesoscope_data.vrpc_data.mesoscope_positions_path,
     )
 
     # Forces the user to update the cached mesoscope position coordinates with the current data.
@@ -197,14 +197,14 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
     _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
-    # Defines the error message for file formatting issues
+    # Defines the error message for file formatting issues.
     io_error_message = (
         f"Unable to read the data from the {session_data.session_name} session's mesoscope_positions.yaml file. This "
         f"indicates that the file was mis-formatted during editing. Make sure the file contents follow the .YAML "
         f"format before retrying."
     )
 
-    # Defines the validation error message for unchanged positions
+    # Defines the validation error message for unchanged positions.
     validation_error_message = (
         f"Failed to verify that the mesoscope_positions.yaml file stored inside the {session_data.session_name} "
         f"session's raw_data directory has been updated to include the mesoscope imaging coordinates used during "
@@ -213,9 +213,9 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
         f"the 'CTRL+S' combination."
     )
 
-    # Continuously attempts to read and validate the Mesoscope positions data until successful
+    # Continuously attempts to read and validate the Mesoscope positions data until successful.
     while True:
-        # Attempts to read the current mesoscope positions from the session file
+        # Attempts to read the current mesoscope positions from the session file.
         # noinspection PyBroadException
         try:
             mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
@@ -226,7 +226,7 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
             input("Enter anything to continue: ")
             continue
 
-        # Validates that the user has updated the position data
+        # Validates that the user has updated the position data.
         if (
             mesoscope_positions.mesoscope_x != previous_mesoscope_positions.mesoscope_x
             or mesoscope_positions.mesoscope_y != previous_mesoscope_positions.mesoscope_y
@@ -240,12 +240,12 @@ def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_d
         ):
             break
 
-        # If positions match, request the user to update the file
+        # If positions match, requests the user to update the file.
         console.echo(message=validation_error_message, level=LogLevel.ERROR)
         input("Enter anything to continue: ")
 
     # Copies the updated mesoscope positions data into the animal's persistent directory.
-    sh.copy2(
+    shutil.copy2(
         src=session_data.system_raw_data.mesoscope_positions_path,
         dst=mesoscope_data.vrpc_data.mesoscope_positions_path,
     )
@@ -257,17 +257,16 @@ def _generate_zaber_snapshot(
     """Creates a snapshot of the current Zaber motor positions and saves it as a zaber_positions.yaml file.
 
     Args:
-        zaber_motors: The ZaberMotors instance that manages the Zaber assets used by the session for which the
-            snapshot is generated.
         session_data: The SessionData instance that defines the session for which the snapshot is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
+        zaber_motors: The ZaberMotors instance that manages the Zaber assets used by the session for which the
+            snapshot is generated.
     """
     # If at least one of the managed motor groups is not connected, does not run the snapshot generation sequence.
     # Also, if the session failed to properly initialize, as marked by the presence of the nk.bin marker.
     if not zaber_motors.is_connected or session_data.raw_data.nk_path.exists():
         return
 
-    # Generates the snapshot
     zaber_positions = zaber_motors.generate_position_snapshot()
 
     # Saves the newly generated file both to the persistent directory and to the session directory. Note, saving to the
@@ -373,7 +372,7 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
         user_input = input("Enter 'yes' or 'no': ").strip().lower()
         answer = user_input[0] if user_input else ""
 
-        # Continues with the rest of the shutdown runtime
+        # Continues with the rest of the shutdown runtime.
         if answer == "y":
             break
 
@@ -384,7 +383,7 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
             zaber_motors.disconnect()
             return
 
-    # Helps with removing the animal from the enclosure by retracting the lick-port in the Y-axis (moving it away
+    # Helps with removing the animal from the enclosure by retracting the LickPort in the Y-axis (moving it away
     # from the animal).
     message = "Retracting the lick-port away from the animal..."
     console.echo(message=message, level=LogLevel.INFO)
@@ -413,7 +412,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
     """Guides the user through the sequence of steps that prepares the Mesoscope for the data acquisition runtime.
 
     Args:
-        session_data: The SessionData instance that defines the session for which the snapshot is generated.
+        session_data: The SessionData instance that defines the session for which the Mesoscope is being prepared.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
     # Determines whether the acquired session is a Window Checking session.
@@ -431,7 +430,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         message = (
             f"Unable to prepare the Mesoscope for the data acquisition runtime. The preparation requires the shared "
             f"'mesoscope_data' ScanImagePC directory to be empty, but the directory contains the following unexpected "
-            f"files: {','.join([file.name for file in existing_files])}. Clear the directory from all existing files "
+            f"files: {','.join(file.name for file in existing_files)}. Clear the directory from all existing files "
             f"before proceeding."
         )
         console.echo(message=message, level=LogLevel.ERROR)
@@ -440,13 +439,13 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
     # Step 1: Resolves the imaging plane.
     # If the previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
-    # user
+    # user.
     if not window_checking and mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
         previous_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-            file_path=mesoscope_data.vrpc_data.mesoscope_positions_path
+            file_path=mesoscope_data.vrpc_data.mesoscope_positions_path,
         )
         message = (
-            f"Follow the steps of the mesoscope preparation protocol available from the sl-protocols repository."
+            f"Follow the steps of the mesoscope preparation protocol available from the sl-protocols repository. "
             f"Previous mesoscope coordinates were: x={previous_positions.mesoscope_x}, "
             f"y={previous_positions.mesoscope_y}, roll={previous_positions.mesoscope_roll}, "
             f"z={previous_positions.mesoscope_z}, fast_z={previous_positions.mesoscope_fast_z}, "
@@ -494,13 +493,15 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
-    # Transfers the screenshot to the session's mesoscope_frames directory
+    # Transfers the screenshot to the session's mesoscope_frames directory.
     screenshot_path = session_data.system_raw_data.window_screenshot_path
-    sh.move(screenshots.pop(), screenshot_path)  # Moves the screenshot from the ScanImagePC to the VRPC
+
+    # Moves the screenshot from the ScanImagePC to the VRPC.
+    shutil.move(src=screenshots.pop(), dst=screenshot_path)
 
     # Copies the screenshot to the animal's persistent data directory so that it can be reused during the next
     # runtime.
-    sh.copy2(screenshot_path, mesoscope_data.vrpc_data.window_screenshot_path)
+    shutil.copy2(src=screenshot_path, dst=mesoscope_data.vrpc_data.window_screenshot_path)
 
     # Window checking sessions require special handling.
     if window_checking:
@@ -510,18 +511,18 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         console.echo(message=message, level=LogLevel.INFO)
         _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
 
-        # Blocks until a valid answer is received from the user
+        # Blocks until a valid answer is received from the user.
         while True:
             user_input = input("Enter 'yes' or 'no': ").strip().lower()
             answer = user_input[0] if user_input else ""
 
             if answer == "n":
-                # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data
+                # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
                 console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
                 return
 
             if answer == "y":
-                # Proceeds with the metadata file acquisition sequence
+                # Proceeds with the metadata file acquisition sequence.
                 break
 
         # Ensures that kinase is removed, while the phosphatase is present. This aborts the runtime
@@ -553,12 +554,12 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
     # Waits until the necessary files are generated on the ScanImagePC.
     while True:
-        missing_files = [f for f in target_files if not f.exists()]
+        missing_files = [file for file in target_files if not file.exists()]
 
         if not missing_files:
             break
 
-        missing_names = ", ".join(f.name for f in missing_files)
+        missing_names = ", ".join(file.name for file in missing_files)
 
         message = (
             f"Unable to confirm that the ScanImagePC has generated the required acquisition data files, as the "
@@ -603,7 +604,7 @@ def _verify_descriptor_update(
     _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
-    # Defines error messages for file operations
+    # Defines error messages for file operations.
     io_error_message = (
         f"Unable to read the data from the {session_data.session_name} session's session_descriptor.yaml file. This "
         f"indicates that the file was mis-formatted during editing. Make sure the file contents follow the .YAML "
@@ -617,7 +618,7 @@ def _verify_descriptor_update(
         f"the 'CTRL+S' combination."
     )
 
-    # Continuously attempts to read and validate the session descriptor until successful
+    # Continuously attempts to read and validate the session descriptor until successful.
     while True:
         # Attempts to read the session's descriptor data from the .yaml file.
         # noinspection PyBroadException
@@ -628,19 +629,19 @@ def _verify_descriptor_update(
             input("Enter anything to continue: ")
             continue
 
-        # Validates that the user has updated the experimenter notes
+        # Validates that the user has updated the experimenter notes.
         # noinspection PyUnresolvedReferences
         if "Replace this with your notes." not in descriptor.experimenter_notes:
             break
 
-        # If validation fails, prompt the user to update the file
+        # If validation fails, prompts the user to update the file.
         console.echo(message=validation_error_message, level=LogLevel.ERROR)
         input("Enter anything to continue: ")
 
     # If the descriptor has passed the verification, copies it up to the animal's persistent directory. This is a
     # feature primarily used during training to restore the training parameters between training sessions of the
     # same type.
-    sh.copy2(
+    shutil.copy2(
         src=session_data.raw_data.session_descriptor_path,
         dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
