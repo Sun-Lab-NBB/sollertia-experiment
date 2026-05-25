@@ -49,6 +49,29 @@ class MesoscopeStorageDestination(StrEnum):
     """The remote compute server used as the primary long-term storage and analysis destination."""
 
 
+@dataclass(frozen=True, slots=True)
+class RunTrainingThresholdLimits:
+    """Defines the absolute bounds applied to the run training running speed and epoch duration thresholds.
+
+    The run training logic clamps the effective speed and duration thresholds to these bounds, and the runtime control
+    GUI uses them to constrain the user-facing target threshold spin boxes. Sharing a single definition keeps the
+    acquisition runtime and the control GUI in agreement on the achievable threshold range.
+    """
+
+    minimum_speed_cm_s: float = 0.1
+    """The lower bound, in centimeters per second, of the running speed threshold."""
+    maximum_speed_cm_s: float = 5.0
+    """The upper bound, in centimeters per second, of the running speed threshold."""
+    minimum_duration_s: float = 0.05
+    """The lower bound, in seconds, of the running epoch duration threshold."""
+    maximum_duration_s: float = 5.0
+    """The upper bound, in seconds, of the running epoch duration threshold."""
+
+
+RUN_TRAINING_THRESHOLD_LIMITS: RunTrainingThresholdLimits = RunTrainingThresholdLimits()
+"""The active run training speed and duration threshold limits shared by the acquisition runtime and the control GUI."""
+
+
 @dataclass(slots=True)
 class MesoscopeFileSystem:
     """Stores the filesystem configuration of the Mesoscope-VR data acquisition system."""

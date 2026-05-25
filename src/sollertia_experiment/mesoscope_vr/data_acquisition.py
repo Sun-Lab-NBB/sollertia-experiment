@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from .system import MesoscopeSystemConfiguration
 
 
-from .system import MesoscopeVRStates
+from .system import RUN_TRAINING_THRESHOLD_LIMITS, MesoscopeVRStates
 from .system_controller import _MesoscopeVRSystem
 from .acquisition_components import (
     _RESPONSE_DELAY,
@@ -369,9 +369,9 @@ def lick_training_logic(
 
     # Converts maximum volume to uL and divides it by the reward size to get the number of delays to sample from
     # the delay distribution.
-    number_of_samples = np.floor(
-        (descriptor.maximum_water_volume_ml * 1000) / descriptor.water_reward_size_ul
-    ).astype(np.uint64)
+    number_of_samples = np.floor((descriptor.maximum_water_volume_ml * 1000) / descriptor.water_reward_size_ul).astype(
+        np.uint64
+    )
 
     # Generates samples from a uniform distribution within delay bounds.
     random_generator = np.random.default_rng()
@@ -388,9 +388,7 @@ def lick_training_logic(
     # Finds the maximum number of samples that fits within the maximum training time. This handles the (expected) cases
     # where the total training time is insufficient to deliver the maximum allowed volume of water, so the reward
     # sequence needs to be clipped.
-    maximum_sample_index = np.searchsorted(
-        a=cumulative_time, v=descriptor.maximum_training_time_min * 60, side="right"
-    )
+    maximum_sample_index = np.searchsorted(a=cumulative_time, v=descriptor.maximum_training_time_min * 60, side="right")
 
     # Slices the samples array to make the total training time be roughly the maximum requested duration.
     reward_delays: NDArray[np.float64] = samples[:maximum_sample_index]
@@ -715,11 +713,11 @@ def run_training_logic(
     # Converts all arguments used to determine the speed and duration threshold over time into numpy variables to
     # optimize the main session's runtime loop:
     initial_speed = np.float64(descriptor.initial_run_speed_threshold_cm_s)  # In centimeters per second
-    maximum_speed = np.float64(5)  # In centimeters per second
+    maximum_speed = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_speed_cm_s)  # In centimeters per second
     speed_step = np.float64(descriptor.run_speed_increase_step_cm_s)  # In centimeters per second
 
     initial_duration = np.float64(descriptor.initial_run_duration_threshold_s * 1000)  # In milliseconds
-    maximum_duration = np.float64(5000)  # In milliseconds
+    maximum_duration = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_duration_s * 1000)  # In milliseconds
     duration_step = np.float64(descriptor.run_duration_increase_step_s * 1000)  # In milliseconds
 
     water_threshold = np.float64(descriptor.increase_threshold_ml * 1000)  # In microliters
@@ -812,16 +810,25 @@ def run_training_logic(
             # harder to keep receiving water.
             increase_steps: np.float64 = np.floor(system.dispensed_water_volume / water_threshold)
 
-            # Determines the speed and duration thresholds for each cycle. This factors in the user input via the
-            # session control GUI. Note, user input has a static resolution of 0.01 cm/s and 0.01 s (10 ms) per step.
+            # Computes the automatic (runtime-driven) component of each threshold, which combines the initial threshold
+            # with the volume-driven increments but excludes the user-defined GUI modifier. Publishing these values to
+            # the control GUI lets it display the current effective threshold and back-compute the modifier needed to
+            # match user-requested absolute values.
+            auto_speed: np.float64 = initial_speed + (increase_steps * speed_step)
+            auto_duration: np.float64 = initial_duration + (increase_steps * duration_step)
+            system.publish_runtime_thresholds(speed_threshold=auto_speed, duration_threshold=auto_duration)
+
+            # Determines the effective speed and duration thresholds for each cycle by adding the user input from the
+            # session control GUI on top of the automatic component. User input has a static resolution of 0.01 cm/s
+            # and 0.01 s (10 ms) per step.
             speed_threshold = np.clip(
-                a=initial_speed + (increase_steps * speed_step) + (system.speed_modifier * 0.01),
-                a_min=0.1,  # Minimum value
+                a=auto_speed + (system.speed_modifier * 0.01),
+                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_speed_cm_s,  # Minimum value
                 a_max=maximum_speed,  # Maximum value
             )
             duration_threshold = np.clip(
-                a=initial_duration + (increase_steps * duration_step) + (system.duration_modifier * 10),
-                a_min=50,  # Minimum value (0.05 seconds == 50 milliseconds)
+                a=auto_duration + (system.duration_modifier * 10),
+                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_duration_s * 1000,  # Minimum value, converted to ms
                 a_max=maximum_duration,  # Maximum value
             )
 

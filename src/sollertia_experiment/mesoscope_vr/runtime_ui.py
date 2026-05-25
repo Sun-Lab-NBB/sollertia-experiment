@@ -12,7 +12,7 @@ from multiprocessing import Process
 
 import numpy as np
 from PySide6.QtGui import QFont, QCloseEvent
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSignalBlocker
 from PySide6.QtWidgets import (
     QLabel,
     QWidget,
@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
 
+from .system import RUN_TRAINING_THRESHOLD_LIMITS
 from .visualizer import VisualizerMode
 
 
@@ -68,6 +69,12 @@ class _DataArrayIndex(IntEnum):
     """Stores the user-defined gas puff duration in milliseconds."""
     SETUP_COMPLETE = 15
     """Tracks whether the initial setup phase is complete."""
+    RUNTIME_SPEED_THRESHOLD = 16
+    """Stores the runtime-driven running speed threshold, in hundredths of a centimeter per second, excluding the
+    user-defined modifier."""
+    RUNTIME_DURATION_THRESHOLD = 17
+    """Stores the runtime-driven running epoch duration threshold, in milliseconds, excluding the user-defined
+    modifier."""
 
 
 class RuntimeControlUI:
@@ -101,7 +108,7 @@ class RuntimeControlUI:
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state
-        prototype = np.zeros(shape=16, dtype=np.int32)
+        prototype = np.zeros(shape=18, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state
         prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance
         prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance
@@ -259,6 +266,22 @@ class RuntimeControlUI:
         """Returns the current user-defined running epoch duration threshold modifier."""
         return int(self._data_array[_DataArrayIndex.DURATION_MODIFIER])
 
+    def set_runtime_thresholds(self, speed_threshold_cm_s: float, duration_threshold_ms: float) -> None:
+        """Shares the runtime-driven running speed and duration thresholds with the GUI process.
+
+        These values exclude the user-defined modifier. The GUI displays them as the current effective thresholds and
+        uses them to convert user-requested absolute threshold values into the modifier offset consumed by the run
+        training loop.
+
+        Args:
+            speed_threshold_cm_s: The runtime-driven running speed threshold, in centimeters per second.
+            duration_threshold_ms: The runtime-driven running epoch duration threshold, in milliseconds.
+        """
+        # Stores the speed threshold as hundredths of a centimeter per second to preserve the 0.01 cm/s GUI resolution
+        # within the integer shared memory array.
+        self._data_array[_DataArrayIndex.RUNTIME_SPEED_THRESHOLD] = round(speed_threshold_cm_s * 100)
+        self._data_array[_DataArrayIndex.RUNTIME_DURATION_THRESHOLD] = round(duration_threshold_ms)
+
     @property
     def pause_runtime(self) -> bool:
         """Returns True if the user has requested the system to pause the data acquisition session's runtime."""
@@ -386,6 +409,10 @@ class _ControlUIWindow(QMainWindow):
         _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
+        _last_auto_speed: Tracks the most recently displayed runtime-driven running speed threshold, in hundredths of
+            a centimeter per second, so the speed spinbox is refreshed only when the automatic component changes.
+        _last_auto_duration: Tracks the most recently displayed runtime-driven running epoch duration threshold, in
+            milliseconds, so the duration spinbox is refreshed only when the automatic component changes.
     """
 
     def __init__(
@@ -414,6 +441,11 @@ class _ControlUIWindow(QMainWindow):
 
         self._reward_in_progress: bool = False
         self._puff_in_progress: bool = False
+
+        # Initializes the runtime-driven threshold trackers to a sentinel so the first monitoring cycle always
+        # synchronizes the run training spinboxes with the runtime state.
+        self._last_auto_speed: int = -1
+        self._last_auto_duration: int = -1
 
         self.setWindowTitle("Mesoscope-VR Control Panel")
 
@@ -672,6 +704,9 @@ class _ControlUIWindow(QMainWindow):
         self._duration_spinbox: QDoubleSpinBox | None = None
 
         if self._mode == VisualizerMode.RUN_TRAINING:
+            # Bounds the target spin boxes to the same threshold limits the run training loop clamps to.
+            limits = RUN_TRAINING_THRESHOLD_LIMITS
+
             controls_layout = QHBoxLayout()
             controls_layout.setSpacing(6)
 
@@ -679,16 +714,15 @@ class _ControlUIWindow(QMainWindow):
             speed_group = QGroupBox("Speed Threshold")
             speed_layout = QVBoxLayout(speed_group)
 
-            # Speed Modifier
-            speed_status_label = QLabel("Current Modifier:")
-            speed_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            speed_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
-            speed_layout.addWidget(speed_status_label)
+            # Speed threshold. The spinbox shows the current effective threshold in absolute units and lets the user
+            # request an absolute target, which the runtime converts into a modifier offset.
             speed_spinbox = QDoubleSpinBox()
-            speed_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 cm/s
-            speed_spinbox.setValue(0)
-            speed_spinbox.setDecimals(0)
-            speed_spinbox.setToolTip("Sets the running speed threshold modifier value.")
+            speed_spinbox.setRange(limits.minimum_speed_cm_s, limits.maximum_speed_cm_s)
+            speed_spinbox.setSingleStep(0.01)
+            speed_spinbox.setDecimals(2)
+            speed_spinbox.setValue(limits.minimum_speed_cm_s)
+            speed_spinbox.setSuffix(" cm/s")
+            speed_spinbox.setToolTip("Sets the target running speed threshold, in centimeters per second.")
             speed_spinbox.setMinimumHeight(30)
             # noinspection PyUnresolvedReferences
             speed_spinbox.valueChanged.connect(self._update_speed_modifier)
@@ -698,16 +732,15 @@ class _ControlUIWindow(QMainWindow):
             duration_group = QGroupBox("Duration Threshold")
             duration_layout = QVBoxLayout(duration_group)
 
-            # Duration modifier
-            duration_status_label = QLabel("Current Modifier:")
-            duration_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            duration_status_label.setStyleSheet("QLabel { font-weight: bold; color: #34495e; }")
-            duration_layout.addWidget(duration_status_label)
+            # Duration threshold. The spinbox shows the current effective threshold in absolute units and lets the
+            # user request an absolute target, which the runtime converts into a modifier offset.
             duration_spinbox = QDoubleSpinBox()
-            duration_spinbox.setRange(-1000, 1000)  # Factoring in the step of 0.01, this allows -20 to +20 s
-            duration_spinbox.setValue(0)
-            duration_spinbox.setDecimals(0)
-            duration_spinbox.setToolTip("Sets the running duration threshold modifier value.")
+            duration_spinbox.setRange(limits.minimum_duration_s, limits.maximum_duration_s)
+            duration_spinbox.setSingleStep(0.01)
+            duration_spinbox.setDecimals(2)
+            duration_spinbox.setValue(limits.minimum_duration_s)
+            duration_spinbox.setSuffix(" s")
+            duration_spinbox.setToolTip("Sets the target running epoch duration threshold, in seconds.")
             # noinspection PyUnresolvedReferences
             duration_spinbox.valueChanged.connect(self._update_duration_modifier)
             duration_layout.addWidget(duration_spinbox)
@@ -1157,6 +1190,23 @@ class _ControlUIWindow(QMainWindow):
                 self._setup_complete = True
                 self._disable_valve_open_close_buttons()
 
+            # Refreshes the run training threshold spinboxes so they display the current effective thresholds as the
+            # runtime-driven component progresses with the volume of water delivered to the animal.
+            self._last_auto_speed = self._sync_run_training_spinbox(
+                spinbox=self._speed_spinbox,
+                auto_index=_DataArrayIndex.RUNTIME_SPEED_THRESHOLD,
+                modifier_index=_DataArrayIndex.SPEED_MODIFIER,
+                last_auto=self._last_auto_speed,
+                divisor=100.0,
+            )
+            self._last_auto_duration = self._sync_run_training_spinbox(
+                spinbox=self._duration_spinbox,
+                auto_index=_DataArrayIndex.RUNTIME_DURATION_THRESHOLD,
+                modifier_index=_DataArrayIndex.DURATION_MODIFIER,
+                last_auto=self._last_auto_duration,
+                divisor=1000.0,
+            )
+
             # Reads valve tracker state (index 2 contains open/close state: 0=closed, 1=open).
             water_valve_state = int(self._valve_tracker[2])
 
@@ -1244,14 +1294,66 @@ class _ControlUIWindow(QMainWindow):
         self._data_array[_DataArrayIndex.REWARD_VOLUME] = int(self._volume_spinbox.value())
 
     def _update_speed_modifier(self) -> None:
-        """Updates the running speed threshold modifier to match the current GUI configuration."""
-        if self._speed_spinbox is not None:
-            self._data_array[_DataArrayIndex.SPEED_MODIFIER] = int(self._speed_spinbox.value())
+        """Converts the user-requested absolute running speed threshold into the modifier offset consumed by the run
+        training loop.
+        """
+        if self._speed_spinbox is None:
+            return
+        # The modifier is the difference between the requested absolute threshold and the runtime-driven component,
+        # expressed in units of 0.01 cm/s. The run training loop adds it back on top of the runtime component to
+        # recover the requested value, so the offset is preserved as the runtime component progresses.
+        target_speed = self._speed_spinbox.value()
+        auto_speed = int(self._data_array[_DataArrayIndex.RUNTIME_SPEED_THRESHOLD]) / 100
+        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = round((target_speed - auto_speed) / 0.01)
 
     def _update_duration_modifier(self) -> None:
-        """Updates the running epoch duration modifier to match the current GUI configuration."""
-        if self._duration_spinbox is not None:
-            self._data_array[_DataArrayIndex.DURATION_MODIFIER] = int(self._duration_spinbox.value())
+        """Converts the user-requested absolute running epoch duration threshold into the modifier offset consumed by
+        the run training loop.
+        """
+        if self._duration_spinbox is None:
+            return
+        # The modifier is the difference between the requested absolute threshold and the runtime-driven component,
+        # expressed in units of 0.01 s (10 ms). The run training loop adds it back on top of the runtime component to
+        # recover the requested value, so the offset is preserved as the runtime component progresses.
+        target_duration = self._duration_spinbox.value()
+        auto_duration = int(self._data_array[_DataArrayIndex.RUNTIME_DURATION_THRESHOLD]) / 1000
+        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = round((target_duration - auto_duration) / 0.01)
+
+    def _sync_run_training_spinbox(
+        self,
+        spinbox: QDoubleSpinBox | None,
+        auto_index: _DataArrayIndex,
+        modifier_index: _DataArrayIndex,
+        last_auto: int,
+        divisor: float,
+    ) -> int:
+        """Refreshes a run training threshold spinbox with the current effective threshold and returns the updated
+        runtime-driven threshold tracker.
+
+        The displayed value combines the runtime-driven component shared by the runtime with the user modifier,
+        keeping the user offset intact as the runtime component progresses. The spinbox is left untouched while the
+        user is editing it or while the runtime-driven component is unchanged.
+
+        Args:
+            spinbox: The threshold spinbox to refresh, or None when the spinbox is absent in the current mode.
+            auto_index: The shared memory index storing the runtime-driven threshold component.
+            modifier_index: The shared memory index storing the user-defined modifier offset.
+            last_auto: The previously observed runtime-driven threshold value used to detect changes.
+            divisor: The factor that converts the stored integer threshold into absolute spinbox units.
+
+        Returns:
+            The runtime-driven threshold value to track for the next monitoring cycle.
+        """
+        auto_raw = int(self._data_array[auto_index])
+        if auto_raw == last_auto or spinbox is None or spinbox.hasFocus():
+            return last_auto
+
+        # Reapplies the user modifier on top of the runtime-driven component so the spinbox shows the effective
+        # threshold. Blocks signals to avoid recomputing the modifier from this programmatic value change.
+        modifier = int(self._data_array[modifier_index])
+        with QSignalBlocker(spinbox):
+            spinbox.setValue(auto_raw / divisor + modifier * 0.01)
+        return auto_raw
 
     @staticmethod
     def _refresh_button_style(button: QPushButton) -> None:

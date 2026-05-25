@@ -277,9 +277,7 @@ class _MesoscopeVRSystem:
             self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
             and self._experiment_configuration is not None
         ):
-            task_template = load_vr_task_template(
-                unity_scene_name=self._experiment_configuration.unity_scene_name
-            )
+            task_template = load_vr_task_template(unity_scene_name=self._experiment_configuration.unity_scene_name)
             self._task_template = task_template
             self._vr_task = VRTaskDriver(
                 configuration=self._system_configuration.assets.vr_task,
@@ -1133,6 +1131,23 @@ class _MesoscopeVRSystem:
 
         self._visualizer.update_run_training_thresholds(
             speed_threshold=speed_threshold, duration_threshold=duration_threshold
+        )
+
+    def publish_runtime_thresholds(self, speed_threshold: np.float64, duration_threshold: np.float64) -> None:
+        """Publishes the runtime-driven running speed and duration thresholds to the runtime control GUI.
+
+        Unlike update_visualizer_thresholds, the values passed to this method exclude the user-defined GUI modifier.
+        The GUI uses them to display the current effective thresholds and to convert user-requested absolute threshold
+        values into the modifier offset consumed by the run training loop.
+
+        Args:
+            speed_threshold: The runtime-driven running speed threshold, in centimeters per second, before the user
+                modifier is applied.
+            duration_threshold: The runtime-driven running epoch duration threshold, in milliseconds, before the user
+                modifier is applied.
+        """
+        self._ui.set_runtime_thresholds(
+            speed_threshold_cm_s=float(speed_threshold), duration_threshold_ms=float(duration_threshold)
         )
 
     def _deliver_reward(self, reward_size: float = 5.0, tone_duration: int = 300) -> None:
