@@ -71,7 +71,7 @@ def _convert_date_time_to_timestamp(date: str, time: str) -> int:
         interpreted as local time and converted to a UTC timestamp for internal storage.
 
     Args:
-        date: The date string in the format "%m-%d-%y" or "%m-%d-%Y".
+        date: The date string in one of the supported formats: "%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", or "%m/%d/%Y".
         time: The time string in the format "%H:%M".
 
     Returns:
@@ -292,7 +292,7 @@ class SurgeryLog:
             )
             console.error(message=message, error=ValueError)
 
-        # Retrieves all animal names (IDs) from the 'ID' column. Each ID is z-filled to a triple-digit string for
+        # Retrieves all animal names (IDs) from the 'ID' column. Each ID is z-filled to a five-digit string for
         # sorting to behave predictably. This data is stored as a tuple of IDs.
         id_column = self._get_column_id("id")
         # noinspection PyUnresolvedReferences
@@ -338,6 +338,11 @@ class SurgeryLog:
 
         Returns:
             A SurgeryData instance that stores the extracted data.
+
+        Raises:
+            ValueError: If the animal's date, time, weight, or cage cells contain malformed or empty values. Date and
+                time cells are parsed via _convert_date_time_to_timestamp, while weight and cage cells are parsed via
+                float() and int() respectively.
         """
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
@@ -361,8 +366,8 @@ class SurgeryLog:
         row_values = _replace_empty_values(row_values)
 
         # Creates a dictionary mapping headers (column names) to the animal-specific extracted values for these
-        # headers. This procedure assumes that the headers are contiguous, start from row A, and the animal has data for
-        # all or most present headers in the same sequential order as headers are encountered.
+        # headers. This procedure assumes that the headers are contiguous, start from column A, and the animal has data
+        # for all or most present headers in the same sequential order as headers are encountered.
         animal_data: dict[str, Any] = {}
         for index, header in enumerate(self._headers):
             # Handles unlikely scenario of animal having more data than headers
@@ -495,9 +500,14 @@ class SurgeryLog:
     def update_surgery_quality(self, quality: int) -> None:
         """Updates the processed animal's surgery quality value to the input value.
 
+        Notes:
+            In addition to writing the value, this method issues a second batchUpdate request that applies CENTER
+            horizontal and MIDDLE vertical cell alignment formatting to the updated cell.
+
         Args:
             quality: The integer value that reflects the quality of the animal's surgical intervention for scientific
-                data acquisition on a scale from 0 (unusable) to 3 (high-grade scientific publication).
+                data acquisition on a scale from 0 (unusable) to 3 (high-grade scientific publication). The 0-3 scale is
+                advisory; this method does not validate that the input falls within that range.
         """
         quality_column = self._get_column_id("surgery quality")
 
@@ -765,7 +775,7 @@ class WaterLog:
         """Finds the processed log's row index associated with the target date.
 
         Args:
-            target_date: The date to find in 'mm/dd/yyyy' format.
+            target_date: The date to find, in '%-m/%-d/%y' format (e.g. '5/24/26').
 
         Returns:
             The row index (1-based), containing the target date's data.

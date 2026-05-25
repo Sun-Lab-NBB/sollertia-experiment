@@ -27,7 +27,9 @@ if TYPE_CHECKING:
     from sollertia_shared_assets import SurgeryData
 
 _LOG_DIRECTORY_NAME: str = "behavior_data_log"
-"""The name of the temporary directory generated during runtime to store the unprocessed .npy log entries."""
+"""The name of the directory generated during runtime to store the unprocessed .npy log entries and the camera
+manifest (camera_manifest.yaml). During preprocessing, this directory is archived in place into .npz archives and then
+renamed to behavior_data."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,8 +184,9 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
     destinations.
 
     Notes:
-        This function computes the data integrity checksum before the transfer and removes the local copy of the
-        session's data after the data is successfully transferred to all destinations.
+        This function computes the data integrity checksum before the transfer and removes the entire local session
+        directory — including any processed_data not transferred — after the raw data is successfully transferred to
+        all destinations.
 
         If the input collection contains no storage destinations, the function aborts early with a warning and leaves
         the local copy of the session's data intact, since there is no destination to back the data up to.
@@ -292,7 +295,9 @@ def migrate_session_directory(
 
     Notes:
         This function copies the pulled session_data.yaml file to the source project's host-machine location so the
-        caller can later remove the obsolete data from all storage destinations.
+        caller can later remove the obsolete data from all storage destinations. It also recreates the source project's
+        per-session raw_data directory (which preprocessing removed) so the copied session_data.yaml has a valid
+        destination on the host machine.
 
     Args:
         remote_session_path: The path to the session's directory on the remote storage destination.

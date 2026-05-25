@@ -32,7 +32,8 @@ _FALSE: np.bool_ = np.bool_(0)
 """A pre-created boolean False, reused across the module to avoid unnecessary object recreation."""
 
 _MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
-"""The maximum pulse duration, in milliseconds, that water and gas valves can use before keepalive intervention."""
+"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves, kept below the 500 ms firmware
+keepalive interval."""
 _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 """The maximum valve pulse duration, in microseconds."""
 
@@ -147,8 +148,7 @@ class EncoderInterface(ModuleInterface):
         sign = 1 if message.event == _ccw_rotation_code else -1
 
         # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
-        # using the precomputed conversion factor. Uses float64 and rounds to 8 decimal places for consistency and
-        # precision.
+        # using the precomputed conversion factor.
         unity_motion = message.data_object * self._unity_unit_per_pulse * sign
 
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
@@ -638,8 +638,8 @@ class BrakeInterface(ModuleInterface):
     Attributes:
         _minimum_brake_strength: The minimum torque, in N cm, the brake delivers at minimum voltage.
         _maximum_brake_strength: The maximum torque, in N cm, the brake delivers at maximum voltage.
-        _engage: The code for the EnableBrake module command.
-        _disengage: The code for the DisableBrake module command.
+        _engage: The code for the brake-engage (kToggleOn) module command.
+        _disengage: The code for the brake-disengage (kToggleOff) module command.
         _pulse: The code for the SendPulse module command.
         _enabled: Tracks the current state of the managed brake.
         _previous_pulse_duration: Tracks the pulse duration used during the previous send_pulse() call.
@@ -817,9 +817,9 @@ class WaterValveInterface(ModuleInterface):
         self._tone: np.uint8 = np.uint8(5)
 
         # Initializes additional trackers and runtime assets.
-        # Reflects what the module is actually doing.
+        # Reflects what the microcontroller reported it is actually doing.
         self._previous_module_state: bool = False
-        # Reflects what the interface set the module to do.
+        # Reflects what this interface last commanded the module to do.
         self._configured_valve_state: bool = False
         self._previous_volume: float = 0.0
         self._previous_tone_duration: int = 0
@@ -991,8 +991,8 @@ class WaterValveInterface(ModuleInterface):
         Returns:
             The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
         """
-        # Determines the minimum valid pulse duration. This is hardcoded at 10 ms as this is the lower calibration
-        # boundary.
+        # Determines the minimum valid pulse duration, hardcoded at 10 ms: calibrating below this is empirically
+        # pointless for most water valves, so it is treated as the lower pulse-duration bound.
         min_dispensed_volume = self._scale_coefficient * np.power(10.0, self._nonlinearity_exponent)
 
         if target_volume < min_dispensed_volume:

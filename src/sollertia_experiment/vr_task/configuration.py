@@ -29,7 +29,7 @@ def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:
 
     Notes:
         Templates are resolved from the directory configured via the sollertia-shared-assets 'slsa configure
-        directory' CLI command. The directory typically points to the local sollertia-unity-tasks repository copy. The
+        templates' CLI command. The directory typically points to the local sollertia-unity-tasks repository copy. The
         template file name is expected to match the Unity scene name with a '.yaml' suffix.
 
     Args:
@@ -39,8 +39,9 @@ def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:
         The TaskTemplate parsed from the matching YAML file.
 
     Raises:
-        FileNotFoundError: If the task templates directory does not contain a YAML file whose stem matches the given
-            Unity scene name.
+        FileNotFoundError: If the task templates directory has not been configured, if the previously configured task
+            templates directory no longer exists, or if the configured task templates directory does not contain a YAML
+            file whose stem matches the given Unity scene name.
     """
     templates_directory = get_task_templates_directory()
     template_path = templates_directory.joinpath(f"{unity_scene_name}.yaml")

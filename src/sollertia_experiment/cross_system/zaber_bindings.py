@@ -114,7 +114,7 @@ class _ZaberSettings:
     position: str = SettingConstants.POS
     """The current absolute position of the motor, in native motor units, relative to its home position."""
     checksum: str = SettingConstants.USER_DATA_0
-    """The CRC32 checksum that should match the checksum of the device's label, which is used to confirm that the
+    """The CRC32-XFER checksum that should match the checksum of the device's label, which is used to confirm that the
     device has been configured to work with the bindings exposed by this library. Uses USER_DATA 0 variable."""
     shutdown_flag: str = SettingConstants.USER_DATA_1
     """Tracks whether the device has been properly shut down during the previous runtime. Uses USER_DATA 1 variable."""
@@ -221,9 +221,9 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
     """Writes a configuration setting to a Zaber device's non-volatile memory.
 
     Notes:
-        Position values are validated against device motion limits before writing. Label changes automatically
-        update the checksum (USER_DATA_0) to maintain device validation. The checksum setting cannot be modified
-        directly as it is managed by the binding library.
+        Position values are validated against device motion limits before writing. Device label changes
+        automatically update the checksum (USER_DATA_0) to maintain device validation; axis label changes do not.
+        The checksum setting cannot be modified directly as it is managed by the binding library.
 
     Args:
         port: Serial port path (e.g., "/dev/ttyUSB0").
@@ -238,7 +238,8 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
     Raises:
         ConnectionError: If unable to connect to the specified port.
         IndexError: If device_index is out of range for the connected devices.
-        ValueError: If the setting name is invalid, the value type is incorrect, or the value is out of range.
+        TypeError: If the value type does not match the setting (a non-string label, or a non-integer position or flag).
+        ValueError: If the setting name is invalid or the value is out of range.
     """
     valid_settings = {
         "park_position",
@@ -343,7 +344,7 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
             return f"{setting}: {old_int_value} -> {value}"
 
     except Exception as exception:
-        if isinstance(exception, (IndexError, ValueError)):
+        if isinstance(exception, (IndexError, TypeError, ValueError)):
             raise
         message = f"Unable to connect to Zaber device on port {port}: {exception}"
         console.error(message=message, error=ConnectionError)
@@ -868,7 +869,7 @@ class ZaberConnection:
         """Opens the serial port and detects and connects to any available Zaber devices (controllers).
 
         Raises:
-            NoDeviceFoundException: If no compatible Zaber devices are discovered using the target serial port.
+            NoDeviceFoundException: If no Zaber devices are discovered using the target serial port.
         """
         # If the connection is already established, prevents re-establishing the connection.
         if self.is_connected:

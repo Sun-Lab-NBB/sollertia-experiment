@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 
 
 _UNMATCHED_CUE_PREVIEW_COUNT: int = 20
-"""The number of unmatched cues reported in the decomposition failure message to aid diagnosis."""
+"""The maximum number of unmatched cues reported in the decomposition failure message to aid diagnosis."""
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class DecomposedTrials:
     """Stores the per-trial sequences derived from a decomposed Virtual Reality wall cue sequence.
 
@@ -166,7 +166,7 @@ def decompose_cue_sequence(
     )
 
     max_trials = len(cue_sequence) // min(len(motif) for motif in trial_motifs) + 1
-    trial_indices_array, trial_count = _decompose_sequence_numba_flat(
+    trial_indices_array, trial_count, failed_position = _decompose_sequence_numba_flat(
         cue_sequence=cue_sequence,
         motifs_flat=motifs_flat,
         motif_starts=motif_starts,
@@ -176,7 +176,6 @@ def decompose_cue_sequence(
     )
 
     if trial_count == -1:
-        failed_position = sum(len(trial_motifs[index]) for index in trial_indices_array[:max_trials] if index)
         remaining_cues = cue_sequence[failed_position : failed_position + _UNMATCHED_CUE_PREVIEW_COUNT]
         message = (
             f"Unable to decompose the acquired session's Virtual Reality environment's cue sequence into a sequence "
@@ -205,7 +204,7 @@ def _decompose_sequence_numba_flat(
     motif_lengths: NDArray[np.int32],
     motif_indices: NDArray[np.int32],
     max_trials: int,
-) -> tuple[NDArray[np.int32], int]:
+) -> tuple[NDArray[np.int32], int, int]:
     """Decomposes a long sequence of Virtual Reality wall cues into individual trial motifs.
 
     Notes:
@@ -222,8 +221,10 @@ def _decompose_sequence_numba_flat(
         max_trials: The maximum number of trials that can make up the entire cue sequence.
 
     Returns:
-        A tuple of two elements. The first element is the array of trials (trial-type indices) decoded from the cue
-        sequence. The second element is the total number of trials extracted from the cue sequence.
+        A tuple of three elements. The first element is the array of trials (trial-type indices) decoded from the cue
+        sequence. The second element is the total number of trials extracted from the cue sequence, or -1 if no motif
+        matched at some position. The third element is the cue sequence position at which decomposition stopped, which
+        is the failure position when the second element is -1.
     """
     # noinspection PyTypeChecker
     trial_indices: NDArray[np.int32] = np.zeros(max_trials, dtype=np.int32)
@@ -255,6 +256,6 @@ def _decompose_sequence_numba_flat(
                     break
 
         if not motif_found:
-            return trial_indices, -1
+            return trial_indices, -1, sequence_position
 
-    return trial_indices[:trial_count], trial_count
+    return trial_indices[:trial_count], trial_count, sequence_position

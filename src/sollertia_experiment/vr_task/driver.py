@@ -51,7 +51,8 @@ class VRTaskEventKind(IntEnum):
     """
 
     NONE = 0
-    """No Unity message was available in the MQTT buffer during this cycle."""
+    """No dispatchable Unity event was produced this cycle: either the MQTT buffer was empty, or the consumed message
+    was on a topic that cycle() does not surface (a handshake topic)."""
     STIMULUS_TRIGGERED = 1
     """The animal triggered the current trial's stimulus delivery."""
     TRIGGER_DELAY_REQUESTED = 2
@@ -104,7 +105,8 @@ class _VRTaskMQTTTopics(StrEnum):
     """
 
     SESSION_START = "SessionStart"
-    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload)."""
+    """Lifecycle marker published by Unity when its MQTT client starts (empty trigger payload). Outside the setup
+    handshake, a SESSION_START received during cycle() is consumed without producing a typed event."""
     SESSION_STOP = "SessionStop"
     """Lifecycle marker published by Unity on application quit (empty trigger payload)."""
     MOTION = "Motion"
@@ -292,13 +294,14 @@ class VRTaskDriver:
         """Consumes the next pending Unity message and returns it as a typed event.
 
         Notes:
-            During each runtime cycle, the driver receives and parses exactly one message stored in the MQTT
-            buffer. Callers dispatch the returned event to their own hardware (water valve, gas puff, brake) and
-            runtime state (trial advancement, emergency pause).
+            During each runtime cycle, the driver consumes at most one message from the MQTT buffer per cycle.
+            Callers dispatch the returned event to their own hardware (water valve, gas puff, brake) and runtime
+            state (trial advancement, emergency pause).
 
         Returns:
             The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
-            event kind is NONE.
+            event kind is NONE. The event kind is also NONE when the consumed message is on a non-surfaced
+            (handshake) topic, such as SESSION_START, SCENE_NAME, or CUE_SEQUENCE.
         """
         data = self._mqtt.get_data()
         if data is None:
