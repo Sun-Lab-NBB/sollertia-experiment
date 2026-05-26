@@ -6,6 +6,7 @@ import click
 from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
+from sollertia_shared_assets import get_data_root, discover_projects
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
@@ -37,11 +38,7 @@ def get_projects() -> None:
     """Identifies the projects accessible to the data acquisition system."""
     system_configuration = get_system_configuration()
     projects = natsorted(
-        [
-            directory.name  # Use .name instead of .stem (they're the same for directories)
-            for directory in system_configuration.filesystem.root_directory.iterdir()
-            if directory.is_dir() and not directory.name.startswith(".")
-        ]
+        [project.project_name for project in discover_projects(root_path=get_data_root(), strategy="directories")]
     )
     if projects:
         console.echo(
@@ -67,9 +64,7 @@ def get_projects() -> None:
 def get_experiments(project: str) -> None:
     """Identifies the target project's experiment configurations accessible to the data acquisition system."""
     system_configuration = get_system_configuration()
-    experiments = get_project_experiments(
-        project_directory=system_configuration.filesystem.root_directory.joinpath(project)
-    )
+    experiments = get_project_experiments(project_directory=get_data_root().joinpath(project))
     if experiments:
         console.echo(
             f"The {system_configuration.name} data acquisition system is currently configured to execute the following "

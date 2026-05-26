@@ -1,6 +1,6 @@
 """Provides the assets shared by multiple data acquisition systems."""
 
-from .project_tools import get_version_data, get_animal_project, get_project_experiments
+from .project_tools import get_version_data, get_project_experiments
 from .zaber_bindings import (
     ZaberAxis,
     CRCCalculator,
@@ -56,7 +56,6 @@ __all__ = [
     "assemble_session_logs",
     "delete_session_directories",
     "discover_zaber_devices",
-    "get_animal_project",
     "get_project_experiments",
     "get_version_data",
     "get_zaber_device_settings",

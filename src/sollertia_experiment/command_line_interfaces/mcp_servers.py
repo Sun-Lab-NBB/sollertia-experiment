@@ -16,7 +16,7 @@ from dataclasses import MISSING, fields, is_dataclass
 import yaml  # type: ignore[import-untyped]
 from mcp.server.fastmcp import FastMCP
 from ataraxis_base_utilities import ensure_directory_exists
-from sollertia_shared_assets import SessionData
+from sollertia_shared_assets import SessionData, get_data_root
 
 if TYPE_CHECKING:
     from ataraxis_data_structures import YamlConfig
@@ -242,7 +242,7 @@ def preprocess_session_tool(session_path: str) -> str:
 
     Args:
         session_path: The absolute path to the session directory to preprocess. The session must be located
-            inside the root directory of the data acquisition system.
+            inside the data root of the data acquisition system.
 
     Returns:
         A success message upon completion, or an error description if preprocessing fails.
@@ -250,13 +250,14 @@ def preprocess_session_tool(session_path: str) -> str:
     try:
         path = Path(session_path)
         system_configuration = get_system_configuration()
+        data_root = get_data_root()
 
         # Validates that the session is stored locally.
-        if not path.is_relative_to(system_configuration.filesystem.root_directory):
+        if not path.is_relative_to(data_root):
             return (
-                f"Error: Session directory must be inside the root directory of the "
+                f"Error: Session directory must be inside the data root of the "
                 f"{system_configuration.name} data acquisition system "
-                f"({system_configuration.filesystem.root_directory})."
+                f"({data_root})."
             )
 
         session_data = SessionData.load(session_path=path)
@@ -278,7 +279,7 @@ def delete_session_tool(session_path: str, *, confirm_deletion: bool = False) ->
 
     Args:
         session_path: The absolute path to the session directory to delete. The session must be located
-            inside the root directory of the data acquisition system.
+            inside the data root of the data acquisition system.
         confirm_deletion: Safety parameter that must be explicitly set to True to proceed with deletion.
             When False (the default), the tool returns a warning message instead of deleting data.
 
@@ -297,13 +298,14 @@ def delete_session_tool(session_path: str, *, confirm_deletion: bool = False) ->
     try:
         path = Path(session_path)
         system_configuration = get_system_configuration()
+        data_root = get_data_root()
 
         # Validates that the session is stored locally.
-        if not path.is_relative_to(system_configuration.filesystem.root_directory):
+        if not path.is_relative_to(data_root):
             return (
-                f"Error: Session directory must be inside the root directory of the "
+                f"Error: Session directory must be inside the data root of the "
                 f"{system_configuration.name} data acquisition system "
-                f"({system_configuration.filesystem.root_directory})."
+                f"({data_root})."
             )
 
         session_data = SessionData.load(session_path=path)
@@ -506,8 +508,14 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
         A dictionary mapping each configuration path name to its diagnostic report.
     """
     filesystem = configuration.filesystem
+    # The local data root is owned by the Sollertia platform, not the Mesoscope-VR filesystem configuration, so it
+    # is resolved separately and reported as not configured when the platform data root has not been set.
+    try:
+        data_root_report = _check_path(path=get_data_root())
+    except FileNotFoundError as exception:
+        data_root_report = {"path": "", "exists": False, "ok": False, "error": str(exception)}
     paths: dict[str, Any] = {
-        "root_directory": _check_path(path=filesystem.root_directory),
+        "data_root": data_root_report,
         "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
     }
     for destination_name, destination_root in filesystem.storage_directories.items():

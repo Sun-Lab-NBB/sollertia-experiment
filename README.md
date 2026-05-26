@@ -374,7 +374,10 @@ aggregation steps.
 ### Root Directory (Volume)
 All data acquisition systems and all long-term storage destinations keep **ALL** Sollertia platform projects under
 the same **root** directory. The exact location and name of the root directory on each machine is arbitrary but should
-generally remain fixed (unchanging) over the entire lifetime of that specific machine.
+generally remain fixed (unchanging) over the entire lifetime of that specific machine. On the main acquisition machine,
+this local data root is configured with the `slsa configure data-root` command and resolved by the library at runtime,
+so it is no longer part of the system configuration file. The root directories of any long-term storage destinations
+remain configured through the system configuration.
 
 ### Project Directory
 When a new project is created, a **project** directory **named after the project** is created under the **root**
@@ -603,6 +606,14 @@ Use `sle configure system` command (from the
 As part of its runtime, the command configures the host machine to remember the path to the generated configuration
 file, so all future sollertia-experiment runtimes on that machine automatically load and use the appropriate
 acquisition-system configuration parameters.
+
+***Note,*** the local **data root** — the directory under which all projects, animals, and sessions are stored on the
+main acquisition machine — is configured separately from the system configuration file, as it is a Sollertia
+platform-level setting shared across libraries. Set it on the main acquisition machine with the `slsa configure
+data-root` command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets)
+library) and view it with the `slsa get data-root` command. The data root must be configured before running data
+acquisition sessions. The root directories of any long-term storage destinations are not set this way; they remain
+part of the system configuration.
 
 ***Note!*** Each acquisition system uses unique configuration parameters. Additionally, the sollertia-experiment library always
 assumes that any machine (PC) can only be used by a single data-acquisition system (is permanently a part of that

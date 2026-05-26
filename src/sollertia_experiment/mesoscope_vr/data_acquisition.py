@@ -14,6 +14,7 @@ import numpy as np
 from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
+    ProjectData,
     SessionData,
     SessionTypes,
     ExperimentState,
@@ -23,6 +24,8 @@ from sollertia_shared_assets import (
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
     MesoscopeExperimentConfiguration,
+    get_data_root,
+    get_projects_for_animal,
 )
 from ataraxis_data_structures import DataLogger
 from ataraxis_communication_interface import MicroControllerInterface
@@ -33,7 +36,6 @@ from ..cross_system import (
     WaterValveInterface,
     GasPuffValveInterface,
     get_version_data,
-    get_animal_project,
     get_project_experiments,
 )
 from .maintenance_ui import MaintenanceControlUI
@@ -109,13 +111,11 @@ def window_checking_logic(
 
     # Initializes the acquired session's data hierarchy and resolves the Mesoscope-VR's filesystem configuration.
     session_data = SessionData.create(
-        project_name=project_name,
-        animal_id=animal_id,
+        animal=ProjectData(root=get_data_root(), project_name=project_name).animal(animal_id),
         session_type=SessionTypes.WINDOW_CHECKING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
         acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
-        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -300,13 +300,11 @@ def lick_training_logic(
 
     # Initializes the acquired session's data hierarchy and resolves the Mesoscope-VR's filesystem configuration.
     session_data = SessionData.create(
-        project_name=project_name,
-        animal_id=animal_id,
+        animal=ProjectData(root=get_data_root(), project_name=project_name).animal(animal_id),
         session_type=SessionTypes.LICK_TRAINING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
         acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
-        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -623,13 +621,11 @@ def run_training_logic(
 
     # Initializes the acquired session's data hierarchy and resolves the Mesoscope-VR's filesystem configuration.
     session_data = SessionData.create(
-        project_name=project_name,
-        animal_id=animal_id,
+        animal=ProjectData(root=get_data_root(), project_name=project_name).animal(animal_id),
         session_type=SessionTypes.RUN_TRAINING,
         python_version=python_version,
         sollertia_experiment_version=library_version,
         acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
-        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -1053,14 +1049,12 @@ def experiment_logic(
 
     # Initializes the acquired session's data hierarchy and resolves the Mesoscope-VR's filesystem configuration.
     session_data = SessionData.create(
-        project_name=project_name,
-        animal_id=animal_id,
+        animal=ProjectData(root=get_data_root(), project_name=project_name).animal(animal_id),
         session_type=SessionTypes.MESOSCOPE_EXPERIMENT,
         experiment_name=experiment_name,
         python_version=python_version,
         sollertia_experiment_version=library_version,
         acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
-        root_directory=system_configuration.filesystem.root_directory,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
@@ -1439,8 +1433,8 @@ def _verify_project_configured(
     Returns:
         The path to the configured project's root directory.
     """
-    project_directory = system_configuration.filesystem.root_directory.joinpath(project_name)
-    if not project_directory.exists():
+    project = ProjectData(root=get_data_root(), project_name=project_name)
+    if not project.exists():
         message = (
             f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
             f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
@@ -1448,7 +1442,7 @@ def _verify_project_configured(
             f"data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)
-    return project_directory
+    return project.path
 
 
 def _verify_animal_project_membership(
@@ -1466,9 +1460,7 @@ def _verify_animal_project_membership(
         project_name: The name of the project for which the session is prepared.
         animal_id: The unique identifier of the animal for which the session is prepared.
     """
-    animal_projects = get_animal_project(
-        animal_id=animal_id, root_directory=system_configuration.filesystem.root_directory
-    )
+    animal_projects = get_projects_for_animal(root_path=get_data_root(), animal_id=animal_id)
     # Rare case, often indicative of old migration pipeline use.
     if len(animal_projects) > 1:
         message = (
