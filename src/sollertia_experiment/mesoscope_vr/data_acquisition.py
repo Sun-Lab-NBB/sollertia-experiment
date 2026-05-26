@@ -1030,7 +1030,7 @@ def experiment_logic(
         message = (
             f"Unable to execute the {experiment_name} experiment session for the animal {animal_id} participating in "
             f"the project {project_name}. The target project does not have an experiment configuration file named "
-            f"after the target experiment. Use the 'sle configure experiment' command to configure the experiment "
+            f"after the target experiment. Use the 'slsa configure experiment' command to configure the experiment "
             f"before running experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -1438,7 +1438,7 @@ def _verify_project_configured(
         message = (
             f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
             f"{project_name}. The {system_configuration.name} data acquisition system is not configured to acquire "
-            f"data for this project. Use the 'sle configure project' command to configure the project before running "
+            f"data for this project. Use the 'slsa configure project' command to configure the project before running "
             f"data acquisition sessions."
         )
         console.error(message=message, error=FileNotFoundError)

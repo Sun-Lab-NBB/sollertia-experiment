@@ -308,7 +308,7 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 
     Experiment runtimes are carried out after the lick and run training sessions. This command runs any experiment
     configuration supported by the data acquisition system managed by the host-machine. To create a new experiment
-    configuration for the local data-acquisition system, use the 'sle configure experiment' subcommand.
+    configuration for the local data-acquisition system, use the 'slsa configure experiment' subcommand.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],

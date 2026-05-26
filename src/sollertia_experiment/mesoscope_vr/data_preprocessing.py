@@ -232,7 +232,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sle configure project' command to create the project before "
+            f"target project does not exist. Use the 'slsa configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)

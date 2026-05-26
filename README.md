@@ -573,8 +573,9 @@ ___
 ## Acquiring Data
 
 All user-facing library functionality is realized through a set of Command Line Interface (CLI) commands automatically
-exposed when the library is pip-installed into a python environment. The library exposes three main CLI command groups:
-`sle get`, `sle manage`, and `sle run`. Each group contains subcommands that allow further configuring their runtime.
+exposed when the library is pip-installed into a python environment. The library exposes four main CLI command groups:
+`sle configure`, `sle get`, `sle manage`, and `sle run`. Each group contains subcommands that allow further configuring
+their runtime.
 Use `--help` argument when calling any of the commands described below to see the list of supported arguments together
 with their descriptions and default values.
 
@@ -587,13 +588,14 @@ Failure to do so may damage the equipment or harm the animal!
 
 ### CLI Command Overview
 
-The sollertia-experiment library exposes three main CLI command groups:
+The sollertia-experiment library exposes four main CLI command groups:
 
-| Command Group | Purpose                                                  |
-|---------------|----------------------------------------------------------|
-| `sle get`      | Discover and evaluate data acquisition system components |
-| `sle manage`   | Manage session data (preprocessing, deletion, migration) |
-| `sle run`      | Execute data acquisition and maintenance sessions        |
+| Command Group   | Purpose                                                  |
+|-----------------|----------------------------------------------------------|
+| `sle configure` | Generate the data acquisition system configuration file  |
+| `sle get`       | Discover and evaluate data acquisition system components |
+| `sle manage`    | Manage session data (preprocessing, deletion, migration) |
+| `sle run`       | Execute data acquisition and maintenance sessions        |
 
 ### Step 0: Configuring the Data Acquisition System
 
@@ -601,8 +603,7 @@ Before acquiring data, each acquisition system has to be configured. This step i
 the system and installing the required hardware components. Typically, this only needs to be done when the acquisition
 system configuration or hardware changes, so most lab members can safely skip this step.
 
-Use `sle configure system` command (from the
-[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library) to generate the system configuration file.
+Use the `sle configure system` command to generate the system configuration file.
 As part of its runtime, the command configures the host machine to remember the path to the generated configuration
 file, so all future sollertia-experiment runtimes on that machine automatically load and use the appropriate
 acquisition-system configuration parameters.
@@ -627,7 +628,7 @@ after that system.
 
 ### Step 1: Creating a Project
 
-All data acquisition sessions require a valid project to run. To create a new project, use the `sle configure project`
+All data acquisition sessions require a valid project to run. To create a new project, use the `slsa configure project`
 command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This command can only
 be called on the main PC of a properly configured data-acquisition system (see Step 0 above). As part of its runtime,
 this command generates the root project directory on all machines that make up the data acquisition system.
@@ -636,7 +637,7 @@ this command generates the root project directory on all machines that make up t
 
 All projects that involve scientific experiments also need to define at least one **experiment configuration**.
 Experiment configurations are unique for each data acquisition system and are stored inside .yaml files named after the
-experiment. To generate a new experiment configuration file, use the `sle configure experiment` command (from the
+experiment. To generate a new experiment configuration file, use the `slsa configure experiment` command (from the
 [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This command generates a **precursor**
 experiment configuration file inside the **configuration** subdirectory, stored under the root project directory on the
 main PC of the data acquisition system.
@@ -659,12 +660,14 @@ acquisition system:
 | Command                          | Description                                                                   |
 |----------------------------------|-------------------------------------------------------------------------------|
 | `sle get zaber`                  | Discovers Zaber motor devices connected to the system                         |
-| `sle get projects`               | Lists projects configured for the data acquisition system                     |
-| `sle get experiments -p PROJECT` | Lists experiment configurations for the specified project                     |
 | `sle get cameras`                | Discovers cameras accessible to the system (OpenCV and Harvesters interfaces) |
 | `sle get controllers`            | Discovers microcontrollers accessible to the system                           |
 | `sle get ports`                  | Lists available serial communication ports                                    |
 | `sle get checksum -i STRING`     | Calculates the CRC32-XFER checksum for the input string                       |
+
+***Note,*** project and experiment discovery is provided by the sollertia-shared-assets library. Use `slsa get
+projects` and `slsa get experiments -p PROJECT` to list the projects and experiment configurations stored under the
+data root.
 
 ### Step 4: Maintaining the Acquisition System
 

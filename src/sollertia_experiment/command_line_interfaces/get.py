@@ -3,20 +3,13 @@ host-machine.
 """
 
 import click
-from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
-from sollertia_shared_assets import get_data_root, discover_projects
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
 from .mcp_servers import run_get_server
-from ..cross_system import (
-    CRCCalculator,
-    discover_zaber_devices,
-    get_project_experiments,
-)
-from ..mesoscope_vr import get_system_configuration
+from ..cross_system import CRCCalculator, discover_zaber_devices
 
 # Ensures that displayed CLICK help messages are formatted according to the lab standard.
 CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
@@ -31,51 +24,6 @@ def get() -> None:  # pragma: no cover
 def get_zaber_devices() -> None:
     """Identifies the Zaber devices accessible to the data acquisition system."""
     discover_zaber_devices()
-
-
-@get.command("projects")
-def get_projects() -> None:
-    """Identifies the projects accessible to the data acquisition system."""
-    system_configuration = get_system_configuration()
-    projects = natsorted(
-        [project.project_name for project in discover_projects(root_path=get_data_root(), strategy="directories")]
-    )
-    if projects:
-        console.echo(
-            f"The {system_configuration.name} data acquisition system is currently configured to acquire data for the "
-            f"following projects: {', '.join(projects)}."
-        )
-    else:
-        console.echo(
-            f"The {system_configuration.name} data acquisition system is currently not configured to acquire data for "
-            f"any projects. To configure the system to support acquiring data for a new project, use the "
-            f"'sle configure project' subcommand."
-        )
-
-
-@get.command("experiments")
-@click.option(
-    "-p",
-    "--project",
-    type=str,
-    required=True,
-    help="The name of the project for which to discover the available experiment configurations.",
-)
-def get_experiments(project: str) -> None:
-    """Identifies the target project's experiment configurations accessible to the data acquisition system."""
-    system_configuration = get_system_configuration()
-    experiments = get_project_experiments(project_directory=get_data_root().joinpath(project))
-    if experiments:
-        console.echo(
-            f"The {system_configuration.name} data acquisition system is currently configured to execute the following "
-            f"experiments for the {project} project: {', '.join(experiments)}."
-        )
-    else:
-        console.echo(
-            f"The {system_configuration.name} data acquisition system is currently not configured to execute any "
-            f"experiments for the {project} project. To configure the system to support a new experiment "
-            f"configuration, use the 'sle configure experiment' subcommand."
-        )
 
 
 @get.command("cameras")
