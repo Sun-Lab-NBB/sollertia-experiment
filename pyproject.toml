@@ -74,7 +74,7 @@ Documentation = "https://sollertia-experiment-api-docs.netlify.app/"
 
 # Currently, the library is interfaced with through the consolidated 'sle' CLI exposed below.
 [project.scripts]
-sle = "sollertia_experiment.command_line_interfaces.entry_points:sle_cli"
+sle = "sollertia_experiment.interfaces.entry_points:sle_cli"
 
 # Development dependencies (PEP 735). Not published to PyPI.
 [dependency-groups]

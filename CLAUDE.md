@@ -83,16 +83,17 @@ two-photon imaging system, which combines brain imaging with virtual reality beh
 
 ### Key Areas
 
-| Directory                                           | Purpose                                                  |
-|-----------------------------------------------------|----------------------------------------------------------|
-| `src/sollertia_experiment/command_line_interfaces/` | CLI entry points (consolidated under the `sle` command)  |
-| `src/sollertia_experiment/mesoscope_vr/`            | Mesoscope-VR system implementation (current system)      |
-| `src/sollertia_experiment/cross_system/`            | Cross-system utilities shared by all acquisition systems |
+| Directory                                | Purpose                                                  |
+|------------------------------------------|----------------------------------------------------------|
+| `src/sollertia_experiment/interfaces/`   | CLI entry points (consolidated under the `sle` command)  |
+| `src/sollertia_experiment/mesoscope_vr/` | Mesoscope-VR system implementation (current system)      |
+| `src/sollertia_experiment/cross_system/` | Cross-system utilities shared by all acquisition systems |
 
 ### Architecture
 
-- A single `sle` CLI entry point delegates to specialized subgroups (`sle get`, `sle manage`, `sle run`,
-  `sle configure`)
+- A single `sle` CLI entry point delegates to two layers: a general, hardware-agnostic discovery group (`sle get`)
+  and a per-system group that combines configuration, acquisition, and data management for one system
+  (`sle mesoscope` for the Mesoscope-VR system)
 - Hardware abstraction via binding classes (Zaber motors, cameras, microcontrollers)
 - Shared memory IPC for GUI-runtime communication
 - Session-based data management with distributed storage
@@ -128,12 +129,13 @@ For Zaber motor configuration, follow the existing patterns in `mesoscope_vr/zab
 
 **Modifying CLI commands:**
 
-1. Identify the appropriate CLI module: `execute.py` (`sle run`), `manage.py` (`sle manage`), `get.py` (`sle get`),
-   or `configure.py` (`sle configure`)
+1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
+   `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`, `run`,
+   `preprocess`, `delete`, and `migrate`)
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
-4. Register commands with the appropriate Click group (subgroups are auto-registered on the top-level `sle` group via
-   `entry_points.py`)
+4. Register commands with the appropriate Click group (the `get` and `mesoscope` groups are auto-registered on the
+   top-level `sle` group via `entry_points.py`)
 
 **Modifying sollertia-shared-assets (configuration dataclasses):**
 

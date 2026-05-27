@@ -385,7 +385,7 @@ directory of the main data acquisition machine. When the data is moved to the co
 as part of preprocessing, the project directory is also created on these destinations, if it does not already exist.
 
 All data acquisition systems also create a **configuration** subdirectory under the root project directory. This
-directory stores all supported experiment configurations for the project. The `sle run session` command searches the
+directory stores all supported experiment configurations for the project. The `sle mesoscope run` command searches the
 configuration directory for the .yaml file with the name of the target experiment to load the experiment data.
 
 ### Animal Directory
@@ -573,9 +573,10 @@ ___
 ## Acquiring Data
 
 All user-facing library functionality is realized through a set of Command Line Interface (CLI) commands automatically
-exposed when the library is pip-installed into a python environment. The library exposes four main CLI command groups:
-`sle configure`, `sle get`, `sle manage`, and `sle run`. Each group contains subcommands that allow further configuring
-their runtime.
+exposed when the library is pip-installed into a python environment. The library exposes two top-level CLI command
+groups: a general, hardware-agnostic discovery group (`sle get`) shared by all acquisition systems, and the
+Mesoscope-VR system group (`sle mesoscope`) that combines configuration, maintenance, data acquisition, and data
+management for the Mesoscope-VR system. Each group contains subcommands that allow further configuring their runtime.
 Use `--help` argument when calling any of the commands described below to see the list of supported arguments together
 with their descriptions and default values.
 
@@ -588,14 +589,18 @@ Failure to do so may damage the equipment or harm the animal!
 
 ### CLI Command Overview
 
-The sollertia-experiment library exposes four main CLI command groups:
+The sollertia-experiment library exposes two top-level CLI command groups: the general `sle get` group and the
+Mesoscope-VR `sle mesoscope` group.
 
-| Command Group   | Purpose                                                  |
-|-----------------|----------------------------------------------------------|
-| `sle configure` | Generate the data acquisition system configuration file  |
-| `sle get`       | Discover and evaluate data acquisition system components |
-| `sle manage`    | Manage session data (preprocessing, deletion, migration) |
-| `sle run`       | Execute data acquisition and maintenance sessions        |
+| Command                    | Purpose                                                              |
+|----------------------------|----------------------------------------------------------------------|
+| `sle get`                  | Discover and evaluate data acquisition system components (general)   |
+| `sle mesoscope configure`  | Generate the Mesoscope-VR data acquisition system configuration file |
+| `sle mesoscope maintain`   | Run the Mesoscope-VR system maintenance session                      |
+| `sle mesoscope run`        | Execute Mesoscope-VR data acquisition and training sessions          |
+| `sle mesoscope preprocess` | Preprocess a session's data and push it to long-term storage         |
+| `sle mesoscope delete`     | Remove a session's data from all storage destinations                |
+| `sle mesoscope migrate`    | Transfer an animal's sessions between projects                       |
 
 ### Step 0: Configuring the Data Acquisition System
 
@@ -603,7 +608,7 @@ Before acquiring data, each acquisition system has to be configured. This step i
 the system and installing the required hardware components. Typically, this only needs to be done when the acquisition
 system configuration or hardware changes, so most lab members can safely skip this step.
 
-Use the `sle configure system` command to generate the system configuration file.
+Use the `sle mesoscope configure` command to generate the system configuration file.
 As part of its runtime, the command configures the host machine to remember the path to the generated configuration
 file, so all future sollertia-experiment runtimes on that machine automatically load and use the appropriate
 acquisition-system configuration parameters.
@@ -678,7 +683,7 @@ acquisition system. Therefore, this section is further broken into acquisition-s
 
 The Mesoscope-VR system contains two modules that require frequent maintenance: the **water delivery system** and the
 **running wheel**. To facilitate the maintenance of these modules, the sollertia-experiment library exposes the
-`sle run maintenance` command.
+`sle mesoscope maintain` command.
 
 This command is typically called at least twice during each day the system is used to acquire data. First, it is used
 at the beginning of the day to prepare the Mesoscope-VR system for runtime by filling the water delivery system. Second,
@@ -701,7 +706,7 @@ systems may also support one or more training session types, which often do not 
 otherwise behave similar to experiment sessions.
 
 All session commands require common parameters: user ID, project name, animal ID, and animal weight. These are provided
-to the parent `sle run session` command before specifying the session type.
+to the parent `sle mesoscope run` command before specifying the session type.
 
 #### Mesoscope-VR Session Commands
 
@@ -709,7 +714,7 @@ The Mesoscope-VR system supports four types of runtime sessions:
 
 **1. Window Checking Session**
 ```bash
-sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT check-window
+sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT window-checking
 ```
 
 This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
@@ -719,7 +724,7 @@ the animal in experiment cohorts.
 
 **2. Lick Training Session**
 ```bash
-sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]
+sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]
 ```
 
 All animals that participate in Mesoscope-VR experiments undergo a two-stage training protocol, with lick training
@@ -733,7 +738,7 @@ tracking threshold.
 
 **3. Run Training Session**
 ```bash
-sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]
+sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]
 ```
 
 This is the second stage of the mandatory two-stage Mesoscope-VR training protocol. During this runtime, the animals
@@ -747,7 +752,7 @@ water volume, idle time allowance, and unconsumed reward tracking threshold.
 
 **4. Experiment Session**
 ```bash
-sle run session -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]
+sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]
 ```
 
 This session type is designed to execute the experiment specified in the target *experiment_configuration.yaml* file
@@ -768,7 +773,7 @@ CLI command.
 The most commonly used operation is to **preprocess** the acquired data. This can be done manually by calling:
 
 ```bash
-sle manage preprocess -sp SESSION_PATH
+sle mesoscope preprocess -sp SESSION_PATH
 ```
 
 Preprocessing consists of two major steps. The first step pulls all available data to the main data acquisition system
@@ -791,7 +796,7 @@ long-term storage destinations. This runtime is extremely dangerous and, if not 
 ***permanently delete valid data***. This mode can be triggered using:
 
 ```bash
-sle manage delete -sp SESSION_PATH
+sle mesoscope delete -sp SESSION_PATH
 ```
 
 **Warning!** This command is not recommended for most users.
@@ -801,7 +806,7 @@ sle manage delete -sp SESSION_PATH
 To transfer all sessions for an animal from one project to another, use:
 
 ```bash
-sle manage migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
+sle mesoscope migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
 ```
 
 This moves the animal's data across all accessible storage destinations.
@@ -816,7 +821,7 @@ Start the MCP servers using the CLI:
 
 ```bash
 sle get mcp      # Discovery and evaluation tools
-sle manage mcp   # Data management tools
+sle mesoscope mcp   # Mesoscope-VR data management tools
 ```
 
 #### Available Tools (sle get MCP)
@@ -834,7 +839,7 @@ sle manage mcp   # Data management tools
 | `check_mount_accessibility_tool`    | Verifies a filesystem path is accessible and writable            |
 | `check_system_mounts_tool`          | Verifies all configured filesystem paths are accessible          |
 
-#### Available Tools (sle manage MCP)
+#### Available Tools (sle mesoscope MCP)
 
 | Tool                            | Description                                              |
 |---------------------------------|----------------------------------------------------------|
@@ -857,7 +862,7 @@ Add the following to the Claude Desktop configuration file:
     },
     "sollertia-experiment-manage": {
       "command": "sle",
-      "args": ["manage", "mcp"]
+      "args": ["mesoscope", "mcp"]
     }
   }
 }
@@ -919,12 +924,12 @@ instructions:
    For example, from mesoscope_data → 2025-11-11-05-03-234123. **Critical!** if this is not done, the library may
    **delete** any leftover Mesoscope files during the next runtime and cannot properly preprocess the frames for the
    interrupted session during the next step.
-6. Call `sle manage preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
+6. Call `sle mesoscope preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
    session. This preprocesses and transfers all collected data to the long-term storage destinations. This preserves
    any data acquired before the interruption and prepares the system for running the next session.
 
 ### Data preprocessing interruption
-To recover from an error encountered during preprocessing, call `sle manage preprocess -sp SESSION_PATH` and provide
+To recover from an error encountered during preprocessing, call `sle mesoscope preprocess -sp SESSION_PATH` and provide
 the path to the session directory of the interrupted session. The preprocessing pipeline automatically resumes an
 interrupted runtime from the nearest checkpoint.
 

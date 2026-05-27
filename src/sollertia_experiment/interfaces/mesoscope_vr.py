@@ -1,30 +1,53 @@
-"""Provides the 'sle run' subcommand for running the data acquisition and system maintenance sessions supported by the
-data acquisition system managed by the host-machine.
+"""Provides the 'sle mesoscope' command group for configuring, running, and managing the Mesoscope-VR data acquisition
+system.
+
+This module combines all Mesoscope-VR-specific interfaces into a single command group: system configuration
+('configure'), system maintenance ('maintain'), data acquisition sessions ('run'), and session data management
+('preprocess', 'delete', 'migrate'). The general, hardware-agnostic discovery commands are exposed separately via the
+'sle get' command group.
 """
 
-import click
+from pathlib import Path
 
+import click
+from ataraxis_base_utilities import console
+from sollertia_shared_assets import SessionData, get_data_root
+
+from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
+    purge_session,
     experiment_logic,
     maintenance_logic,
     run_training_logic,
     lick_training_logic,
     window_checking_logic,
+    preprocess_session_data,
+    get_system_configuration,
+    migrate_animal_between_projects,
+    create_system_configuration_file,
 )
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
-CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
+CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+"""Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
-@click.group("run", context_settings=CONTEXT_SETTINGS)
-def run() -> None:  # pragma: no cover
-    """Runs data acquisition and system maintenance sessions supported by the data acquisition system managed by the
-    host-machine.
+@click.group("mesoscope", context_settings=CONTEXT_SETTINGS)
+def mesoscope() -> None:  # pragma: no cover
+    """Configures, runs, and manages the Mesoscope-VR data acquisition system.
+
+    This command group exposes every Mesoscope-VR-specific runtime: generating the system configuration file,
+    performing system maintenance, running data acquisition sessions, and managing the data collected by the system.
     """
 
 
-@run.command("maintenance")
-def maintain_acquisition_system() -> None:
+@mesoscope.command("configure")
+def configure() -> None:  # pragma: no cover
+    """Creates the Mesoscope-VR data acquisition system configuration file under the working directory."""
+    create_system_configuration_file()
+
+
+@mesoscope.command("maintain")
+def maintain() -> None:
     """Runs the data acquisition system maintenance session.
 
     Calling this command exposes a GUI for directly interfacing with a small subset of the managed data acquisition
@@ -35,7 +58,7 @@ def maintain_acquisition_system() -> None:
     maintenance_logic()
 
 
-@run.group("session")
+@mesoscope.group("run")
 @click.option(
     "-u",
     "--user",
@@ -65,7 +88,7 @@ def maintain_acquisition_system() -> None:
     help="The weight of the animal, in grams, at the beginning of the session.",
 )
 @click.pass_context
-def session(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
+def run(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
     """Runs the specified data acquisition session for the target animal and project combination."""
     # Store common parameters in the context dictionary to be accessible from the subcommands.
     ctx.ensure_object(dict)
@@ -76,9 +99,9 @@ def session(ctx: click.Context, user: str, project: str, animal: str, animal_wei
 
 
 # noinspection PyUnresolvedReferences
-@session.command("check-window")
+@run.command("window-checking")
 @click.pass_context
-def check_window(ctx: click.Context) -> None:
+def window_checking(ctx: click.Context) -> None:
     """Runs the cranial window quality checking session.
 
     The primary purpose of the cranial window quality checking session is to ensure that the animal is suitable for
@@ -94,7 +117,7 @@ def check_window(ctx: click.Context) -> None:
 
 
 # noinspection PyUnresolvedReferences
-@session.command("lick-training")
+@run.command("lick-training")
 @click.option(
     "-t",
     "--maximum_time",
@@ -165,7 +188,7 @@ def lick_training(
 
 
 # noinspection PyUnresolvedReferences
-@session.command("run-training")
+@run.command("run-training")
 @click.option(
     "-t",
     "--maximum_time",
@@ -284,7 +307,7 @@ def run_training(
 
 
 # noinspection PyUnresolvedReferences
-@session.command("experiment")
+@run.command("experiment")
 @click.option(
     "-e",
     "--experiment",
@@ -318,3 +341,108 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
         animal_weight=ctx.obj["animal_weight"],
         maximum_unconsumed_rewards=unconsumed_rewards,
     )
+
+
+@mesoscope.command("preprocess")
+@click.option(
+    "-sp",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to preprocess.",
+)
+def preprocess(session_path: Path) -> None:
+    """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
+    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
+    data_root = get_data_root()
+
+    # Prevent using this command on sessions that are not stored on the local host-machine, but accessible to its
+    # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
+    message = (
+        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"({data_root})."
+    )
+    if not session_path.is_relative_to(data_root):
+        console.error(message=message, error=FileNotFoundError)
+
+    # Loads the SessionData instance for the processed session.
+    session_data = SessionData.load(session_path=session_path)
+    preprocess_session_data(session_data)  # Runs the preprocessing logic.
+
+
+@mesoscope.command("delete")
+@click.option(
+    "-sp",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to remove.",
+)
+def delete(session_path: Path) -> None:
+    """Removes the target session's data from all destinations accessible to the data acquisition system.
+
+    This is an extremely dangerous command that can potentially delete valuable data if used carelessly. This command
+    removes the session's data from all machines of the data acquisition system and all long-term storage destinations
+    accessible to the data acquisition system.
+    """
+    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
+    data_root = get_data_root()
+
+    # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
+    # command safe, it reduces the risk of accidentally removing valid scientific data.
+    message = (
+        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"({data_root})."
+    )
+    if not session_path.is_relative_to(data_root):
+        console.error(message=message, error=FileNotFoundError)
+
+    # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
+    # host-machine.
+    session_data = SessionData.load(session_path=session_path)
+    purge_session(session_data)
+
+
+@mesoscope.command("migrate")
+@click.option(
+    "-s",
+    "--source",
+    type=str,
+    required=True,
+    help="The name of the project from which to migrate the data.",
+)
+@click.option(
+    "-d",
+    "--destination",
+    type=str,
+    required=True,
+    help="The name of the project to which to migrate the data.",
+)
+@click.option(
+    "-a",
+    "--animal",
+    type=str,
+    required=True,
+    help="The ID of the animal whose data to migrate.",
+)
+def migrate(source: str, destination: str, animal: str) -> None:
+    """Transfers all sessions for the specified animal from the source project to the target project."""
+    migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
+
+
+@mesoscope.command("mcp")
+@click.option(
+    "-t",
+    "--transport",
+    type=str,
+    default="stdio",
+    show_default=True,
+    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
+)
+def start_mcp_server(transport: str) -> None:  # pragma: no cover
+    """Starts the MCP server for agentic access to 'sle mesoscope' tools."""
+    run_manage_server(transport=transport)  # type: ignore[arg-type]

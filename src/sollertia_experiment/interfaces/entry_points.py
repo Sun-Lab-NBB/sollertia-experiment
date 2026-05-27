@@ -18,8 +18,8 @@ CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 def sle_cli() -> None:  # pragma: no cover
     """Top-level entry point for the sollertia-experiment library.
 
-    Exposes four operational command groups: 'get' for hardware discovery, 'manage' for session and storage
-    operations, 'run' for data acquisition runtimes, and 'configure' for acquisition-system configuration.
+    Exposes two operational command groups: 'get' for general, hardware-agnostic acquisition system discovery, and
+    'mesoscope' for configuring, running, and managing the Mesoscope-VR data acquisition system.
     """
 
 
@@ -30,14 +30,12 @@ def _register_subcommands() -> None:
     needed by the wheel build or by tools like importlib.metadata.
     """
     from .get import get  # noqa: PLC0415
-    from .manage import manage  # noqa: PLC0415
-    from .execute import run  # noqa: PLC0415
-    from .configure import configure_cli  # noqa: PLC0415
+    from .mesoscope_vr import mesoscope  # noqa: PLC0415
 
+    # noinspection PyTypeChecker
     sle_cli.add_command(cmd=get)
-    sle_cli.add_command(cmd=manage)
-    sle_cli.add_command(cmd=run)
-    sle_cli.add_command(cmd=configure_cli, name="configure")
+    # noinspection PyTypeChecker
+    sle_cli.add_command(cmd=mesoscope)
 
 
 _register_subcommands()
