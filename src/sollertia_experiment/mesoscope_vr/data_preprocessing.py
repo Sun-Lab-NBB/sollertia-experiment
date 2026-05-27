@@ -20,12 +20,14 @@ from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_time import TimeUnits, convert_time
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
+    AnimalData,
     SessionData,
     SessionTypes,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
+    get_data_root,
     discover_sessions,
     get_google_credentials_path,
 )
@@ -218,15 +220,19 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     system_configuration = get_system_configuration()
     filesystem = system_configuration.filesystem
 
-    # Resolves the paths to the key local root directories used in the migration process.
-    destination_local_root = filesystem.root_directory.joinpath(target_project, animal)
-    source_local_root = filesystem.root_directory.joinpath(source_project, animal)
+    # Resolves the local data root and the per-project animal directories used in the migration process. The data
+    # root is owned by the Sollertia platform, not by the Mesoscope-VR filesystem configuration.
+    data_root = get_data_root()
+    source_animal = AnimalData(root=data_root, project_name=source_project, animal_id=animal)
+    destination_animal = AnimalData(root=data_root, project_name=target_project, animal_id=animal)
+    destination_local_root = destination_animal.path
+    source_local_root = source_animal.path
 
     # If the target project does not exist, aborts with an error.
     if not destination_local_root.parent.exists():
         message = (
             f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'sle configure project' command to create the project before "
+            f"target project does not exist. Use the 'slsa configure project' command to create the project before "
             f"migrating animals to this project."
         )
         console.error(message=message, error=FileNotFoundError)
@@ -269,8 +275,8 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     shutil.move(src=old_path, dst=new_path)
 
     # Also moves the VRPC persistent data for the animal between projects.
-    old_path = source_local_root.joinpath("persistent_data")
-    new_path = destination_local_root.joinpath("persistent_data")
+    old_path = source_animal.persistent_data_path
+    new_path = destination_animal.persistent_data_path
     if new_path.exists():
         shutil.rmtree(new_path)
     shutil.move(src=old_path, dst=new_path)
@@ -281,7 +287,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # their unset roots resolve to relative paths that are unsafe to delete.
     deletion_root_candidates = [
         filesystem.mesoscope_directory,
-        filesystem.root_directory,
+        data_root,
         *filesystem.storage_directories.values(),
     ]
     deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]

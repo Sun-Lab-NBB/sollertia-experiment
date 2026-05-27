@@ -9,18 +9,18 @@ from dataclasses import field, dataclass
 from ataraxis_video_system import EncoderSpeedPresets
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
+    CONFIGURATION_DIRECTORY,
+    AnimalData,
     SessionData,
     SessionTypes,
     AcquisitionSystems,
+    get_data_root,
     get_working_directory,
 )
 from ataraxis_data_structures import YamlConfig
 
 from ..vr_task import VRTaskConfiguration
 from ..cross_system import StorageDestination, StorageDestinations
-
-_CONFIGURATION_DIR: str = "configuration"
-"""Subdirectory under the working directory that stores the Mesoscope-VR system configuration YAML."""
 
 _SYSTEM_CONFIGURATION_FILENAME: str = "mesoscope_system_configuration.yaml"
 """Canonical filename for the Mesoscope-VR system configuration YAML."""
@@ -74,10 +74,14 @@ RUN_TRAINING_THRESHOLD_LIMITS: RunTrainingThresholdLimits = RunTrainingThreshold
 
 @dataclass(slots=True)
 class MesoscopeFileSystem:
-    """Stores the filesystem configuration of the Mesoscope-VR data acquisition system."""
+    """Stores the filesystem configuration of the Mesoscope-VR data acquisition system.
 
-    root_directory: Path = Path()
-    """The absolute path to the directory where all projects are stored on the main data acquisition system PC."""
+    Notes:
+        The local data root (the directory under which all projects are stored on this machine) is no longer part
+        of this configuration. It is owned by the Sollertia platform as the shared data root; resolve it with
+        ``get_data_root()`` and set it with the ``slsa configure data-root`` command.
+    """
+
     mesoscope_directory: Path = Path()
     """The absolute path to the local-filesystem-mounted directory where all Mesoscope-acquired data is aggregated
     during acquisition by the PC that manages the Mesoscope during runtime."""
@@ -481,7 +485,7 @@ def create_system_configuration_file(system: AcquisitionSystems | str = Acquisit
         )
         console.error(message=message, error=ValueError)
 
-    directory = get_working_directory().joinpath(_CONFIGURATION_DIR)
+    directory = get_working_directory().joinpath(CONFIGURATION_DIRECTORY)
     ensure_directory_exists(path=directory)
 
     # Removes any existing system configuration files to guarantee that exactly one remains after this call.
@@ -501,7 +505,7 @@ def create_system_configuration_file(system: AcquisitionSystems | str = Acquisit
 
 def get_system_configuration_path() -> Path:
     """Returns the expected path to the Mesoscope-VR system configuration YAML under the working directory."""
-    return get_working_directory().joinpath(_CONFIGURATION_DIR, _SYSTEM_CONFIGURATION_FILENAME)
+    return get_working_directory().joinpath(CONFIGURATION_DIRECTORY, _SYSTEM_CONFIGURATION_FILENAME)
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
@@ -556,23 +560,24 @@ class MesoscopeData:
     """
 
     def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
-        project = session_data.project_name
-        animal = session_data.animal_id
         session = session_data.session_name
+
+        # Anchors the animal on the platform data root, then rebinds it onto the Mesoscope acquisition mount and each
+        # long-term storage destination to resolve the per-root copies of the same logical session.
+        local_animal = AnimalData(
+            root=get_data_root(), project_name=session_data.project_name, animal_id=session_data.animal_id
+        )
+        mesoscope_animal = local_animal.for_root(root=system_configuration.filesystem.mesoscope_directory)
 
         self.vrpc_data: _VRPCPersistentData = _VRPCPersistentData(
             session_type=session_data.session_type,
-            persistent_data_path=system_configuration.filesystem.root_directory.joinpath(
-                project, animal, "persistent_data"
-            ),
+            persistent_data_path=local_animal.persistent_data_path,
         )
 
         self.scanimagepc_data: _ScanImagePCData = _ScanImagePCData(
             session=session,
             mesoscope_root_path=system_configuration.filesystem.mesoscope_directory,
-            persistent_data_path=system_configuration.filesystem.mesoscope_directory.joinpath(
-                project, animal, "persistent_data"
-            ),
+            persistent_data_path=mesoscope_animal.persistent_data_path,
         )
 
         # Long-term storage destinations. Resolves a StorageDestination only for each storage root that is configured
@@ -582,13 +587,14 @@ class MesoscopeData:
         # order is preserved, defining the preference order used when a single destination is required.
         resolved_destinations: list[StorageDestination] = []
         unconfigured_destinations: list[str] = []
-        for destination_name, root_directory in system_configuration.filesystem.storage_directories.items():
-            if root_directory == Path():
+        for destination_name, destination_root in system_configuration.filesystem.storage_directories.items():
+            if destination_root == Path():
                 unconfigured_destinations.append(destination_name)
                 continue
             resolved_destinations.append(
                 StorageDestination(
-                    name=destination_name, session_path=root_directory.joinpath(project, animal, session)
+                    name=destination_name,
+                    session_path=local_animal.for_root(root=destination_root).session_path(session_name=session),
                 )
             )
         self.destinations: StorageDestinations = StorageDestinations(destinations=tuple(resolved_destinations))

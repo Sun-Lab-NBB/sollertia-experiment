@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
-from datetime import (
-    UTC,
-    datetime,
-)
+from datetime import datetime
 
 from ataraxis_base_utilities import console
-from sollertia_shared_assets import DrugData, ImplantData, SubjectData, SurgeryData, InjectionData, ProcedureData
+from sollertia_shared_assets import (
+    DrugData,
+    ImplantData,
+    SubjectData,
+    SurgeryData,
+    InjectionData,
+    ProcedureData,
+    parse_session_timestamp,
+)
 from googleapiclient.discovery import Resource, build
 from google.oauth2.service_account import Credentials
 
@@ -724,12 +729,15 @@ class WaterLog:
             )
             console.error(message=message, error=ValueError)
 
-        # Parses the session's date and converts it into the format used in the log files.
-        session_datetime = datetime.strptime(session_date, "%Y-%m-%d-%H-%M-%S-%f").replace(tzinfo=UTC)
-
-        # Session timestamps are stored in UTC, but the log files use the host machine's local time for user
-        # convenience. Converting to the local timezone matches the machine configuration used to fill the logs.
-        local_datetime = session_datetime.astimezone()
+        # Parses the session's UTC timestamp from its name and renders it in the host machine's local time, which is
+        # the timezone the log files use for user convenience.
+        local_datetime = parse_session_timestamp(session_name=session_date, utc_timezone=False)
+        if local_datetime is None:
+            message = (
+                f"Unable to interface with the water restriction and animal interaction log file for the animal "
+                f"{self._animal_id}. The session name '{session_date}' is not a valid Sollertia session timestamp."
+            )
+            console.error(message=message, error=ValueError)
 
         # Formats the date to appear the same way as used in the log file.
         formatted_date = local_datetime.strftime("%-m/%-d/%y")

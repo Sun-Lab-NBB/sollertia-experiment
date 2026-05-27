@@ -3,7 +3,7 @@
 
 Command Line Interface
 ======================
-.. click:: sollertia_experiment.command_line_interfaces.entry_points:sle_cli
+.. click:: sollertia_experiment.interfaces.entry_points:sle_cli
    :prog: sle
    :nested: full
 

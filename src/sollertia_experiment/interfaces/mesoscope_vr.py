@@ -1,30 +1,52 @@
-"""Provides the 'sle run' subcommand for running the data acquisition and system maintenance sessions supported by the
-data acquisition system managed by the host-machine.
+"""Provides the 'sle mesoscope' command group for configuring, running, and managing the Mesoscope-VR data acquisition
+system.
+
+This module combines all Mesoscope-VR-specific interfaces into a single command group: system configuration
+('configure'), system maintenance ('maintain'), data acquisition sessions ('run'), and session data management
+('preprocess', 'delete', 'migrate'). The general, hardware-agnostic discovery commands are exposed separately via the
+'sle get' command group.
 """
 
+from pathlib import Path
+
 import click
+from ataraxis_base_utilities import console
+from sollertia_shared_assets import SessionData, get_data_root
 
 from ..mesoscope_vr import (
+    purge_session,
     experiment_logic,
     maintenance_logic,
     run_training_logic,
     lick_training_logic,
     window_checking_logic,
+    preprocess_session_data,
+    get_system_configuration,
+    migrate_animal_between_projects,
+    create_system_configuration_file,
 )
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
-CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
+CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+"""Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
-@click.group("run", context_settings=CONTEXT_SETTINGS)
-def run() -> None:  # pragma: no cover
-    """Runs data acquisition and system maintenance sessions supported by the data acquisition system managed by the
-    host-machine.
+@click.group("mesoscope", context_settings=CONTEXT_SETTINGS)
+def mesoscope() -> None:  # pragma: no cover
+    """Configures, runs, and manages the Mesoscope-VR data acquisition system.
+
+    This command group exposes every Mesoscope-VR-specific runtime: generating the system configuration file,
+    performing system maintenance, running data acquisition sessions, and managing the data collected by the system.
     """
 
 
-@run.command("maintenance")
-def maintain_acquisition_system() -> None:
+@mesoscope.command("configure")
+def configure() -> None:  # pragma: no cover
+    """Creates the Mesoscope-VR data acquisition system configuration file under the working directory."""
+    create_system_configuration_file()
+
+
+@mesoscope.command("maintain")
+def maintain() -> None:
     """Runs the data acquisition system maintenance session.
 
     Calling this command exposes a GUI for directly interfacing with a small subset of the managed data acquisition
@@ -35,7 +57,7 @@ def maintain_acquisition_system() -> None:
     maintenance_logic()
 
 
-@run.group("session")
+@mesoscope.group("run")
 @click.option(
     "-u",
     "--user",
@@ -59,15 +81,15 @@ def maintain_acquisition_system() -> None:
 )
 @click.option(
     "-w",
-    "--animal_weight",
+    "--animal-weight",
     type=float,
     required=True,
     help="The weight of the animal, in grams, at the beginning of the session.",
 )
 @click.pass_context
-def session(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
+def run(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
     """Runs the specified data acquisition session for the target animal and project combination."""
-    # Store common parameters in the context dictionary to be accessible from the subcommands.
+    # Stores common parameters in the context dictionary to be accessible from the subcommands.
     ctx.ensure_object(dict)
     ctx.obj["user"] = user
     ctx.obj["project"] = project
@@ -76,9 +98,9 @@ def session(ctx: click.Context, user: str, project: str, animal: str, animal_wei
 
 
 # noinspection PyUnresolvedReferences
-@session.command("check-window")
+@run.command("window-checking")
 @click.pass_context
-def check_window(ctx: click.Context) -> None:
+def window_checking(ctx: click.Context) -> None:
     """Runs the cranial window quality checking session.
 
     The primary purpose of the cranial window quality checking session is to ensure that the animal is suitable for
@@ -94,16 +116,16 @@ def check_window(ctx: click.Context) -> None:
 
 
 # noinspection PyUnresolvedReferences
-@session.command("lick-training")
+@run.command("lick-training")
 @click.option(
     "-t",
-    "--maximum_time",
+    "--maximum-time",
     type=int,
     help="The maximum time to run the training session, in minutes. Defaults to 20 minutes.",
 )
 @click.option(
     "-min",
-    "--minimum_delay",
+    "--minimum-delay",
     type=int,
     help=(
         "The minimum number of seconds that has to pass between two consecutive reward deliveries during training. "
@@ -112,7 +134,7 @@ def check_window(ctx: click.Context) -> None:
 )
 @click.option(
     "-max",
-    "--maximum_delay",
+    "--maximum-delay",
     type=int,
     help=(
         "The maximum number of seconds that can pass between two consecutive reward deliveries during training. "
@@ -121,13 +143,13 @@ def check_window(ctx: click.Context) -> None:
 )
 @click.option(
     "-v",
-    "--maximum_volume",
+    "--maximum-volume",
     type=float,
     help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -165,16 +187,16 @@ def lick_training(
 
 
 # noinspection PyUnresolvedReferences
-@session.command("run-training")
+@run.command("run-training")
 @click.option(
     "-t",
-    "--maximum_time",
+    "--maximum-time",
     type=int,
     help="The maximum time to run the training session, in minutes. Defaults to 40 minutes.",
 )
 @click.option(
     "-is",
-    "--initial_speed",
+    "--initial-speed",
     type=float,
     help=(
         "The initial speed, in centimeters per second, the animal must maintain to obtain water rewards. "
@@ -183,7 +205,7 @@ def lick_training(
 )
 @click.option(
     "-id",
-    "--initial_duration",
+    "--initial-duration",
     type=float,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
@@ -192,7 +214,7 @@ def lick_training(
 )
 @click.option(
     "-it",
-    "--increase_threshold",
+    "--increase-threshold",
     type=float,
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
@@ -202,7 +224,7 @@ def lick_training(
 )
 @click.option(
     "-ss",
-    "--speed_step",
+    "--speed-step",
     type=float,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
@@ -211,7 +233,7 @@ def lick_training(
 )
 @click.option(
     "-ds",
-    "--duration_step",
+    "--duration-step",
     type=float,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
@@ -220,13 +242,13 @@ def lick_training(
 )
 @click.option(
     "-v",
-    "--maximum_volume",
+    "--maximum-volume",
     type=float,
     help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-mit",
-    "--maximum_idle_time",
+    "--maximum-idle-time",
     type=float,
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain the speed that is below the speed threshold "
@@ -236,7 +258,7 @@ def lick_training(
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -284,7 +306,7 @@ def run_training(
 
 
 # noinspection PyUnresolvedReferences
-@session.command("experiment")
+@run.command("experiment")
 @click.option(
     "-e",
     "--experiment",
@@ -294,7 +316,7 @@ def run_training(
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -308,7 +330,7 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 
     Experiment runtimes are carried out after the lick and run training sessions. This command runs any experiment
     configuration supported by the data acquisition system managed by the host-machine. To create a new experiment
-    configuration for the local data-acquisition system, use the 'sle configure experiment' subcommand.
+    configuration for the local data-acquisition system, use the 'slsa configure experiment' subcommand.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],
@@ -318,3 +340,93 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
         animal_weight=ctx.obj["animal_weight"],
         maximum_unconsumed_rewards=unconsumed_rewards,
     )
+
+
+@mesoscope.command("preprocess")
+@click.option(
+    "-sp",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to preprocess.",
+)
+def preprocess(session_path: Path) -> None:
+    """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
+    system_configuration = get_system_configuration()
+    data_root = get_data_root()
+
+    # Prevents using this command on sessions that are not stored on the local host-machine, but accessible to its
+    # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
+    message = (
+        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"({data_root})."
+    )
+    if not session_path.is_relative_to(data_root):
+        console.error(message=message, error=FileNotFoundError)
+
+    session_data = SessionData.load(session_path=session_path)
+    preprocess_session_data(session_data)
+
+
+@mesoscope.command("delete")
+@click.option(
+    "-sp",
+    "--session-path",
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, path_type=Path),
+    required=True,
+    prompt="Enter the path to the target data acquisition session's directory: ",
+    help="The path to the data acquisition session's directory to remove.",
+)
+def delete(session_path: Path) -> None:
+    """Removes the target session's data from all destinations accessible to the data acquisition system.
+
+    This is an extremely dangerous command that can potentially delete valuable data if used carelessly. This command
+    removes the session's data from all machines of the data acquisition system and all long-term storage destinations
+    accessible to the data acquisition system.
+    """
+    system_configuration = get_system_configuration()
+    data_root = get_data_root()
+
+    # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
+    # command safe, it reduces the risk of accidentally removing valid scientific data.
+    message = (
+        f"Unable to delete the session's directory stored at the {session_path} path. The session's directory must "
+        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"({data_root})."
+    )
+    if not session_path.is_relative_to(data_root):
+        console.error(message=message, error=FileNotFoundError)
+
+    # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
+    # host-machine.
+    session_data = SessionData.load(session_path=session_path)
+    purge_session(session_data)
+
+
+@mesoscope.command("migrate")
+@click.option(
+    "-s",
+    "--source",
+    type=str,
+    required=True,
+    help="The name of the project from which to migrate the data.",
+)
+@click.option(
+    "-d",
+    "--destination",
+    type=str,
+    required=True,
+    help="The name of the project to which to migrate the data.",
+)
+@click.option(
+    "-a",
+    "--animal",
+    type=str,
+    required=True,
+    help="The ID of the animal whose data to migrate.",
+)
+def migrate(source: str, destination: str, animal: str) -> None:
+    """Transfers all sessions for the specified animal from the source project to the target project."""
+    migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
