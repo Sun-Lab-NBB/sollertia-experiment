@@ -811,43 +811,51 @@ sle mesoscope migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
 
 This moves the animal's data across all accessible storage destinations.
 
-### MCP Servers
+### MCP Server
 
-This library provides two MCP servers that expose CLI functionality for AI agent integration.
+This library provides a single MCP server that exposes the tools backing the `sle get` and `sle mesoscope` CLI
+layers for AI agent integration. The server intentionally does not re-expose assets owned by the
+sollertia-shared-assets, ataraxis-video-system, and ataraxis-communication-interface dependencies; those are
+available through the dependencies' own MCP servers.
 
-#### Starting the Servers
+#### Starting the Server
 
-Start the MCP servers using the CLI:
+Start the MCP server using the CLI:
 
 ```bash
-sle get mcp      # Discovery and evaluation tools
-sle mesoscope mcp   # Mesoscope-VR data management tools
+sle mcp
 ```
 
-#### Available Tools (sle get MCP)
+#### Available Tools
+
+The general, hardware-agnostic tools mirror the `sle get` CLI layer:
 
 | Tool                                | Description                                                      |
 |-------------------------------------|------------------------------------------------------------------|
 | `get_zaber_devices_tool`            | Discovers Zaber motor devices connected to the system            |
-| `get_projects_tool`                 | Lists all projects configured for the acquisition system         |
-| `get_experiments_tool`              | Lists experiment configurations for a specified project          |
-| `get_experiment_info_tool`          | Returns detailed experiment configuration summary                |
-| `get_checksum_tool`                 | Calculates CRC32-XFER checksum for an input string               |
+| `get_checksum_tool`                 | Calculates the CRC32-XFER checksum for an input string           |
 | `get_zaber_device_settings_tool`    | Reads configuration from a Zaber device's non-volatile memory    |
 | `set_zaber_device_setting_tool`     | Writes configuration to a Zaber device's non-volatile memory     |
 | `validate_zaber_configuration_tool` | Validates a Zaber device's configuration for binding library use |
-| `check_mount_accessibility_tool`    | Verifies a filesystem path is accessible and writable            |
-| `check_system_mounts_tool`          | Verifies all configured filesystem paths are accessible          |
+| `check_mount_accessibility_tool`    | Verifies a filesystem path exists and is writable                |
 
-#### Available Tools (sle mesoscope MCP)
+The Mesoscope-VR-specific tools mirror the `sle mesoscope` CLI layer:
 
-| Tool                            | Description                                              |
-|---------------------------------|----------------------------------------------------------|
-| `preprocess_session_tool`       | Preprocesses a session's data on the host machine        |
-| `delete_session_tool`           | Removes a session from all storage locations             |
-| `migrate_animal_tool`           | Transfers all sessions for an animal between projects    |
-| `create_project_tool`           | Creates a new project directory structure                |
-| `create_experiment_config_tool` | Creates an experiment configuration from a task template |
+| Tool                                         | Description                                                  |
+|----------------------------------------------|--------------------------------------------------------------|
+| `read_system_configuration_tool`             | Loads the Mesoscope-VR system configuration                  |
+| `write_system_configuration_tool`            | Creates or replaces the Mesoscope-VR system configuration    |
+| `validate_system_configuration_tool`         | Validates the system configuration and reports mount status  |
+| `describe_system_configuration_schema_tool`  | Returns the system configuration dataclass schema            |
+| `check_system_mounts_tool`                   | Verifies all configured filesystem paths are accessible      |
+| `read_session_zaber_positions_tool`          | Loads a session's ZaberPositions snapshot                    |
+| `write_session_zaber_positions_tool`         | Creates or replaces a session's ZaberPositions snapshot      |
+| `read_session_mesoscope_positions_tool`      | Loads a session's MesoscopePositions snapshot                |
+| `write_session_mesoscope_positions_tool`     | Creates or replaces a session's MesoscopePositions snapshot  |
+| `read_session_system_configuration_tool`     | Loads a session's system configuration snapshot              |
+| `preprocess_session_tool`                    | Preprocesses a session's data on the host machine            |
+| `delete_session_tool`                        | Removes a session from all storage locations                 |
+| `migrate_animal_tool`                        | Transfers all sessions for an animal between projects        |
 
 #### Claude Desktop Configuration
 
@@ -856,13 +864,9 @@ Add the following to the Claude Desktop configuration file:
 ```json
 {
   "mcpServers": {
-    "sollertia-experiment-get": {
+    "sollertia-experiment": {
       "command": "sle",
-      "args": ["get", "mcp"]
-    },
-    "sollertia-experiment-manage": {
-      "command": "sle",
-      "args": ["mesoscope", "mcp"]
+      "args": ["mcp"]
     }
   }
 }

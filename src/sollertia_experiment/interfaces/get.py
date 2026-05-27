@@ -8,11 +8,13 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
-from .mcp_servers import run_get_server
 from ..cross_system import CRCCalculator, discover_zaber_devices
 
-# Ensures that displayed CLICK help messages are formatted according to the lab standard.
-CONTEXT_SETTINGS = {"max_content_width": 120}  # pragma: no cover
+CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
+"""Ensures that displayed Click help messages are formatted according to the lab standard."""
+
+_MICROCONTROLLER_BAUDRATE: int = 115200
+"""The baud rate used to communicate with the data acquisition system's microcontrollers during discovery."""
 
 
 @click.group("get", context_settings=CONTEXT_SETTINGS)
@@ -29,15 +31,14 @@ def get_zaber_devices() -> None:
 @get.command("cameras")
 def get_cameras() -> None:
     """Identifies the cameras accessible to the data acquisition system."""
-    # Discovers all compatible cameras from both interfaces.
     all_cameras = discover_camera_ids()
 
     # Separates cameras by interface for display purposes.
-    opencv_cameras = [cam for cam in all_cameras if cam.interface == CameraInterfaces.OPENCV]
-    harvesters_cameras = [cam for cam in all_cameras if cam.interface == CameraInterfaces.HARVESTERS]
+    opencv_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.OPENCV]
+    harvesters_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.HARVESTERS]
 
     # Displays OpenCV camera information.
-    if len(opencv_cameras) == 0:
+    if not opencv_cameras:
         console.echo(message="No OpenCV-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
         console.echo(
@@ -48,7 +49,7 @@ def get_cameras() -> None:
             ),
             level=LogLevel.WARNING,
         )
-        console.echo("Available OpenCV cameras:", level=LogLevel.SUCCESS)
+        console.echo(message="Available OpenCV cameras:", level=LogLevel.SUCCESS)
         for number, camera_data in enumerate(opencv_cameras, start=1):
             console.echo(
                 message=(
@@ -59,12 +60,12 @@ def get_cameras() -> None:
             )
 
     # Displays Harvesters camera information.
-    if len(harvesters_cameras) == 0:
+    if not harvesters_cameras:
         console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
-        # Note, Harvesters interface supports identifying the camera's model and serial number, which makes it easy to
-        # map discovered indices to physical hardware.
-        console.echo("Available Harvesters cameras:", level=LogLevel.SUCCESS)
+        # The Harvesters interface exposes the camera model and serial number, which makes it easy to map discovered
+        # indices to physical hardware.
+        console.echo(message="Available Harvesters cameras:", level=LogLevel.SUCCESS)
         for number, camera_data in enumerate(harvesters_cameras, start=1):
             console.echo(
                 message=(
@@ -79,7 +80,7 @@ def get_cameras() -> None:
 @get.command("controllers")
 def get_microcontrollers() -> None:
     """Identifies the microcontrollers accessible to the data acquisition system."""
-    _identify_microcontrollers.callback(baudrate=115200)  # type: ignore[misc]
+    _identify_microcontrollers.callback(baudrate=_MICROCONTROLLER_BAUDRATE)  # type: ignore[misc]
 
 
 @get.command("ports")
@@ -91,26 +92,12 @@ def get_ports() -> None:
 @get.command("checksum")
 @click.option(
     "-i",
-    "--input_string",
+    "--input-string",
     prompt="Enter the string for which to compute the checksum: ",
     help="The string for which to compute the checksum.",
 )
 def calculate_crc(input_string: str) -> None:
     """Calculates the CRC32-XFER checksum for the input string."""
     calculator = CRCCalculator()
-    crc_checksum = calculator.string_checksum(input_string)
-    click.echo(f"The CRC32-XFER checksum for the input string '{input_string}' is: {crc_checksum}.")
-
-
-@get.command("mcp")
-@click.option(
-    "-t",
-    "--transport",
-    type=str,
-    default="stdio",
-    show_default=True,
-    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
-)
-def start_get_mcp_server(transport: str) -> None:  # pragma: no cover
-    """Starts the MCP server for agentic access to 'sle get' tools."""
-    run_get_server(transport=transport)  # type: ignore[arg-type]
+    crc_checksum = calculator.string_checksum(string=input_string)
+    console.echo(message=f"The CRC32-XFER checksum for the input string '{input_string}' is: {crc_checksum}.")

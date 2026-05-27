@@ -13,7 +13,6 @@ import click
 from ataraxis_base_utilities import console
 from sollertia_shared_assets import SessionData, get_data_root
 
-from .mcp_servers import run_manage_server
 from ..mesoscope_vr import (
     purge_session,
     experiment_logic,
@@ -82,7 +81,7 @@ def maintain() -> None:
 )
 @click.option(
     "-w",
-    "--animal_weight",
+    "--animal-weight",
     type=float,
     required=True,
     help="The weight of the animal, in grams, at the beginning of the session.",
@@ -90,7 +89,7 @@ def maintain() -> None:
 @click.pass_context
 def run(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
     """Runs the specified data acquisition session for the target animal and project combination."""
-    # Store common parameters in the context dictionary to be accessible from the subcommands.
+    # Stores common parameters in the context dictionary to be accessible from the subcommands.
     ctx.ensure_object(dict)
     ctx.obj["user"] = user
     ctx.obj["project"] = project
@@ -120,13 +119,13 @@ def window_checking(ctx: click.Context) -> None:
 @run.command("lick-training")
 @click.option(
     "-t",
-    "--maximum_time",
+    "--maximum-time",
     type=int,
     help="The maximum time to run the training session, in minutes. Defaults to 20 minutes.",
 )
 @click.option(
     "-min",
-    "--minimum_delay",
+    "--minimum-delay",
     type=int,
     help=(
         "The minimum number of seconds that has to pass between two consecutive reward deliveries during training. "
@@ -135,7 +134,7 @@ def window_checking(ctx: click.Context) -> None:
 )
 @click.option(
     "-max",
-    "--maximum_delay",
+    "--maximum-delay",
     type=int,
     help=(
         "The maximum number of seconds that can pass between two consecutive reward deliveries during training. "
@@ -144,13 +143,13 @@ def window_checking(ctx: click.Context) -> None:
 )
 @click.option(
     "-v",
-    "--maximum_volume",
+    "--maximum-volume",
     type=float,
     help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -191,13 +190,13 @@ def lick_training(
 @run.command("run-training")
 @click.option(
     "-t",
-    "--maximum_time",
+    "--maximum-time",
     type=int,
     help="The maximum time to run the training session, in minutes. Defaults to 40 minutes.",
 )
 @click.option(
     "-is",
-    "--initial_speed",
+    "--initial-speed",
     type=float,
     help=(
         "The initial speed, in centimeters per second, the animal must maintain to obtain water rewards. "
@@ -206,7 +205,7 @@ def lick_training(
 )
 @click.option(
     "-id",
-    "--initial_duration",
+    "--initial-duration",
     type=float,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
@@ -215,7 +214,7 @@ def lick_training(
 )
 @click.option(
     "-it",
-    "--increase_threshold",
+    "--increase-threshold",
     type=float,
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
@@ -225,7 +224,7 @@ def lick_training(
 )
 @click.option(
     "-ss",
-    "--speed_step",
+    "--speed-step",
     type=float,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
@@ -234,7 +233,7 @@ def lick_training(
 )
 @click.option(
     "-ds",
-    "--duration_step",
+    "--duration-step",
     type=float,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
@@ -243,13 +242,13 @@ def lick_training(
 )
 @click.option(
     "-v",
-    "--maximum_volume",
+    "--maximum-volume",
     type=float,
     help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
 )
 @click.option(
     "-mit",
-    "--maximum_idle_time",
+    "--maximum-idle-time",
     type=float,
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain the speed that is below the speed threshold "
@@ -259,7 +258,7 @@ def lick_training(
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -317,7 +316,7 @@ def run_training(
 )
 @click.option(
     "-ur",
-    "--unconsumed_rewards",
+    "--unconsumed-rewards",
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
@@ -354,10 +353,10 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 )
 def preprocess(session_path: Path) -> None:
     """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
-    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
+    system_configuration = get_system_configuration()
     data_root = get_data_root()
 
-    # Prevent using this command on sessions that are not stored on the local host-machine, but accessible to its
+    # Prevents using this command on sessions that are not stored on the local host-machine, but accessible to its
     # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
     message = (
         f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
@@ -367,9 +366,8 @@ def preprocess(session_path: Path) -> None:
     if not session_path.is_relative_to(data_root):
         console.error(message=message, error=FileNotFoundError)
 
-    # Loads the SessionData instance for the processed session.
     session_data = SessionData.load(session_path=session_path)
-    preprocess_session_data(session_data)  # Runs the preprocessing logic.
+    preprocess_session_data(session_data)
 
 
 @mesoscope.command("delete")
@@ -388,13 +386,13 @@ def delete(session_path: Path) -> None:
     removes the session's data from all machines of the data acquisition system and all long-term storage destinations
     accessible to the data acquisition system.
     """
-    system_configuration = get_system_configuration()  # Retrieves the system configuration data.
+    system_configuration = get_system_configuration()
     data_root = get_data_root()
 
     # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
     # command safe, it reduces the risk of accidentally removing valid scientific data.
     message = (
-        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
+        f"Unable to delete the session's directory stored at the {session_path} path. The session's directory must "
         f"be located inside the data root of the {system_configuration.name} data acquisition system "
         f"({data_root})."
     )
@@ -432,17 +430,3 @@ def delete(session_path: Path) -> None:
 def migrate(source: str, destination: str, animal: str) -> None:
     """Transfers all sessions for the specified animal from the source project to the target project."""
     migrate_animal_between_projects(source_project=source, target_project=destination, animal=animal)
-
-
-@mesoscope.command("mcp")
-@click.option(
-    "-t",
-    "--transport",
-    type=str,
-    default="stdio",
-    show_default=True,
-    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
-)
-def start_mcp_server(transport: str) -> None:  # pragma: no cover
-    """Starts the MCP server for agentic access to 'sle mesoscope' tools."""
-    run_manage_server(transport=transport)  # type: ignore[arg-type]
