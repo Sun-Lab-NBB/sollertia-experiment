@@ -317,17 +317,16 @@ command on the ScanImagePC to save the screenshots into the shared Mesoscope out
 #### MATLAB Assets
 ScanImage software is written in MATLAB and controls all aspects of Mesoscope data acquisition. While each runtime
 requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation, all data
-acquisition runtimes using the sollertia-experiment library require the user to call the **setupAcquisition** MATLAB function
-available from [mesoscope assets repository](https://github.com/Sun-Lab-NBB/sollertia-mesoscope-assets). This function carries
-out multiple runtime-critical tasks, including setting up the acquisition, generating and applying the online motion
-correction algorithm, and allowing the VRPC to control the Mesoscope via creating or removing binary marker files.
+acquisition runtimes using the sollertia-experiment library require the user to call the **setupAcquisition** MATLAB
+function on the ScanImagePC. This function carries out multiple runtime-critical tasks, including setting up the
+acquisition, generating and applying the online motion correction, and allowing the VRPC to control the Mesoscope by
+creating or removing binary marker files.
 
-To configure MATLAB to access the mesoscope assets, git-clone the entire repository to the ScanImagePC. Then, follow the
-tutorials [here](https://www.mathworks.com/help/matlab/matlab_env/add-remove-or-reorder-folders-on-the-search-path.html)
-and add the path to the root mesoscope assets directory to MATLAB's search path. MATLAB can then use all
-functions from that repository, including the setupAcquisition function. The repository also contains the online
-motion estimation and correction assets developed in the [Pachitariu and Stringer lab](https://mouseland.github.io/),
-which are required for the setupAcquisition function to work as expected.
+The setupAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
+[Mesoscope-VR ScanImage PC assets guide](assets/mesoscope_vr/README.md) for instructions on deploying the function to
+the ScanImagePC and registering it with MATLAB's search path. The function relies on the MariusMotionEstimator
+and MariusMotionCorrector2 online motion-correction classes, which are provided as part of the ScanImage
+installation on the ScanImagePC.
 
 ### Mesoscope-VR Assembly
 ***This section is currently a placeholder. Since the final Mesoscope-VR system design is still a work in progress, it
