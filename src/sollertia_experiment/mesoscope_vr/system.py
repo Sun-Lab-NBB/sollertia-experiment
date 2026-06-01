@@ -7,23 +7,25 @@ from pathlib import Path
 from dataclasses import field, dataclass
 
 from ataraxis_video_system import EncoderSpeedPresets
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_base_utilities import console, ensure_directory_exists
 from sollertia_shared_assets import (
-    CONFIGURATION_DIRECTORY,
     AnimalData,
     SessionData,
     SessionTypes,
     AcquisitionSystems,
     get_data_root,
-    get_working_directory,
 )
 from ataraxis_data_structures import YamlConfig
 
 from ..vr_task import VRTaskConfiguration
-from ..cross_system import StorageDestination, StorageDestinations
-
-_SYSTEM_CONFIGURATION_FILENAME: str = "mesoscope_system_configuration.yaml"
-"""Canonical filename for the Mesoscope-VR system configuration YAML."""
+from ..cross_system import (
+    StorageDestination,
+    StorageDestinations,
+    SystemConfiguration,
+    get_system_configuration_data,
+    register_system_configuration,
+    create_system_configuration_file as _create_system_configuration_file,
+)
 
 MESOSCOPE_VR_SESSIONS: tuple[str, str, str, str] = (
     SessionTypes.LICK_TRAINING,
@@ -240,7 +242,7 @@ class MesoscopeVRAssets:
 
 
 @dataclass
-class MesoscopeSystemConfiguration(YamlConfig):
+class MesoscopeSystemConfiguration(SystemConfiguration):
     """Defines the hardware and software asset configuration for the Mesoscope-VR data acquisition system."""
 
     name: str = "mesoscope"
@@ -466,46 +468,21 @@ class _ScanImagePCData:
         ensure_directory_exists(path=self.persistent_data_path)
 
 
-def create_system_configuration_file(system: AcquisitionSystems | str = AcquisitionSystems.MESOSCOPE_VR) -> None:
-    """Creates the .YAML configuration file for the Mesoscope-VR data acquisition system and configures the local
+# Registers the Mesoscope-VR system configuration with the shared cross-system registry so the shared create / resolve
+# / load helpers can operate on it. The shared helpers own the file lifecycle; this package only adds the registration
+# and the typed get_system_configuration() wrapper below. The shared get_system_configuration_path is re-exported as-is.
+register_system_configuration(AcquisitionSystems.MESOSCOPE_VR, MesoscopeSystemConfiguration)
+
+
+def create_system_configuration_file() -> None:
+    """Creates the .yaml configuration file for the Mesoscope-VR data acquisition system and configures the local
     machine (PC) to use this file for all future acquisition-system-related calls.
 
-    Args:
-        system: The acquisition system name. Only ``AcquisitionSystems.MESOSCOPE_VR`` is supported in this package.
-
-    Raises:
-        ValueError: If the requested acquisition system is not supported by this package.
+    This package only supports the Mesoscope-VR acquisition system, so this thin wrapper always creates the
+    Mesoscope-VR configuration by delegating to the shared cross-system create_system_configuration_file, which owns
+    the file-creation logic.
     """
-    requested = AcquisitionSystems(str(system))
-    # noinspection PyUnreachableCode
-    if requested is not AcquisitionSystems.MESOSCOPE_VR:
-        message = (
-            f"Unable to generate the system configuration file for the acquisition system '{system}'. This package "
-            f"only supports '{AcquisitionSystems.MESOSCOPE_VR.value}'."
-        )
-        console.error(message=message, error=ValueError)
-
-    directory = get_working_directory().joinpath(CONFIGURATION_DIRECTORY)
-    ensure_directory_exists(path=directory)
-
-    # Removes any existing system configuration files to guarantee that exactly one remains after this call.
-    for existing in tuple(directory.glob("*_system_configuration.yaml")):
-        console.echo(message=f"Removing the existing configuration file {existing.name}...", level=LogLevel.INFO)
-        existing.unlink()
-
-    configuration_path = directory.joinpath(_SYSTEM_CONFIGURATION_FILENAME)
-    MesoscopeSystemConfiguration().save(path=configuration_path)
-
-    message = (
-        f"Mesoscope-VR data acquisition system configuration file: Saved to {configuration_path}. Edit the default "
-        f"parameters inside the configuration file to finish configuring the system."
-    )
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def get_system_configuration_path() -> Path:
-    """Returns the expected path to the Mesoscope-VR system configuration YAML under the working directory."""
-    return get_working_directory().joinpath(CONFIGURATION_DIRECTORY, _SYSTEM_CONFIGURATION_FILENAME)
+    _create_system_configuration_file(AcquisitionSystems.MESOSCOPE_VR)
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
@@ -516,28 +493,21 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
         The initialized MesoscopeSystemConfiguration instance that stores the loaded configuration parameters.
 
     Raises:
-        FileNotFoundError: If the local Sollertia platform working directory does not contain the expected Mesoscope-VR
-            system configuration file.
+        FileNotFoundError: If the local working directory does not contain exactly one system configuration file.
         TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
-    configuration_path = get_system_configuration_path()
-
-    if not configuration_path.exists():
-        message = (
-            f"Unable to load the Mesoscope-VR data acquisition system configuration. Expected the configuration file "
-            f"at {configuration_path}, but it does not exist. Call the 'sle mesoscope configure' CLI command to generate "
-            f"a default configuration file."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    system_configuration = MesoscopeSystemConfiguration.from_yaml(file_path=configuration_path)
-    if system_configuration.name != AcquisitionSystems.MESOSCOPE_VR.value:
+    system_configuration = get_system_configuration_data()
+    if not isinstance(system_configuration, MesoscopeSystemConfiguration):
+        belongs_to = getattr(system_configuration, "name", "an unknown")
         message = (
             f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
-            f"belongs to the {system_configuration.name} data acquisition system. Use the 'sle mesoscope configure' CLI "
-            f"command to reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
+            f"belongs to the {belongs_to} data acquisition system. Use the 'sle mesoscope configure' CLI command to "
+            f"reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
         )
         console.error(message=message, error=TypeError)
+        # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
+        # noinspection PyUnreachableCode
+        raise TypeError(message)  # pragma: no cover
     return system_configuration
 
 

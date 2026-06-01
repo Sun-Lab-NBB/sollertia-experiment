@@ -11,9 +11,9 @@ from .system import (
     MesoscopeStorageDestination,
     MesoscopeSystemConfiguration,
     get_system_configuration,
-    get_system_configuration_path,
     create_system_configuration_file,
 )
+from ..cross_system import get_system_configuration_path
 from .data_acquisition import (
     experiment_logic,
     maintenance_logic,
