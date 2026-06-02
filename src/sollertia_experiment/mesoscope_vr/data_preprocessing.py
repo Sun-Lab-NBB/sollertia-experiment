@@ -204,10 +204,15 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     Notes:
         The migration strategy depends on whether the host-machine is configured with any long-term storage
         destinations. Systems with at least one configured destination treat the preferred (first configured)
-        destination as the source of truth and pull, re-preprocess, and purge each session. Systems without any
-        configured destination keep all data on the acquisition host machine, so the migration reduces to an
-        on-premises operation that relocates each locally stored session to the target project directory and reassigns
-        it. The persistent data relocation and the cleanup of redundant directories apply to both modes.
+        destination as the source of truth. They preprocess any sessions that still reside only on the host machine,
+        then pull, re-preprocess, and purge each session. Systems without any configured destination keep all data on
+        the acquisition host machine, so the migration reduces to an on-premises operation that relocates each locally
+        stored session to the target project directory and reassigns it. The persistent data relocation and the cleanup
+        of redundant directories apply to both modes.
+
+        The migration fails with an error if any session cannot be preprocessed or migrated. Each session is handled as
+        an isolated unit that cleans up after itself on failure, so re-running the migration after resolving the error
+        resumes from the failed session without manual intervention.
 
     Args:
         animal: The animal for which to migrate the data.
@@ -260,8 +265,6 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
             destination_root=preferred_root.joinpath(source_project, animal),
             source_local_root=source_local_root,
             destination_local_root=destination_local_root,
-            animal=animal,
-            source_project=source_project,
             target_project=target_project,
         )
 
@@ -869,17 +872,22 @@ def _migrate_sessions_via_destination(
     destination_root: Path,
     source_local_root: Path,
     destination_local_root: Path,
-    animal: str,
-    source_project: str,
     target_project: str,
 ) -> None:
     """Migrates the animal's sessions from the source to the target project using a long-term storage destination as
     the source of truth.
 
     Notes:
-        This helper supports systems that transfer their data to long-term storage destinations. It requires the local
-        source project directory to be free of non-preprocessed sessions, then pulls each destination-stored session to
-        the host machine, re-preprocesses it under the target project, and purges the obsolete source-project copies.
+        This helper supports systems that transfer their data to long-term storage destinations. It first preprocesses
+        any sessions that still reside only on the host machine under the source project, which moves them to the
+        long-term storage destinations so the destination holds the authoritative copy of every session. It then pulls
+        each destination-stored session to the host machine, re-preprocesses it under the target project, and purges the
+        obsolete source-project copies.
+
+        Each session is migrated as an isolated unit. When migrating a session fails, the helper removes the in-flight
+        source-project marker it recreated while pulling the session and re-raises the error. This keeps a failed run
+        re-runnable: already-migrated sessions have been purged from the source and no longer surface during discovery,
+        so the resumed migration continues from the failed session.
 
     Args:
         destination_name: The name of the long-term storage destination used as the source of truth, used in status
@@ -887,50 +895,53 @@ def _migrate_sessions_via_destination(
         destination_root: The path to the animal's source-project directory on the long-term storage destination.
         source_local_root: The path to the animal's source-project directory on the acquisition host machine.
         destination_local_root: The path to the animal's target-project directory on the acquisition host machine.
-        animal: The animal for which to migrate the data.
-        source_project: The name of the project from which to migrate the data.
         target_project: The name of the project to which the data should be migrated.
     """
     console.echo(
         message=f"Using the {destination_name} long-term storage destination as the migration source of truth."
     )
 
-    # Ensures that all locally stored sessions have been processed and moved to a long-term storage destination. This
-    # guarantees that the destination holds the authoritative copy of every session before the migration relocates it.
-    local_sessions = discover_sessions(root_path=source_local_root)
-    if local_sessions:
-        message = (
-            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"source project directory on the VRPC contains non-preprocessed session data. "
-            f"Preprocess all locally stored sessions before starting the migration process."
-        )
-        console.error(message=message, error=FileNotFoundError)
+    # Preprocesses any sessions that still reside only on the host machine under the source project, moving them to the
+    # long-term storage destinations. This guarantees the destination holds the authoritative copy of every session
+    # before the migration relocates it. Preprocessing is idempotent and removes each local copy only after a
+    # successful transfer, so an interrupted preprocessing run can be safely re-run.
+    for session in discover_sessions(root_path=source_local_root):
+        console.echo(message=f"Preprocessing non-migrated local session {session.name}...")
+        preprocess_session_data(session_data=SessionData.load(session_path=session))
 
-    # Loops over all sessions stored on the long-term storage destination and processes them sequentially.
-    sessions = discover_sessions(root_path=destination_root)
-    for session in sessions:
+    # Loops over all sessions stored on the long-term storage destination and migrates them sequentially.
+    for session in discover_sessions(root_path=destination_root):
         console.echo(message=f"Migrating session {session.name}...")
         local_session_path = destination_local_root.joinpath(session.name)
         old_session_data_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
 
-        # Pulls the session to the local machine and reassigns it to the target project.
-        session_data = migrate_session_directory(
-            remote_session_path=destination_root.joinpath(session.name),
-            local_session_path=local_session_path,
-            old_session_data_path=old_session_data_path,
-            target_project=target_project,
-            threads=30,
-        )
+        migrated = False
+        try:
+            # Pulls the session to the local machine and reassigns it to the target project.
+            session_data = migrate_session_directory(
+                remote_session_path=destination_root.joinpath(session.name),
+                local_session_path=local_session_path,
+                old_session_data_path=old_session_data_path,
+                target_project=target_project,
+                threads=30,
+            )
 
-        # Runs preprocessing on the session's data again, which regenerates the checksum and transfers the data to
-        # all configured long-term storage destinations.
-        preprocess_session_data(session_data=session_data)
+            # Runs preprocessing on the session's data again, which regenerates the checksum and transfers the data to
+            # all configured long-term storage destinations under the target project.
+            preprocess_session_data(session_data=session_data)
 
-        # Removes the now-obsolete long-term storage and VRPC directories. To do so, first marks the old session for
-        # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
-        old_session_data = SessionData.load(session_path=old_session_data_path.parents[1])
-        old_session_data.raw_data.nk_path.touch()
-        purge_session(old_session_data)
+            # Removes the now-obsolete long-term storage and VRPC directories. To do so, first marks the old session for
+            # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
+            old_session_data = SessionData.load(session_path=old_session_data_path.parents[1])
+            old_session_data.raw_data.nk_path.touch()
+            purge_session(old_session_data)
+            migrated = True
+        finally:
+            # On a failed or interrupted migration, removes the in-flight source-project marker recreated while pulling
+            # the session. Otherwise, the bare marker would surface as a non-migrated local session on the next run and
+            # corrupt the resumed migration. The local target copy is left as-is, since pulling overwrites it on retry.
+            if not migrated:
+                delete_directory(directory_path=old_session_data_path.parents[1])
 
 
 def _migrate_sessions_on_premises(
