@@ -35,7 +35,7 @@ ___
 
 - [Installation](#installation)
 - [Data Acquisition Systems](#data-acquisition-systems)
-- [Mesoscope-VR System](#mesoscope-vr-data-acquisition-system)
+- [Mesoscope-VR Data Acquisition System](#mesoscope-vr-data-acquisition-system)
 - [Acquired Data Structure and Management](#acquired-data-structure-and-management)
 - [Acquiring Data](#acquiring-data)
 - [API Documentation](#api-documentation)
@@ -51,18 +51,18 @@ ___
 
 ### Source
 
-Note, installation from source is ***highly discouraged*** for anyone who is not an active project developer.
+***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
    [stable releases](https://github.com/Sun-Lab-NBB/sollertia-experiment/releases).
 2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
-3. ```cd``` to the root directory of the prepared project distribution.
-4. Run ```python -m pip install .``` to install the project. Alternatively, if using a distribution with precompiled
-   binaries, use ```python -m pip install WHEEL_PATH```, replacing 'WHEEL_PATH' with the path to the wheel file.
+3. `cd` to the root directory of the prepared project distribution.
+4. Run `python -m pip install .` to install the project. Alternatively, if using a distribution with precompiled
+   binaries, use `python -m pip install WHEEL_PATH`, replacing 'WHEEL_PATH' with the path to the wheel file.
 
 ### pip
 
-Use the following command to install the library using pip: ```pip install sollertia-experiment```.
+Use the following command to install the library using pip: `pip install sollertia-experiment`.
 
 ___
 
@@ -82,7 +82,7 @@ components of that system are built around the Mesoscope to facilitate the acqui
 to this inherent specialization, each Sollertia platform data acquisition system is treated as an independent unit
 that requires custom software to acquire, preprocess, and process the resultant data.
 
-***Note!*** Since each data acquisition system is unique, the section below is iteratively expanded to include
+***Note,*** Since each data acquisition system is unique, the section below is iteratively expanded to include
 system-specific assembly instructions for **each supported acquisition system**. Commonly, updates to this section
 coincide with major or minor library version updates.
 
@@ -114,7 +114,7 @@ This is the flagship Sollertia platform data acquisition system. The system broa
   window system architecture.
 
 ### Software Dependencies
-***Note!*** This list only includes *external dependencies*, which are installed *in addition* to all
+***Note,*** This list only includes *external dependencies*, which are installed *in addition* to all
 dependencies automatically installed from pip / conda as part of library installation. The dependencies below have to
 be installed and configured on the **VRPC** before calling runtime commands via the command line interface (CLI) exposed
 by this library.
@@ -131,7 +131,7 @@ by this library.
 
 ### Hardware Dependencies
 
-**Note!** These dependencies only apply to the **VRPC**. Hardware dependencies for the **ScanImagePC** are determined
+***Note,*** These dependencies only apply to the **VRPC**. Hardware dependencies for the **ScanImagePC** are determined
 and controlled by MBF and ThorLabs. This library benefits from the **ScanImagePC** being outfitted with a 10-GB network
 card, but this is not a strict requirement.
 
@@ -149,8 +149,8 @@ card, but this is not a strict requirement.
 
 ### System Assembly
 
-The Mesoscope-VR system consists of multiple interdependent components. We are constantly making minor changes to the
-system to optimize its performance and facilitate novel experiments and projects. Treat this section as a general
+The Mesoscope-VR system consists of multiple interdependent components. It is continually refined with minor changes
+to optimize its performance and facilitate novel experiments and projects. Treat this section as a general
 system composition guide, but consult the original publication for each project over this section for instructions on
 building specific system implementations used to acquire the data featured in different publications.
 
@@ -174,7 +174,7 @@ The current snapshot of Zaber motor configurations used by the Sollertia platfor
 electrical wiring instructions, is available
 [here](https://drive.google.com/drive/folders/1SL75KE3S2vuR9TTkxe6N4wvrYdK-Zmxn?usp=drive_link).
 
-**Warning!** Zaber motors have to be configured correctly to work with this library. To (re)configure the motors to work
+***Warning!*** Zaber motors have to be configured correctly to work with this library. To (re)configure the motors to work
 with the library, apply the setting snapshots from the link above via the
 [Zaber Launcher](https://software.zaber.com/zaber-launcher/download) software. Read the instructions in
 the 'Applying Zaber Configuration' document for the correct application procedure.
@@ -201,7 +201,7 @@ the data expected by this library:
    the device should be moved as part of the 'park' command and the shut-down sequence. This is used to position all
    motors in a way that guarantees they can be safely 'homed' at the beginning of the next runtime. Therefore, each
    park position has to be selected so that each motor can move to their 'home' sensor without colliding with any other
-   motor **simultaneously** moving towards their 'home' position. **Note!** The LickPort uses the 'park' position as
+   motor **simultaneously** moving towards their 'home' position. ***Note,*** The LickPort uses the 'park' position as
    the **default** imaging position. During runtime, it moves to the 'park' position if it has no animal-specific
    position to use during imaging. Therefore, the park position for the LickPort should always be set so that
    it cannot harm the animal mounted in the Mesoscope enclosure while moving to the park position from any other
@@ -243,7 +243,7 @@ Unity work with this library, each project-specific Unity task must use the bind
 [sollertia-unity-tasks repository](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks). Follow the instructions from that repository to
 set up Unity Game engine to interface with this library and to create new virtual task environments.
 
-**Note!** This library does not contain tools to initialize Unity Game engine. The desired Virtual Reality task
+***Note,*** This library does not contain tools to initialize Unity Game engine. The desired Virtual Reality task
 has to be started ('armed') ***manually*** before entering the main runtime (data acquisition session) cycle. The main
 Unity repository contains more details about starting the virtual reality tasks when running experiments. During
 CLI-driven experiment runtimes, the library instructs the user when to 'arm' the Unity game engine.
@@ -289,7 +289,7 @@ To access the **surgery log** and the **water restriction log** Google Sheets as
 and share these log files with the email of the service account created above. The service account requires **Editor**
 access to both files.
 
-**Note!** This feature requires that both log files are formatted according to the available Sollertia platform
+***Note,*** This feature requires that both log files are formatted according to the available Sollertia platform
 templates. Otherwise, the parsing algorithm does not behave as expected, leading to runtime failures. Additionally, both log files
 have to be pre-filled in advance, as the processing code is not allowed to automatically generate new table (log) rows.
 **Hint!** Currently, it is advised to pre-fill the data a month in advance. Since most experiments last for at most a
@@ -410,7 +410,7 @@ All data acquired by this library is stored under the **raw_data** subdirectory,
 an example path to the acquired (raw) data can therefore look like this:
 `/media/Data/Experiments/Template/666/2025-11-11-05-03-234123/raw_data/`.
 
-***Note!*** This library treats **both** newly acquired and preprocessed data as **raw**. This is because preprocessing
+***Note,*** This library treats **both** newly acquired and preprocessed data as **raw**. This is because preprocessing
 **does not change the content of the data**. Instead, preprocessing uses lossless compression to more efficiently
 package the data for transmission and can at any time be converted back to the original format.
 
@@ -420,12 +420,12 @@ The section below briefly lists the data acquired by **all** Sollertia platform 
 system also generates **system-specific** data, which is listed under acquisition-system-specific sections available
 after this section.
 
-**Note!** For information about the **processed** data, see the
+***Note,*** For information about the **processed** data, see the
 [main data processing library](https://github.com/Sun-Lab-NBB/sollertia-forgery).
 
 After acquisition and preprocessing, the **raw_data** directory of each acquisition system contains, as a minimum, the
 following files and subdirectories:
-1. **ax_checksum.txt**: Stores the xxHash-128 checksum used to verify data integrity when it is transferred to the
+1. **ax_checksum.txt**: Stores the xxHash3-128 checksum used to verify data integrity when it is transferred to the
    long-term storage destination. The checksum is generated before the data leaves the main data acquisition system PC
    and, therefore, accurately captures the final state of the raw data before it enters storage.
 2. **hardware_state.yaml**: Stores the snapshot of the dynamically calculated parameters used by the data acquisition
@@ -516,7 +516,7 @@ raw data section on the VRPC:
    motors to the same position during the next session.
 3. **mesoscope_positions.yaml**: Stores the snapshot of the Mesoscope objective position in the physical axes (X, Y, Z, 
    and Roll), the virtual ScanImage axes (Fast Z, Tip, and Tilt), and the laser power at the sample, taken at the end of
-   the session's data acquisition. **Note!** This file relies on the experimenter updating the stored positions. It is 
+   the session's data acquisition. ***Note,*** This file relies on the experimenter updating the stored positions. It is 
    only created for window checking and experiment sessions. A copy of this snapshot file is also saved to the 
    *persistent_data* directory of the animal to support restoring the Mesoscope to the same imaging field during the 
    next session.
@@ -591,7 +591,7 @@ Failure to do so may damage the equipment or harm the animal!
 The sollertia-experiment library exposes two top-level CLI command groups: the general `sle get` group and the
 Mesoscope-VR `sle mesoscope` group.
 
-| Command                    | Purpose                                                              |
+| Command                    | Description                                                          |
 |----------------------------|----------------------------------------------------------------------|
 | `sle get`                  | Discover and evaluate data acquisition system components (general)   |
 | `sle mesoscope configure`  | Generate the Mesoscope-VR data acquisition system configuration file |
@@ -620,7 +620,7 @@ library) and view it with the `slsa get data-root` command. The data root must b
 acquisition sessions. The root directories of any long-term storage destinations are not set this way; they remain
 part of the system configuration.
 
-***Note!*** Each acquisition system uses unique configuration parameters. Additionally, the sollertia-experiment library always
+***Note,*** Each acquisition system uses unique configuration parameters. Additionally, the sollertia-experiment library always
 assumes that any machine (PC) can only be used by a single data-acquisition system (is permanently a part of that
 acquisition system). Only the **main** PC of the data acquisition system (e.g.: the VRPC of the Mesoscope-VR system)
 that runs the sollertia-experiment library should be configured via this command.
@@ -695,7 +695,7 @@ surface material of the running wheel, which slowly deteriorates as the wheel is
 This command can also facilitate cleaning the wheel, which is typically done before and after each runtime to remove
 any biological contaminants left by each animal participating in experiment or training runtimes.
 
-***Note!*** This runtime uses a GUI-based interface for issuing commands and monitoring the system state.
+***Note,*** This runtime uses a GUI-based interface for issuing commands and monitoring the system state.
 
 ### Step 5: Acquiring Data
 
@@ -779,7 +779,7 @@ Preprocessing consists of two major steps. The first step pulls all available da
 machine (PC) and re-packages (re-compresses) the data to reduce its size without loss. The second step distributes
 (pushes) the data to all configured long-term storage destinations, such as a Server and a NAS.
 
-**Critical!** It is imperative that **all** valid data acquired in the lab undergoes preprocessing
+***Critical!*** It is imperative that **all** valid data acquired in the lab undergoes preprocessing
 **as soon as possible**. Only preprocessed data is stored in a way that maximizes its safety by using both
 redundancy and parity. Data that is not preprocessed may be **lost** in the case of emergency, which is considerably
 less likely for the preprocessed data.
@@ -798,7 +798,7 @@ long-term storage destinations. This runtime is extremely dangerous and, if not 
 sle mesoscope delete -sp SESSION_PATH
 ```
 
-**Warning!** This command is not recommended for most users.
+***Warning!*** This command is not recommended for most users.
 
 #### Migrating Animal Data Between Projects
 
@@ -871,6 +871,13 @@ Add the following to the Claude Desktop configuration file:
 }
 ```
 
+#### Client Registration
+
+MCP server registration and Claude Code skill assets for this library are distributed through the
+[sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace as part of the **experiment**
+plugin. Install the plugin from the marketplace to automatically register the MCP server with
+compatible clients and make all associated skills available.
+
 ___
 
 ## API Documentation
@@ -897,7 +904,7 @@ soft interruptions are supported for most external assets, which includes anythi
 sollertia-experiment library and the main data acquisition system PC. While inconvenient, these
 interruptions do not typically require specialized handling other than recovering and restoring the failed asset.
 
-**Note!** While most soft interruptions typically entail resuming the interrupted runtime, it is also possible to
+***Note,*** While most soft interruptions typically entail resuming the interrupted runtime, it is also possible to
 instead terminate the runtime. To do so, execute the `terminate` command via the GUI instead of trying to resume
 the runtime. In this case, the system attempts to execute a graceful shutdown procedure, saving all valid data in the
 process.
@@ -924,7 +931,7 @@ instructions:
    critical! If this is not done, the motor cannot home during the next session and instead collides
    with the movement guard, at best damaging the motor and, at worst, the Mesoscope.
 5. If the session involved Mesoscope imaging, **rename the mesoscope_data directory to use the session name**.
-   For example, from mesoscope_data → 2025-11-11-05-03-234123. **Critical!** if this is not done, the library may
+   For example, from mesoscope_data → 2025-11-11-05-03-234123. ***Critical!*** if this is not done, the library may
    **delete** any leftover Mesoscope files during the next runtime and cannot properly preprocess the frames for the
    interrupted session during the next step.
 6. Call `sle mesoscope preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
