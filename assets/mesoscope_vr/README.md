@@ -24,6 +24,8 @@ The `setupAcquisition` function is designed to work with the `MariusMotionEstima
 the ScanImage installation on the ScanImagePC and are assumed to be available; they are not
 distributed with this repository.
 
+___
+
 ## Table of Contents
 
 - [Dependencies](#dependencies)
@@ -31,6 +33,8 @@ distributed with this repository.
 - [Usage](#usage)
 - [Authors](#authors)
 - [Acknowledgments](#acknowledgments)
+
+___
 
 ## Dependencies
 
@@ -43,6 +47,8 @@ assembles the machine (MBF Bioscience and ThorLabs):
   by the `MariusMotionEstimator` class for fast online motion detection and correction.
 - An [NVIDIA CUDA GPU](https://www.nvidia.com/en-us/), used to accelerate online motion detection
   and correction.
+
+___
 
 ## Registering the Asset with MATLAB
 
@@ -62,6 +68,8 @@ the Command Window.
 ***Note,*** the `MariusMotionEstimator` and `MariusMotionCorrector2` motion-correction classes must
 be present in the ScanImage installation for `setupAcquisition` to work. These classes ship with
 ScanImage and require no separate registration.
+
+___
 
 ## Usage
 
@@ -89,13 +97,17 @@ In most cases, the function executes three major steps:
 argument set to `true`. In this mode, it skips steps 1 and 2, loads the existing `MotionEstimator.me`
 file, and proceeds directly to step 3.
 
+___
+
 ## Authors
 
 - Ivan Kondratyev ([Inkaros](https://github.com/Inkaros))
 
+___
+
 ## Acknowledgments
 
 - The members of the [Pachitariu and Stringer lab](https://mouseland.github.io/) and Georg Jaindl,
-  who developed the `MariusMotionEstimator` and `MariusMotionCorrector` motion-correction classes
+  who developed the `MariusMotionEstimator` and `MariusMotionCorrector2` motion-correction classes
   distributed with ScanImage, and the original z-stack acquisition routine that `setupAcquisition`
   is derived from.
