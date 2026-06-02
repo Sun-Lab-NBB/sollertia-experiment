@@ -131,6 +131,10 @@ class MesoscopeCameras:
     """The quantization parameter used by the face camera to encode acquired frames as video files."""
     face_camera_preset: EncoderSpeedPresets = EncoderSpeedPresets.SLOWEST
     """The encoding speed preset used by the face camera to encode acquired frames as video files."""
+    face_camera_configuration_path: Path = Path()
+    """The absolute path to the GenICam configuration .yaml file that records the expected node configuration of the
+    face camera. An empty path means no stored configuration is associated with this camera. When set, it is used to
+    verify, dump, or restore the camera's GenICam configuration."""
     body_camera_index: int = 1
     """The index of the body camera in the list of all available Harvester-managed cameras."""
     body_camera_display_frame_rate: int = 25
@@ -140,6 +144,10 @@ class MesoscopeCameras:
     """The quantization parameter used by the body camera to encode acquired frames as video files."""
     body_camera_preset: EncoderSpeedPresets = EncoderSpeedPresets.SLOWEST
     """The encoding speed preset used by the body camera to encode acquired frames as video files."""
+    body_camera_configuration_path: Path = Path()
+    """The absolute path to the GenICam configuration .yaml file that records the expected node configuration of the
+    body camera. An empty path means no stored configuration is associated with this camera. When set, it is used to
+    verify, dump, or restore the camera's GenICam configuration."""
 
 
 @dataclass(slots=True)

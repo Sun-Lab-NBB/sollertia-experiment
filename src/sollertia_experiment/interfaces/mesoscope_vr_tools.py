@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from pathlib import Path
+from contextlib import contextmanager
 
+from ataraxis_video_system import GenicamConfiguration
 from sollertia_shared_assets import SessionData, get_data_root
+from ataraxis_video_system.camera import HarvestersCamera
 
 from .mcp_instance import mcp, read_yaml, serialize, probe_writable, describe_dataclass, write_yaml_validated
 from ..mesoscope_vr import (
@@ -18,6 +21,9 @@ from ..mesoscope_vr import (
     get_system_configuration_path,
     migrate_animal_between_projects,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 _ZABER_POSITIONS_FILENAME: str = "zaber_positions.yaml"
 """Canonical filename for the per-session ZaberPositions YAML."""
@@ -94,6 +100,35 @@ def validate_system_configuration_tool() -> dict[str, Any]:
         f"{name}: {report.get('error', 'not ok')}" for name, report in paths.items() if not report.get("ok", False)
     ]
     return {"valid": not issues, "issues": issues, "paths": paths}
+
+
+@mcp.tool()
+def verify_camera_configuration_tool() -> dict[str, Any]:
+    """Compares each camera's live GenICam configuration against its stored configuration .yaml file.
+
+    For every camera in the active Mesoscope-VR system configuration that declares a configuration file path, this
+    tool connects to the camera, dumps its current GenICam node configuration, and diffs it against the stored
+    configuration file. Cameras whose configuration path is unset are reported as not configured.
+
+    Returns:
+        A dictionary with a ``cameras`` key mapping each camera role to its verification report, or ``{"error": ...}``
+        if the active system configuration cannot be loaded.
+    """
+    try:
+        configuration = get_system_configuration()
+    except (FileNotFoundError, OSError, ValueError) as exception:
+        return {"error": str(exception)}
+
+    cameras = configuration.cameras
+    targets = (
+        ("face_camera", cameras.face_camera_index, cameras.face_camera_configuration_path),
+        ("body_camera", cameras.body_camera_index, cameras.body_camera_configuration_path),
+    )
+    report: dict[str, Any] = {
+        role: _verify_single_camera(camera_index=camera_index, configuration_path=configuration_path)
+        for role, camera_index, configuration_path in targets
+    }
+    return {"cameras": report}
 
 
 @mcp.tool()
@@ -411,3 +446,93 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
         report["configured"] = True
         paths[report_key] = report
     return paths
+
+
+def _diff_genicam_configurations(stored: GenicamConfiguration, live: GenicamConfiguration) -> dict[str, Any]:
+    """Builds a structured diff between a stored and a live GenICam camera configuration.
+
+    Args:
+        stored: The configuration loaded from the stored .yaml file.
+        live: The configuration dumped from the connected camera.
+
+    Returns:
+        A dictionary describing the camera-identity match, per-node value mismatches, and the nodes present in only
+        one of the two configurations, plus an overall ``match`` flag that is True only when the camera identities
+        match and every stored node is present on the live camera with the stored value.
+    """
+    identity_match = (
+        stored.camera_model == live.camera_model and stored.camera_serial_number == live.camera_serial_number
+    )
+
+    stored_nodes = {node.name: node.value for node in stored.nodes}
+    live_nodes = {node.name: node.value for node in live.nodes}
+
+    value_mismatches = [
+        {"name": name, "stored": stored_nodes[name], "live": live_nodes[name]}
+        for name in sorted(stored_nodes.keys() & live_nodes.keys())
+        if stored_nodes[name] != live_nodes[name]
+    ]
+    nodes_only_in_stored = sorted(stored_nodes.keys() - live_nodes.keys())
+    nodes_only_in_live = sorted(live_nodes.keys() - stored_nodes.keys())
+
+    return {
+        "match": identity_match and not value_mismatches and not nodes_only_in_stored,
+        "identity_match": identity_match,
+        "camera_model": {"stored": stored.camera_model, "live": live.camera_model},
+        "camera_serial_number": {"stored": stored.camera_serial_number, "live": live.camera_serial_number},
+        "value_mismatches": value_mismatches,
+        "nodes_only_in_stored": nodes_only_in_stored,
+        "nodes_only_in_live": nodes_only_in_live,
+    }
+
+
+def _verify_single_camera(camera_index: int, configuration_path: Path) -> dict[str, Any]:
+    """Verifies a single camera's live GenICam configuration against its stored configuration .yaml file.
+
+    Args:
+        camera_index: The index of the Harvester-managed camera to connect to and dump the live configuration from.
+        configuration_path: The path to the stored GenICam configuration .yaml file. An unset (empty) path means the
+            camera has no associated stored configuration.
+
+    Returns:
+        A dictionary with ``configured`` and, when a stored configuration is present, either an ``error`` describing
+        why verification could not complete or the structured diff produced by ``_diff_genicam_configurations``.
+    """
+    if configuration_path == Path():
+        return {"configured": False}
+    if not configuration_path.exists():
+        return {"configured": True, "error": f"Stored camera configuration file not found: {configuration_path}"}
+    try:
+        stored = GenicamConfiguration.from_yaml(file_path=configuration_path)
+    except Exception as exception:
+        return {"configured": True, "error": f"Failed to load stored camera configuration: {exception}"}
+
+    try:  # pragma: no cover
+        with _harvester_connection(camera_index=camera_index) as camera:
+            live = camera.get_configuration()
+    except Exception as exception:  # pragma: no cover
+        return {"configured": True, "error": f"Failed to read live camera configuration: {exception}"}
+
+    return {"configured": True, **_diff_genicam_configurations(stored=stored, live=live)}  # pragma: no cover
+
+
+@contextmanager
+def _harvester_connection(camera_index: int) -> Generator[HarvestersCamera]:  # pragma: no cover
+    """Opens a temporary connection to a Harvesters camera and guarantees disconnection on exit.
+
+    Mirrors the connection helper used by ataraxis-video-system: a HarvestersCamera is created with a placeholder
+    system_id (only GenICam node-map access is needed) and is always disconnected on exit to release the GenTL handle
+    for other processes.
+
+    Args:
+        camera_index: The index of the Harvesters camera to connect to.
+
+    Yields:
+        The connected HarvestersCamera instance.
+    """
+    camera = HarvestersCamera(system_id=0, camera_index=camera_index)
+    try:
+        camera.connect()
+        yield camera
+    finally:
+        camera.disconnect()
