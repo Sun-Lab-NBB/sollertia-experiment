@@ -1409,9 +1409,9 @@ class _MesoscopeVRSystem:
             self._logger.input_queue.put(log_package)
 
             message = (
-                "Address the issue that prevents Unity game engine from running and resume the runtime. Re-arm the "
-                "Unity scene (hit the 'play' button) before resuming the runtime. Alternatively, terminate the runtime "
-                "to attempt graceful shutdown."
+                "Address the issue that prevents the Unity game engine from running, then resume the runtime. The "
+                "system automatically re-arms the Unity scene through the editor bridge on resume. Alternatively, "
+                "terminate the runtime to attempt graceful shutdown."
             )
             console.echo(message=message, level=LogLevel.INFO)
 

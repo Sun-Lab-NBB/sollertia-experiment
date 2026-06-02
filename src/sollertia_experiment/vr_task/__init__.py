@@ -2,6 +2,7 @@
 https://github.com/Sun-Lab-NBB/sollertia-unity-tasks.
 """
 
+from .bridge import UnityBridgeError, UnityBridgeClient
 from .driver import VRTaskEvent, VRTaskState, VRTaskDriver, VRTaskEventKind
 from .configuration import VRTaskConfiguration, load_vr_task_template
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
@@ -9,6 +10,8 @@ from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decomp
 __all__ = [
     "CachedMotifDecomposer",
     "DecomposedTrials",
+    "UnityBridgeClient",
+    "UnityBridgeError",
     "VRTaskConfiguration",
     "VRTaskDriver",
     "VRTaskEvent",
