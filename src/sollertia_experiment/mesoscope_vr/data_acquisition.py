@@ -1474,7 +1474,7 @@ def _verify_animal_project_membership(
         message = (
             f"Unable to execute the {session_description} for the animal {animal_id} participating in the project "
             f"{project_name}. The animal is already associated with a different project '{animal_projects[0]}' managed "
-            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle manage migrate' "
+            f"by the {system_configuration.name} data acquisition system. If necessary, use the 'sle mesoscope migrate' "
             f"CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
