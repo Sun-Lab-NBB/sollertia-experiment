@@ -8,6 +8,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
 
+from ..vr_task import UnityBridgeClient
 from ..cross_system import CRCCalculator, discover_zaber_devices
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
@@ -87,6 +88,23 @@ def get_microcontrollers() -> None:
 def get_ports() -> None:
     """Identifies the serial communication ports accessible to the data acquisition system."""
     print_available_ports()
+
+
+@get.command("unity")
+def get_unity_bridge() -> None:
+    """Checks whether the Unity Editor MCP Bridge is reachable for Virtual Reality task sessions."""
+    client = UnityBridgeClient()
+    try:
+        if client.is_reachable():
+            console.echo(message=client.describe_status(), level=LogLevel.SUCCESS)
+        else:
+            message = (
+                "Unity bridge: unreachable. Open the Unity project in the editor to enable Virtual Reality task "
+                "control; its MCP bridge starts automatically with the editor."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+    finally:
+        client.close()
 
 
 @get.command("checksum")

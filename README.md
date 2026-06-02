@@ -243,10 +243,11 @@ Unity work with this library, each project-specific Unity task must use the bind
 [sollertia-unity-tasks repository](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks). Follow the instructions from that repository to
 set up Unity Game engine to interface with this library and to create new virtual task environments.
 
-***Note,*** This library does not contain tools to initialize Unity Game engine. The desired Virtual Reality task
-has to be started ('armed') ***manually*** before entering the main runtime (data acquisition session) cycle. The main
-Unity repository contains more details about starting the virtual reality tasks when running experiments. During
-CLI-driven experiment runtimes, the library instructs the user when to 'arm' the Unity game engine.
+***Note,*** The Unity Editor must be running with the project open before starting an experiment session. The editor
+exposes an HTTP MCP Bridge that starts automatically with it, and this library uses that bridge to open the correct
+scene and to 'arm' (enter Play Mode) and 'disarm' (exit Play Mode) the task automatically. The operator does not open
+scenes or press the Unity 'play' button manually; they only confirm that the Virtual Reality display renders correctly
+during setup. Use the `sle get unity` command to verify the bridge is reachable before running a session.
 
 #### Configuration Sharing via MQTT
 The sollertia-experiment library and Unity communicate bidirectionally using the MQTT protocol. This communication is used to:
@@ -667,6 +668,7 @@ acquisition system:
 | `sle get cameras`                | Discovers cameras accessible to the system (OpenCV and Harvesters interfaces) |
 | `sle get controllers`            | Discovers microcontrollers accessible to the system                           |
 | `sle get ports`                  | Lists available serial communication ports                                    |
+| `sle get unity`                  | Checks whether the Unity Editor MCP Bridge is reachable                       |
 | `sle get checksum -i STRING`     | Calculates the CRC32-XFER checksum for the input string                       |
 
 ***Note,*** project and experiment discovery is provided by the sollertia-shared-assets library. Use `slsa get
@@ -837,6 +839,7 @@ The general, hardware-agnostic tools mirror the `sle get` CLI layer:
 | `set_zaber_device_setting_tool`     | Writes configuration to a Zaber device's non-volatile memory     |
 | `validate_zaber_configuration_tool` | Validates a Zaber device's configuration for binding library use |
 | `check_mount_accessibility_tool`    | Verifies a filesystem path exists and is writable                |
+| `check_unity_bridge_tool`           | Checks whether the Unity Editor MCP Bridge is reachable          |
 
 The Mesoscope-VR-specific tools mirror the `sle mesoscope` CLI layer:
 

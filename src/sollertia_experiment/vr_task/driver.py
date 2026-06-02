@@ -4,8 +4,10 @@ Virtual Reality task.
 
 from __future__ import annotations
 
+import sys
 from enum import IntEnum, StrEnum
 import json
+import select
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
@@ -14,6 +16,7 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
+from .bridge import UnityBridgeError, UnityBridgeClient
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
@@ -39,6 +42,15 @@ caller-enabled VR screens to settle before they are required to render."""
 
 _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for Unity to respond to a cue sequence request before retrying."""
+
+_PLAY_MODE_READINESS_TIMEOUT_MS: int = 60000
+"""The maximum time, in milliseconds, to wait for Unity to publish the SessionStart message after the driver requests
+Play Mode entry through the bridge. The window is generous because entering Play Mode can trigger a Unity script
+recompile before the scene's MQTT client connects."""
+
+_SESSION_STOP_TIMEOUT_MS: int = 5000
+"""The maximum time, in milliseconds, to wait for Unity to publish the SessionStop message after the driver requests
+Play Mode exit through the bridge."""
 
 
 class VRTaskEventKind(IntEnum):
@@ -160,6 +172,8 @@ class VRTaskDriver:
         _decomposed_trials: The DecomposedTrials produced by the most recent cue sequence decomposition.
         _polling_timer: The PrecisionTimer used to delay between consecutive Unity buffer polls during the setup
             sequence.
+        _bridge: The UnityBridgeClient used to drive Unity scene activation and Play Mode through the editor MCP
+            Bridge.
     """
 
     def __init__(
@@ -195,6 +209,7 @@ class VRTaskDriver:
             trigger_types=(),
         )
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        self._bridge: UnityBridgeClient = UnityBridgeClient()
 
     def __repr__(self) -> str:
         """Returns a string representation of the VRTaskDriver instance."""
@@ -225,23 +240,27 @@ class VRTaskDriver:
         self._mqtt.connect()
 
     def disconnect(self) -> None:
-        """Closes the MQTT connection to the Unity game engine."""
+        """Closes the MQTT connection to the Unity game engine and the bridge connection to the Unity Editor."""
         self._mqtt.disconnect()
+        self._bridge.close()
 
     def setup(self) -> None:
-        """Carries out the interactive Unity setup sequence used at the start of a session.
+        """Carries out the Unity setup sequence used at the start of a session.
 
         Notes:
-            Verifies that the Unity scene matches the expected scene name, drives a display verification loop on the
-            VR screens, re-arms Unity, and requests the wall cue sequence used by the task. The setup sequence is
-            interactive and prompts the user via console messages when a step requires confirmation or retry.
+            Requires the Unity Editor MCP Bridge to be reachable, opens the expected scene, arms Unity, verifies the
+            active scene matches the expected one, drives the VR display verification loop, and requests the wall cue
+            sequence used by the task. Scene activation and Play Mode control are issued through the bridge; the
+            operator only confirms that the VR display renders correctly.
 
             The caller must enable the VR screens before invoking this method and disable them once it returns, as
             the display verification stage relies on the screens rendering the verification animation.
         """
+        self._require_bridge()
+        self._activate_scene()
+        self._arm_unity()
         self._verify_scene_name()
         self._verify_vr_display()
-        self._rearm_unity()
         self._refresh_cue_sequence()
         console.echo(message="Unity setup: Complete.", level=LogLevel.SUCCESS)
 
@@ -324,14 +343,106 @@ class VRTaskDriver:
         return VRTaskEvent(kind=VRTaskEventKind.NONE)
 
     def resume_after_unity_restart(self) -> None:
-        """Re-fetches the cue sequence after Unity has been restarted and resets the termination flag.
+        """Re-arms Unity through the bridge after an emergency pause and re-fetches the wall cue sequence.
 
         Notes:
-            When the Unity game cycles, it resets the sequence of VR wall cues. This method re-queries the new wall
-            cue sequence to enable accurate tracking of the animal's position in VR after the reset.
+            An emergency pause occurs when Unity reports that its runtime terminated. This method ensures the editor
+            is reachable, re-arms Unity via the bridge, re-queries the regenerated wall cue sequence so the animal's
+            Virtual Reality position is tracked accurately after the reset, and clears the termination flag.
         """
+        self._require_bridge()
+        self._arm_unity()
         self._refresh_cue_sequence()
         self._state.terminated = False
+
+    def _require_bridge(self) -> None:
+        """Blocks until the Unity Editor MCP Bridge is reachable, prompting the operator to open Unity if it is not.
+
+        Notes:
+            The bridge starts automatically when the Unity Editor loads, so an unreachable bridge means the editor is
+            not running. The method enforces that Unity is open before the session proceeds instead of falling back
+            to manual scene and Play Mode control.
+        """
+        while not self._bridge.is_reachable():
+            message = (
+                "Unable to reach the Unity Editor. Open the Unity project in the editor; its MCP bridge starts "
+                "automatically. Run 'sle get unity' to verify the connection."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            input("Enter anything once the Unity Editor is running: ")
+        console.echo(message="Unity bridge: Connected.", level=LogLevel.SUCCESS)
+
+    def _activate_scene(self) -> None:
+        """Opens the expected Unity scene through the bridge, persisting any unsaved editor changes.
+
+        Raises:
+            UnityBridgeError: If the expected scene cannot be resolved to a project scene path or the bridge refuses
+                to open it.
+        """
+        try:
+            scene_path = self._bridge.resolve_scene_path(scene_name=self._expected_scene_name)
+            self._bridge.open_scene(scene_path=scene_path)
+        except UnityBridgeError as exception:
+            message = f"Unable to open the Virtual Reality scene '{self._expected_scene_name}' in Unity. {exception}"
+            console.error(message=message, error=UnityBridgeError)
+        message = f"Unity scene: Opened '{self._expected_scene_name}'."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+    def _arm_unity(self) -> None:
+        """Arms Unity by requesting Play Mode through the bridge and waiting for the scene's MQTT client to connect.
+
+        Notes:
+            The bridge triggers Play Mode entry, but the SessionStart message published by the scene's MQTT client
+            remains the authoritative signal that Unity is armed and ready to exchange task data. Entering Play Mode
+            can trigger a Unity script recompile, so the method retries on a bridge failure or a readiness timeout.
+        """
+        while True:
+            self._clear_buffer()
+            try:
+                state = self._bridge.enter_play_mode()
+                if state == "playing":
+                    # Unity was already in Play Mode, so its SessionStart fired earlier and will not repeat.
+                    # Restarting Play Mode yields a fresh SessionStart and a clean Virtual Reality origin.
+                    self._stop_unity()
+                    self._clear_buffer()
+                    self._bridge.enter_play_mode()
+            except UnityBridgeError as exception:
+                message = f"Unable to arm Unity through the bridge. {exception}"
+                console.echo(message=message, level=LogLevel.WARNING)
+                input("Enter anything to retry arming Unity: ")
+                continue
+
+            if self._wait_for_topic_bounded(
+                expected_topic=_VRTaskMQTTTopics.SESSION_START, timeout_ms=_PLAY_MODE_READINESS_TIMEOUT_MS
+            ):
+                message = "Unity state transition: Confirmed. Unity is now armed."
+                console.echo(message=message, level=LogLevel.SUCCESS)
+                return
+
+            # Play Mode entry succeeded but the scene never connected. Leaving Play Mode lets the next iteration
+            # trigger a fresh entry that re-publishes SessionStart instead of reporting that Unity is already playing.
+            self._stop_unity()
+            message = (
+                "Unity entered Play Mode but its MQTT client did not connect within the expected time. Ensure the "
+                "scene's MQTT settings are correct."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+            input("Enter anything to retry arming Unity: ")
+
+    def _stop_unity(self) -> None:
+        """Stops Unity Play Mode through the bridge and drains the resulting SessionStop message.
+
+        Notes:
+            Draining the SessionStop published when the scene's MQTT client disconnects prevents it from later being
+            misread by cycle() as an unexpected Unity termination during the runtime.
+        """
+        try:
+            self._bridge.exit_play_mode()
+        except UnityBridgeError as exception:
+            message = f"Unable to stop Unity through the bridge. {exception}"
+            console.echo(message=message, level=LogLevel.WARNING)
+            return
+        self._wait_for_topic_bounded(expected_topic=_VRTaskMQTTTopics.SESSION_STOP, timeout_ms=_SESSION_STOP_TIMEOUT_MS)
 
     def _refresh_cue_sequence(self) -> None:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
@@ -392,48 +503,53 @@ class VRTaskDriver:
             input("Enter anything to retry: ")
 
     def _verify_scene_name(self) -> None:
-        """Verifies that the Unity scene matches the expected scene name with infinite retry on mismatch."""
-        while True:
-            self._clear_buffer()
-            message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
-            console.echo(message=message, level=LogLevel.INFO)
+        """Verifies that the armed Unity scene matches the expected scene name.
 
-            self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
-            message = "Unity state transition: Confirmed. Unity is now armed."
-            console.echo(message=message, level=LogLevel.SUCCESS)
+        Notes:
+            The driver opens the expected scene through the bridge before arming Unity, so a mismatch indicates a
+            configuration error, such as a scene whose embedded name disagrees with its file name. The SceneName
+            reply also confirms the scene's MQTT client is responsive.
 
-            message = "Verifying that the Unity game engine is configured to display the correct scene..."
-            console.echo(message=message, level=LogLevel.INFO)
-
-            self._mqtt.send_data(topic=_VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
-            payload = self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SCENE_NAME)
-            scene_name: str = json.loads(payload.decode("utf-8"))["name"]
-
-            if scene_name == self._expected_scene_name:
-                message = "Unity scene configuration: Confirmed."
-                console.echo(message=message, level=LogLevel.SUCCESS)
-                return
-
-            message = (
-                f"The name of the Virtual Reality scene (task) running in Unity ({scene_name}) does not match the "
-                f"scene name expected based on the session's experiment configuration ({self._expected_scene_name}). "
-                f"Reconfigure Unity to run the correct VR task and try again."
-            )
-            console.echo(message=message, level=LogLevel.ERROR)
-            input("Enter anything to retry: ")
-
-    def _verify_vr_display(self) -> None:
-        """Drives the VR display verification loop until the user confirms the scene renders correctly."""
-        self._polling_timer.delay(delay=_DISPLAY_SCREENS_WARMUP_DELAY_MS, block=False)
-
-        message = (
-            "Verify that the Virtual Reality scene displays on the VR screens as intended. Disable (end) Unity "
-            "runtime when ready to advance to the next preparation step."
-        )
+        Raises:
+            RuntimeError: If the active Unity scene does not match the expected scene name.
+        """
+        self._clear_buffer()
+        message = "Verifying that the Unity game engine is configured to display the correct scene..."
         console.echo(message=message, level=LogLevel.INFO)
 
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
+        payload = self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SCENE_NAME)
+        scene_name: str = json.loads(payload.decode("utf-8"))["name"]
+
+        if scene_name != self._expected_scene_name:
+            message = (
+                f"The name of the Virtual Reality scene (task) running in Unity ({scene_name}) does not match the "
+                f"scene name expected based on the session's experiment configuration ({self._expected_scene_name})."
+            )
+            console.error(message=message, error=RuntimeError)
+
+        message = "Unity scene configuration: Confirmed."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+    def _verify_vr_display(self) -> None:
+        """Drives the VR display verification loop until the operator confirms the scene renders correctly.
+
+        Notes:
+            Unity animates continuously while the operator inspects the VR screens. When the operator signals they
+            have seen enough, the driver stops Play Mode and asks whether the display rendered correctly. A negative
+            answer lets the operator adjust the configuration before the driver re-arms Unity and repeats the check.
+            A positive answer re-arms Unity so the session continues from a fresh Virtual Reality origin.
+        """
+        self._polling_timer.delay(delay=_DISPLAY_SCREENS_WARMUP_DELAY_MS, block=False)
+
         while True:
-            self._animate_until_termination()
+            message = (
+                "Verify that the Virtual Reality scene displays on the VR screens as intended. The scene is "
+                "animating; press Enter once you have seen enough to judge the display."
+            )
+            console.echo(message=message, level=LogLevel.INFO)
+            self._animate_until_satisfied()
+            self._stop_unity()
 
             message = "Did the Virtual Reality display render correctly on the VR screens?"
             console.echo(message=message, level=LogLevel.INFO)
@@ -444,47 +560,35 @@ class VRTaskDriver:
                 answer = user_input[0] if user_input else ""
 
             if answer == "y":
+                self._arm_unity()
                 return
 
             message = (
-                "Restarting VR display verification. Ensure Unity is properly configured and arm the task "
-                "to begin the verification."
+                "Adjust the Unity configuration as needed, then confirm when you are ready to re-verify the display."
             )
             console.echo(message=message, level=LogLevel.WARNING)
+            input("Enter anything once you are ready to re-verify: ")
+            self._arm_unity()
 
-            self._clear_buffer()
-            message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
-            console.echo(message=message, level=LogLevel.INFO)
-            self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
-            message = "Unity state transition: Confirmed. Unity is now armed."
-            console.echo(message=message, level=LogLevel.SUCCESS)
+    def _animate_until_satisfied(self) -> None:
+        """Sends incremental position updates to Unity until the operator presses Enter to signal satisfaction.
 
-    def _animate_until_termination(self) -> None:
-        """Sends incremental position updates to Unity until Unity reports termination."""
+        Notes:
+            The method polls standard input without blocking between position updates so the Virtual Reality scene
+            keeps animating on the VR screens while it waits for the operator. The pending MQTT buffer is drained
+            each cycle so it does not accumulate the messages the verification animation does not consume.
+        """
         while True:
             self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
 
             payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
             self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
+            self._clear_buffer()
 
-            data = self._mqtt.get_data()
-            if data is None:
-                continue
-
-            topic, _ = data
-            if topic == _VRTaskMQTTTopics.SESSION_STOP:
-                message = "Unity termination: Detected."
-                console.echo(message=message, level=LogLevel.INFO)
+            ready, _, _ = select.select([sys.stdin], [], [], 0)
+            if ready:
+                sys.stdin.readline()
                 return
-
-    def _rearm_unity(self) -> None:
-        """Re-arms Unity after successful display verification."""
-        self._clear_buffer()
-        message = "Arm the Unity task by pressing the 'play' button in the Unity Editor."
-        console.echo(message=message, level=LogLevel.INFO)
-        self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SESSION_START)
-        message = "Unity state transition: Confirmed. Unity is now armed."
-        console.echo(message=message, level=LogLevel.SUCCESS)
 
     def _wait_for_topic(self, expected_topic: str) -> bytes | bytearray:
         """Blocks until Unity sends a message on the specified topic and returns the payload."""
@@ -495,6 +599,26 @@ class VRTaskDriver:
                 topic, payload = data
                 if topic == expected_topic:
                     return payload
+
+    def _wait_for_topic_bounded(self, expected_topic: str, timeout_ms: int) -> bool:
+        """Polls the Unity MQTT buffer for a message on the given topic until the timeout elapses.
+
+        Args:
+            expected_topic: The MQTT topic to wait for.
+            timeout_ms: The maximum time, in milliseconds, to wait before giving up.
+
+        Returns:
+            True if a message on the expected topic arrived within the timeout, False otherwise.
+        """
+        self._polling_timer.reset()
+        while self._polling_timer.elapsed < timeout_ms:
+            self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
+            data = self._mqtt.get_data()
+            if data is not None:
+                topic, _ = data
+                if topic == expected_topic:
+                    return True
+        return False
 
     def _clear_buffer(self) -> None:
         """Drains all pending messages from the MQTT buffer used to communicate with Unity."""

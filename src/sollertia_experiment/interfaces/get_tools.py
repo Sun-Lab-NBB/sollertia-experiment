@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..vr_task import UnityBridgeClient
 from .mcp_instance import mcp, probe_writable
 from ..cross_system import (
     CRCCalculator,
@@ -169,6 +170,25 @@ def check_mount_accessibility_tool(path: str) -> str:
         return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: False | OK: False | Error: {write_error}"
 
     return f"Path: {target} | Exists: True | Mount: {is_mount} | Writable: True | OK: True"
+
+
+@mcp.tool()
+def check_unity_bridge_tool() -> str:
+    """Checks whether the Unity Editor MCP Bridge is reachable for Virtual Reality task sessions.
+
+    Probes the editor-only bridge that the Virtual Reality task driver uses to control scene activation and Play
+    Mode. Use this tool during pre-flight health checks to confirm the Unity Editor is open before starting a
+    Mesoscope experiment session.
+
+    Returns:
+        A status line reporting whether the bridge is reachable, and when reachable, the active scene name and the
+        editor's play state.
+    """
+    client = UnityBridgeClient()
+    try:
+        return client.describe_status()
+    finally:
+        client.close()
 
 
 @mcp.tool()
