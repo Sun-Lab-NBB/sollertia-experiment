@@ -250,7 +250,7 @@ class SurgeryLog:
         self._sheet_id: str = sheet_id
 
         # Generates the credentials' object to access the target Google Sheet.
-        credentials = Credentials.from_service_account_file(
+        credentials = Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 
@@ -636,7 +636,7 @@ class WaterLog:
 
         # Generates the credentials' object to access the target Google Sheet. In contrast to surgery data, this object
         # requires write access.
-        credentials = Credentials.from_service_account_file(
+        credentials = Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 

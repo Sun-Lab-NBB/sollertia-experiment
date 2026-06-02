@@ -118,7 +118,7 @@ class _TrialState:
         """
         if self.completed >= len(self.distances):
             return False
-        return traveled_distance > self.distances[self.completed]
+        return bool(traveled_distance > self.distances[self.completed])
 
     def get_current_reward(self) -> tuple[float, int]:
         """Retrieves the reward parameters for the current reinforcing trial.

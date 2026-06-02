@@ -886,9 +886,9 @@ class _BlitManager:
         """Restores the cached background, redraws the data lines on top, and blits the result to the canvas."""
         # Captures the background on the first update if no full redraw has populated it yet.
         if self._background is None:
-            self._canvas.draw()
+            self._canvas.draw()  # type: ignore[no-untyped-call]
 
-        self._canvas.restore_region(self._background)
+        self._canvas.restore_region(self._background)  # type: ignore[no-untyped-call]
         for artist in self._animated_artists:
             self._figure.draw_artist(artist)
         self._canvas.blit(self._figure.bbox)
@@ -896,9 +896,9 @@ class _BlitManager:
 
     def refresh(self) -> None:
         """Rebuilds the cached background after static artists change, then redraws the data lines on top."""
-        self._canvas.draw()
+        self._canvas.draw()  # type: ignore[no-untyped-call]
         self.update()
 
     def _on_draw(self, _event: Event) -> None:
         """Caches the static figure background after each full canvas redraw."""
-        self._background = self._canvas.copy_from_bbox(self._figure.bbox)
+        self._background = self._canvas.copy_from_bbox(self._figure.bbox)  # type: ignore[no-untyped-call]

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 # Project metadata section. Provides the general ID information about the project.
 [project]
 name = "sollertia-experiment"
-version = "5.0.0rc1"
+version = "5.0.0"
 description = "Provides data acquisition and preprocessing runtimes for Sollertia platform data acquisition systems."
 readme = "README.md"
 license = "Apache-2.0"

@@ -544,7 +544,7 @@ class ZaberAxis:
             f"position={self.get_position()})."
         )
 
-    def _padded_method_call(self, method: Callable, *args: Any, **kwargs: Any) -> Any:
+    def _padded_method_call[T](self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         """Interacts with the motor hardware by executing the requested method with the appropriate time padding to
         prevent overwhelming the communication interface.
 

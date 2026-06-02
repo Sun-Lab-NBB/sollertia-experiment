@@ -207,12 +207,12 @@ class EncoderInterface(ModuleInterface):
     @property
     def absolute_position(self) -> np.float64:
         """Returns the absolute position of the animal, in Unity units, relative to the runtime onset."""
-        return self._distance_tracker[1]
+        return np.float64(self._distance_tracker[1])
 
     @property
     def traveled_distance(self) -> np.float64:
         """Returns the total distance, in centimeters, traveled by the animal since the runtime onset."""
-        return self._distance_tracker[0]
+        return np.float64(self._distance_tracker[0])
 
     def reset_distance_tracker(self) -> None:
         """Resets the traveled distance trackers to zero."""
@@ -373,7 +373,7 @@ class LickInterface(ModuleInterface):
     @property
     def lick_count(self) -> np.uint64:
         """Returns the total number of licks detected by the module since the runtime onset."""
-        return self._lick_tracker[0]
+        return np.uint64(self._lick_tracker[0])
 
     @property
     def lick_threshold(self) -> np.uint16:
@@ -618,7 +618,7 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
     @property
     def pulse_count(self) -> np.uint64:
         """Returns the number of received TTL pulses recorded by the module since runtime onset."""
-        return self._pulse_tracker[0]
+        return np.uint64(self._pulse_tracker[0])
 
     def reset_pulse_count(self) -> None:
         """Resets the TTL pulse tracker to zero."""
@@ -1031,12 +1031,12 @@ class WaterValveInterface(ModuleInterface):
     @property
     def delivered_volume(self) -> np.float64:
         """Returns the total volume of water, in microliters, delivered by the valve since the runtime onset."""
-        return self._valve_tracker[0]
+        return np.float64(self._valve_tracker[0])
 
     @property
     def calibrating(self) -> bool:
         """Returns True if the module is currently performing a valve calibration cycle and False otherwise."""
-        return self._valve_tracker[1] == 0
+        return bool(self._valve_tracker[1] == 0)
 
 
 class ScreenInterface(ModuleInterface):
