@@ -16,8 +16,11 @@ Currently, this directory provides a single asset, the `setupAcquisition` functi
 automates the preparation for data acquisition and allows the sollertia-experiment library to
 bidirectionally interface with the ScanImage software during runtime. It carries out three
 runtime-critical tasks: setting up the online motion estimation reference, acquiring a
-high-definition reference z-stack, and arming the acquisition loop that the main acquisition system PC controls by
-creating and removing the `kinase.bin` and `phosphatase.bin` marker files in the shared Mesoscope data directory.
+high-definition reference z-stack, and servicing the acquisition commands that the main acquisition system PC (VRPC)
+issues over MQTT. The function connects to the shared MQTT broker, preloads the persisted reference estimator as an
+alignment aid, generates the session reference data on request, and begins, aborts, or recovers frame acquisition in
+response to the VRPC commands. It exchanges messages over a dedicated `Mesoscope` topic namespace that does not overlap
+with the namespace used by the Unity Virtual Reality task sharing the same broker.
 
 The `setupAcquisition` function is designed to work with the `MariusMotionEstimator` and
 `MariusMotionCorrector2` motion-correction classes. These classes are provided as part of
@@ -45,6 +48,8 @@ assembles the machine (MBF Bioscience and ThorLabs):
   [ScanImage](https://www.mbfbioscience.com/products/scanimage/) version 2023.1.0 (Premium).
 - [Parallel Computing Toolbox](https://www.mathworks.com/products/parallel-computing.html), required
   by the `MariusMotionEstimator` class for fast online motion detection and correction.
+- [Industrial Communication Toolbox](https://www.mathworks.com/products/industrial-communication.html),
+  required by `setupAcquisition` to connect to the MQTT broker shared with the sollertia-experiment runtime.
 - An [NVIDIA CUDA GPU](https://www.nvidia.com/en-us/), used to accelerate online motion detection
   and correction.
 
@@ -78,6 +83,13 @@ the broader Mesoscope preparation sequence, where `hSI` is the ScanImage handle 
 is the ScanImage controller. Use `help setupAcquisition` in the MATLAB Command Window for the full
 list of supported arguments.
 
+***Critical!*** The MQTT broker runs on the **VRPC**, not on the ScanImagePC, so the cross-machine
+connection must be configured explicitly. Pass the VRPC's network address through the `broker` argument,
+for example `setupAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`, replacing `VRPC-IP` with the
+VRPC's address on the local network. The default `tcp://127.0.0.1:1883` only works when the broker and
+ScanImage run on the same machine, which is not the standard two-machine deployment. The VRPC's broker
+must also be configured to accept connections from the ScanImagePC over the local network.
+
 In most cases, the function executes three major steps:
 
 1. **Motion estimation setup.** The function configures the acquisition according to the
@@ -89,13 +101,13 @@ In most cases, the function executes three major steps:
    and repeats the z-stack acquisition, generating a high-definition `zstack.tiff` file that is kept
    alongside the TIFF files acquired during runtime.
 3. **Data acquisition.** The function configures the acquisition and motion-detection parameters for
-   the runtime and enters the acquisition loop. While in the loop, it starts or stops the
-   acquisition depending on the presence of the `kinase.bin` and `phosphatase.bin` marker files
-   created by the sollertia-experiment library.
+   the runtime and enters its MQTT command loop. While in the loop, it begins, aborts, or recovers
+   frame acquisition in response to the commands published by the sollertia-experiment library, and
+   reports command reception and progress back to the library.
 
-***Note,*** the function can also resume an interrupted runtime when called with the `recovery`
-argument set to `true`. In this mode, it skips steps 1 and 2, loads the existing `MotionEstimator.me`
-file, and proceeds directly to step 3.
+***Note,*** the function can also resume an interrupted runtime in response to the recover command.
+In this mode, it skips steps 1 and 2, reloads the existing `MotionEstimator.me` file from the shared
+Mesoscope data directory, and resumes frame acquisition.
 
 ___
 

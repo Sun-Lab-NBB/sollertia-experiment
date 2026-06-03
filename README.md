@@ -119,8 +119,10 @@ dependencies automatically installed from pip / conda as part of library install
 be installed and configured on the **VRPC** before calling runtime commands via the command line interface (CLI) exposed
 by this library.
 
-- [MQTT broker](https://mosquitto.org/) version **2.0.22**. The broker should be running locally and can use
-  the **default** IP (127.0.0.1) and Port (1883) configuration.
+- [MQTT broker](https://mosquitto.org/) version **2.0.22**. The broker runs on the VRPC, and the VRPC-side runtime
+  reaches it on the **default** loopback IP (127.0.0.1) and Port (1883). Controlling the Mesoscope from a separate
+  ScanImagePC additionally requires exposing the broker on the local network; see
+  [MQTT Broker Access](#mqtt-broker-access).
 - [FFMPEG](https://www.ffmpeg.org/download.html). As a minimum, the version of FFMPEG should support H265 and H264
   codecs with hardware acceleration (Nvidia GPU). This library was tested with the version **8.0.1**.
 - [MvImpactAcquire](https://assets-2.balluff.com/mvIMPACT_Acquire/). This library is tested with version **2.9.2**,
@@ -304,8 +306,36 @@ requires additional assets and configuration post-assembly to make it compatible
 To support the sollertia-experiment runtime, the ScanImagePC's filesystem must be accessible to the **VRPC** via the Server
 Message Block version 3 (SMB3) or equivalent protocol. Since ScanImagePC uses Windows, it is advised to use the SMB3
 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC must be
-configured to share the root Mesoscope output directory with the VRPC over the local network. This is required to both
-fetch the data acquired by the Mesoscope during preprocessing and to control the Mesoscope during runtime.
+configured to share the root Mesoscope output directory with the VRPC over the local network. This is required to fetch
+the data acquired by the Mesoscope during preprocessing and to retrieve the desktop screenshot generated during session
+setup. The Mesoscope acquisition itself is controlled over MQTT, not through the shared directory (see
+[MATLAB Assets](#matlab-assets)).
+
+#### MQTT Broker Access
+The Mesoscope-VR system controls the Mesoscope by exchanging MQTT messages with the **setupAcquisition** MATLAB
+function running on the ScanImagePC. The MQTT broker runs on the **VRPC** and is shared with the Unity Virtual Reality
+task. Because the ScanImagePC connects to this broker over the local network, the broker must be configured to accept
+non-loopback connections.
+
+By default, Mosquitto 2.0 binds only to the loopback interface (127.0.0.1), so a separate ScanImagePC cannot reach it.
+To expose the broker on the local network, add the following to the VRPC's `mosquitto.conf`:
+
+```conf
+listener 1883
+allow_anonymous true
+```
+
+The `listener 1883` directive binds all network interfaces, including loopback, so the VRPC-side runtime and Unity
+continue to connect on 127.0.0.1 without changes. The `allow_anonymous true` directive is required because defining an
+explicit listener disables anonymous access by default, which both the sollertia-experiment runtime and the MATLAB
+client rely on.
+
+***Note,*** anonymous access is acceptable because the Sollertia platform operates on an isolated local network.
+Deployments on shared or untrusted networks should configure broker authentication instead.
+
+After updating the configuration, restart Mosquitto and ensure the VRPC firewall allows inbound connections on the
+broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when arming the Mesoscope, for
+example `setupAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
 
 #### Default Screenshot Directory
 During runtime, the sollertia-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop and
@@ -320,14 +350,16 @@ ScanImage software is written in MATLAB and controls all aspects of Mesoscope da
 requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation, all data
 acquisition runtimes using the sollertia-experiment library require the user to call the **setupAcquisition** MATLAB
 function on the ScanImagePC. This function carries out multiple runtime-critical tasks, including setting up the
-acquisition, generating and applying the online motion correction, and allowing the VRPC to control the Mesoscope by
-creating or removing binary marker files.
+acquisition, generating and applying the online motion correction, and servicing the acquisition commands the VRPC
+issues over MQTT. The function connects to the same MQTT broker as the Unity Virtual Reality task, using a dedicated
+*Mesoscope* topic namespace that does not overlap with the Unity topics, and reports command reception and progress
+back to the VRPC.
 
 The setupAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
 [Mesoscope-VR ScanImage PC assets guide](assets/mesoscope_vr/README.md) for instructions on deploying the function to
 the ScanImagePC and registering it with MATLAB's search path. The function relies on the MariusMotionEstimator
 and MariusMotionCorrector2 online motion-correction classes, which are provided as part of the ScanImage
-installation on the ScanImagePC.
+installation on the ScanImagePC, and on the MATLAB Industrial Communication Toolbox, which provides the MQTT client.
 
 ### Mesoscope-VR Assembly
 ***This section is currently a placeholder. Since the final Mesoscope-VR system design is still a work in progress, it
@@ -550,23 +582,16 @@ following directories and files:
 
 #### Mesoscope-VR Temporary Data
 
-The Mesoscope-VR system also generates the following temporary files and directories during runtime:
+The Mesoscope-VR system also generates the following temporary directory during runtime:
 1. **raw_mesoscope_frames**: Stores uncompressed .TIFF stacks fetched by the VRPC from the ScanImagePC. This is done
    as part of data preprocessing to collect all data on the VRPC before executing individual preprocessing subroutines.
    The .TIFF stacks are then re-compressed using the Limited Error Raster Compression (LERC) scheme and are saved to the
    *mesoscope_data* directory. Once this process completes successfully, the *raw_mesoscope_frames* directory with all
    raw files is deleted to conserve disk space.
-2. **kinase.bin**: This marker is created in the *mesoscope_data* ScanImagePC directory. During runtime, the
-   *setupAcquisition* MATLAB function monitors the *mesoscope_data* directory for the presence of this marker file. If
-   the file is present, the function triggers the Mesoscope data acquisition. If the file is absent, the function stops
-   the Mesoscope data acquisition until the file is re-created. As such, the VRPC uses this marker file to start
-   and stop the Mesoscope data acquisition during normal operation.
-3. **phosphatase.bin**: This marker works similar to the *kinase.bin* marker, but is used by the VRPC to abort the
-   ScanImagePC runtime at any point. When ScanImagePC is waiting for the *kinase.bin* marker to be created for the first
-   time, stopping the Mesoscope acquisition necessarily requires the kinase marker to be first created and then removed,
-   triggering a brief Mesoscope frame acquisition. Creating the *phosphatase.bin* marker instead triggers the
-   ScanImagePC to end the runtime without waiting for the *kinase.bin* marker, effectively aborting the runtime without
-   acquiring any frames.
+
+***Note,*** the VRPC controls the Mesoscope acquisition over MQTT rather than through marker files, so no acquisition
+marker files are created during runtime. See the [ScanImage PC Assets](#scanimage-pc-assets) section for details on the
+MQTT command interface.
 
 ___
 

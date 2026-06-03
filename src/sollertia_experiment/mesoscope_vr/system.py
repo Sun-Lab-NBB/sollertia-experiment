@@ -453,12 +453,6 @@ class _ScanImagePCData:
     roi_path: Path = field(default_factory=Path, init=False)
     """The path to the animal-specific reference .ROI (Region-of-Interest) file, used to restore the same imaging
     field across all data acquisition sessions."""
-    kinase_path: Path = field(default_factory=Path, init=False)
-    """The path to the 'kinase.bin' file used to lock the MATLAB's runtime function (setupAcquisition.m) into the data
-    acquisition mode until the kinase marker is removed by the VRPC."""
-    phosphatase_path: Path = field(default_factory=Path, init=False)
-    """The path to the 'phosphatase.bin' file used to gracefully terminate the MATLAB's runtimes locked into the data
-    acquisition mode by the presence of the 'kinase.bin' file."""
 
     def __post_init__(
         self,
@@ -468,8 +462,6 @@ class _ScanImagePCData:
         self.roi_path = self.persistent_data_path.joinpath("fov.roi")
         self.session_specific_path = self.mesoscope_root_path.joinpath(self.session)
         self.mesoscope_data_path = self.mesoscope_root_path.joinpath("mesoscope_data")
-        self.kinase_path = self.mesoscope_data_path.joinpath("kinase.bin")
-        self.phosphatase_path = self.mesoscope_data_path.joinpath("phosphatase.bin")
 
         # Ensures that the shared data directory and the persistent data directory exist.
         ensure_directory_exists(path=self.mesoscope_data_path)
