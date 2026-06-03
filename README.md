@@ -312,7 +312,7 @@ setup. The Mesoscope acquisition itself is controlled over MQTT, not through the
 [MATLAB Assets](#matlab-assets)).
 
 #### MQTT Broker Access
-The Mesoscope-VR system controls the Mesoscope by exchanging MQTT messages with the **setupAcquisition** MATLAB
+The Mesoscope-VR system controls the Mesoscope by exchanging MQTT messages with the **runAcquisition** MATLAB
 function running on the ScanImagePC. The MQTT broker runs on the **VRPC** and is shared with the Unity Virtual Reality
 task. Because the ScanImagePC connects to this broker over the local network, the broker must be configured to accept
 non-loopback connections.
@@ -335,7 +335,7 @@ Deployments on shared or untrusted networks should configure broker authenticati
 
 After updating the configuration, restart Mosquitto and ensure the VRPC firewall allows inbound connections on the
 broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when arming the Mesoscope, for
-example `setupAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
+example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
 
 #### Default Screenshot Directory
 During runtime, the sollertia-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop and
@@ -348,14 +348,14 @@ command on the ScanImagePC to save the screenshots into the shared Mesoscope out
 #### MATLAB Assets
 ScanImage software is written in MATLAB and controls all aspects of Mesoscope data acquisition. While each runtime
 requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation, all data
-acquisition runtimes using the sollertia-experiment library require the user to call the **setupAcquisition** MATLAB
+acquisition runtimes using the sollertia-experiment library require the user to call the **runAcquisition** MATLAB
 function on the ScanImagePC. This function carries out multiple runtime-critical tasks, including setting up the
 acquisition, generating and applying the online motion correction, and servicing the acquisition commands the VRPC
 issues over MQTT. The function connects to the same MQTT broker as the Unity Virtual Reality task, using a dedicated
 *Mesoscope* topic namespace that does not overlap with the Unity topics, and reports command reception and progress
 back to the VRPC.
 
-The setupAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
+The runAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
 [Mesoscope-VR ScanImage PC assets guide](assets/mesoscope_vr/README.md) for instructions on deploying the function to
 the ScanImagePC and registering it with MATLAB's search path. The function relies on the MariusMotionEstimator
 and MariusMotionCorrector2 online motion-correction classes, which are provided as part of the ScanImage
@@ -566,7 +566,7 @@ All Mesoscope-VR system data on the ScanImagePC is stored under the user-defined
 expected to be mounted to the VRPC via the SMB or similar protocol. Under that root directory, the system creates the
 following directories and files:
 1. **mesoscope_data**: This directory stores all Mesoscope-acquired data for the currently running session. The
-   *setupAcquisition* MATLAB function configures ScanImage software to output all data to the mesoscope_data directory,
+   *runAcquisition* MATLAB function configures ScanImage software to output all data to the mesoscope_data directory,
    which is shared by all sessions, animals, and projects. This allows using the same static output path for all
    ScanImage acquisitions.
 2. **session-specific mesoscope_data**: At the end of each runtime, the Mesoscope-VR system ***renames*** the

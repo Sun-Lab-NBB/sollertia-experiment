@@ -422,7 +422,7 @@ def setup_mesoscope(
     """Guides the user through the sequence of steps that prepares the Mesoscope for the data acquisition runtime.
 
     Notes:
-        The mesoscope is controlled over MQTT. After the ScanImagePC reports that the setupAcquisition function has
+        The mesoscope is controlled over MQTT. After the ScanImagePC reports that the runAcquisition function has
         connected, this function preloads the persisted reference estimator as an alignment aid, guides the user
         through mounting and alignment, and commands the reference generation once the alignment screenshot appears.
 
@@ -576,7 +576,7 @@ def setup_mesoscope(
         message = (
             f"Unable to confirm that the ScanImagePC has generated the required acquisition data files, as the "
             f"following expected files are missing from the 'mesoscope_data' directory: {missing_names}. Ensure the "
-            f"setupAcquisition function is running on the ScanImagePC and retry."
+            f"runAcquisition function is running on the ScanImagePC and retry."
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)

@@ -1,9 +1,9 @@
-% setupAcquisition.m
+% runAcquisition.m
 %
-% Top-level MATLAB script that prepares the ScanImage-controlled 2P-RAM Mesoscope for a Sollertia
-% data-acquisition runtime. It configures the online motion-estimation reference, acquires a
-% high-definition reference z-stack, and services the acquisition commands that the
-% sollertia-experiment VRPC issues over MQTT.
+% Top-level MATLAB script that prepares the ScanImage-controlled 2P-RAM Mesoscope for the Sollertia
+% platform Mesoscope-VR data-acquisition runtime. It configures the online motion-estimation
+% reference, acquires a high-definition reference z-stack, and services the acquisition commands
+% that the sollertia-experiment VRPC issues over MQTT.
 %
 % This script is designed to work with the MariusMotionEstimator and MariusMotionCorrector2
 % ScanImage motion-correction classes, which are expected to be available in the ScanImage
@@ -16,14 +16,14 @@
 % This file is deployed to the ScanImagePC and registered with MATLAB; see the accompanying
 % README.md for setup and usage details.
 
-function setupAcquisition(hSI, hSICtl, arguments)
-    % SETUPACQUISITION Prepares the Mesoscope system for acquiring experiment data on the Sollertia platform.
+function runAcquisition(hSI, hSICtl, arguments)
+    % RUNACQUISITION Prepares and runs a Mesoscope data-acquisition runtime within the Mesoscope-VR system.
     %
     %   This is a heavily refactored 'setupZstackALL' function used in the original manuscript. The function was
-    %   refactored to work with the Sollertia platform's data acquisition infrastructure. The function should be
-    %   used to prepare the system for each data acquisition runtime.
+    %   refactored to work with the Mesoscope-VR system implementation of the Sollertia platform's data acquisition
+    %   infrastructure. The function should be used to prepare the system for each data acquisition runtime.
     %
-    %   Example function call (using default parameters): setupAcquisition(hSI, hSICtl)
+    %   Example function call (using default parameters): runAcquisition(hSI, hSICtl)
     %
     % After the configuration arguments are applied, the function connects to the MQTT broker and services the
     % acquisition commands published by the VRPC: it preloads the persisted reference estimator as an alignment aid,
@@ -57,9 +57,9 @@ function setupAcquisition(hSI, hSICtl, arguments)
     % - scalefactor: The factor by which to scale the X and Y resolution of all ROIs during the acquisition of the
     % high-definition zstack.tiff file. The scaling maintains the initial ROI aspect ratios.
     % - broker: The address of the MQTT broker shared with the Unity Virtual Reality task, in the 'tcp://host:port'
-    % format. The broker runs on the VRPC, not on this ScanImagePC, so for the standard two-machine deployment this
-    % MUST be set to the VRPC's address on the local network, e.g. 'tcp://192.168.1.10:1883'. The default loopback
-    % address only works when the broker and ScanImage run on the same machine, which is not the typical setup.
+    % format. The broker runs on the VRPC, not on this ScanImagePC. The default targets the current VRPC at
+    % 'tcp://192.168.0.13:1883', which matches the broker listener configured on the VRPC's local network interface.
+    % Override this only if the broker host address or listener port changes.
 
     % Limited argument validation and default value assignment support. May not
     % work on older MatLab versions, but good for R2022b+.
@@ -75,7 +75,7 @@ function setupAcquisition(hSI, hSICtl, arguments)
         arguments.naverage (1,1) double {mustBePositive, mustBeInteger} = 20
         arguments.root (1,:) char {mustBeNonempty} = 'F:\mesodata\mesoscope_data'
         arguments.scalefactor (1,:) double {mustBePositive} = 2.0
-        arguments.broker (1,:) char {mustBeNonempty} = 'tcp://127.0.0.1:1883'
+        arguments.broker (1,:) char {mustBeNonempty} = 'tcp://192.168.0.13:1883'
     end
 
     zum = arguments.zum;
@@ -92,8 +92,9 @@ function setupAcquisition(hSI, hSICtl, arguments)
     % Clears the CLI
     clc;
 
-    % Statically defines the MQTT topics used to communicate with the VRPC. The VRPC publishes the command topics and
-    % subscribes to the status and error topics; this namespace does not overlap with the Unity task topics.
+    % Statically defines the MQTT topics used to communicate with the VRPC. The VRPC publishes the command topics
+    % (including the state query) and subscribes to the status, error, and state reply topics; this namespace does not
+    % overlap with the Unity task topics.
     topics = struct( ...
         'alive',    "MesoscopeAlive", ...
         'preload',  "MesoscopePreload", ...
@@ -101,8 +102,10 @@ function setupAcquisition(hSI, hSICtl, arguments)
         'begin',    "MesoscopeBeginAcquisition", ...
         'abort',    "MesoscopeAbort", ...
         'recover',  "MesoscopeRecover", ...
+        'query',    "MesoscopeQueryState", ...
         'status',   "MesoscopeStatus", ...
-        'error',    "MesoscopeError");
+        'error',    "MesoscopeError", ...
+        'state',    "MesoscopeState");
 
     % Converts single zrange values to [min, max] format expected by the rest of the function.
     if isscalar(zrange)
@@ -183,13 +186,12 @@ function setupAcquisition(hSI, hSICtl, arguments)
     subscribe(mqttClient, topics.begin);
     subscribe(mqttClient, topics.abort);
     subscribe(mqttClient, topics.recover);
+    subscribe(mqttClient, topics.query);
 
     fprintf('Mesoscope control interface: Connected to %s.\n', broker);
     fprintf('Waiting for the VRPC to issue acquisition commands...\n');
 
-    % Tracks the number of already-processed messages in the client's accumulating Messages buffer, whether the alive
-    % marker still needs to be republished, and the timestamp of the last alive publication.
-    processedMessages = 0;
+    % Tracks whether the alive marker still needs to be republished and the timestamp of the last alive publication.
     announceAlive = true;
     aliveTimer = tic;
 
@@ -203,10 +205,10 @@ function setupAcquisition(hSI, hSICtl, arguments)
             aliveTimer = tic;
         end
 
-        % Processes every message received since the previous iteration.
-        messages = mqttClient.Messages;
-        messageCount = height(messages);
-        for index = processedMessages + 1 : messageCount
+        % Drains and processes every message received since the previous iteration. read() returns the unread messages
+        % as a timetable with Topic and Data variables, or an empty timetable when nothing arrived.
+        messages = read(mqttClient);
+        for index = 1 : height(messages)
             topic = string(messages.Topic(index));
             payload = string(messages.Data(index));
             announceAlive = false;
@@ -239,6 +241,14 @@ function setupAcquisition(hSI, hSICtl, arguments)
                     hSI.abort();
                     resetMotionState(hSI);
                     publishStatus(mqttClient, topics.status, topic, "stopped");
+
+                elseif topic == topics.query
+                    % Captures a one-shot system-state snapshot and publishes it to the VRPC as a named-field struct
+                    % mirroring the queryAcquisitionState output, to populate a MesoscopePositions instance later.
+                    vals = queryAcquisitionState(hSI);
+                    write(mqttClient, topics.state, jsonencode(struct( ...
+                        'x', vals(1), 'y', vals(2), 'r', vals(3), 'z', vals(4), ...
+                        'fast_z', vals(5), 'tip', vals(6), 'tilt', vals(7), 'power_mW', vals(8))));
                 end
             catch exception
                 % Surfaces the failure to the VRPC and returns the mesoscope to a safe, idle state.
@@ -247,7 +257,6 @@ function setupAcquisition(hSI, hSICtl, arguments)
                 resetMotionState(hSI);
             end
         end
-        processedMessages = messageCount;
 
         pause(0.1);  % Yields to the event queue so the ScanImage GUI stays responsive during alignment.
     end
@@ -256,7 +265,7 @@ function setupAcquisition(hSI, hSICtl, arguments)
 end
 
 
-function preloadEstimator(hSI, hSICtl, payload, config)
+function preloadEstimator(hSI, hSICtl, payload, ~)
     % PRELOADESTIMATOR Loads the persisted reference estimator as an alignment aid with correction disabled.
     %
     %   The estimator restores the imaging field to approximately the same location across days. Automatic correction
@@ -623,4 +632,67 @@ function publishStatus(mqttClient, statusTopic, commandTopic, state)
     % PUBLISHSTATUS Publishes a command acknowledgement or progress update to the VRPC on the status topic.
 
     write(mqttClient, statusTopic, jsonencode(struct('command', char(commandTopic), 'state', char(state))));
+end
+
+
+function vals = queryAcquisitionState(hSI)
+    % QUERYACQUISITIONSTATE Captures a one-shot snapshot of the Mesoscope stage, fast-Z, and laser state.
+    %
+    %   Records the system state at the boundaries of a runtime (before and optionally after acquisition) to populate
+    %   a MesoscopePositions instance; it is not meant for repeated polling. Returns a 1x8 double row vector ordered as
+    %   [x, y, r, z, fast_z, tip, tilt, power_mW], where power_mW is the CONFIGURED target power at the sample (valid
+    %   while the laser is idle). tip and tilt are placeholders (always 0) reserved for hardware that may be added in a
+    %   future update.
+
+    % Caches the MCM6000 stage controller, the imaging beam, and the beam index between calls. Resolving these
+    % resources from the ScanImage resource store is relatively expensive, so they are looked up once and reused.
+    persistent mcm beam beamIdx
+
+    % Resolves the MCM6000 stage controller if it has not been cached yet, or if the cached handle became invalid.
+    if isempty(mcm) || ~isvalid(mcm)
+        mcm = hSI.hResourceStore.filterByName('MCM6000');
+        if iscell(mcm), mcm = mcm{1}; end
+        assert(~isempty(mcm) && isvalid(mcm), ...
+            'queryAcquisitionState:noMCM', ...
+            'MCM6000 not found in hSI.hResourceStore.');
+    end
+
+    % Resolves the imaging beam and its index within the Beams component if it has not been cached yet.
+    if isempty(beam) || ~isvalid(beam)
+        beam = hSI.hResourceStore.filterByName('Thor Axon 920');
+        if iscell(beam), beam = beam{1}; end
+        assert(~isempty(beam) && isvalid(beam), ...
+            'queryAcquisitionState:noBeam', ...
+            'Beam ''Thor Axon 920'' not found in hSI.hResourceStore.');
+
+        % Resolves the index of this beam within the Beams component, which parallels the hBeams.powers array.
+        beamIdx = find(cellfun(@(b) b == beam, hSI.hBeams.hBeams), 1);
+        assert(~isempty(beamIdx), 'queryAcquisitionState:noBeamIdx', ...
+            'Beam not found in hSI.hBeams.hBeams.');
+    end
+
+    % Reads the last known MCM6000 stage position, indexing the raw position vector by each motor's hardware slot.
+    raw = mcm.lastKnownPosition;
+    x = raw(mcm.xMotorSlot);
+    y = raw(mcm.yMotorSlot);
+    r = raw(mcm.rMotorSlot);
+    z = raw(mcm.zMotorSlot);
+
+    % Reads the current fast-Z (voice-coil) position.
+    fast_z = hSI.hFastZ.position;
+
+    % Reports tip and tilt as fixed placeholders. The corresponding hardware is not installed, so these are always 0.
+    % They are reserved in the output contract and may be populated with real values in a future update.
+    tip  = 0;
+    tilt = 0;
+
+    % Computes the configured target laser power at the sample, in milliwatts. The power-fraction setpoint is converted
+    % to watts through the beam's calibration lookup table, then scaled to milliwatts. This value persists while idle.
+    frac     = hSI.hBeams.powers(beamIdx) / 100;
+    lut      = beam.powerFraction2PowerWattLut;
+    watts    = interp1(lut(:,1), lut(:,2), frac, 'linear', 'extrap');
+    power_mW = watts * 1000;
+
+    % Packs the queried state into the 1x8 output row vector.
+    vals = [x, y, r, z, fast_z, tip, tilt, power_mW];
 end

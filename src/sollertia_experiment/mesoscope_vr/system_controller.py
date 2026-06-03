@@ -1046,8 +1046,8 @@ class MesoscopeVRSystem:
             if self._microcontrollers.mesoscope_frame.pulse_count > 0:
                 message = (
                     "Unable to trigger mesoscope frame acquisition, as the mesoscope is already acquiring frames. "
-                    "This indicates that the setupAcquisition() MATLAB function did not run as expected. Re-run the "
-                    "setupAcquisition function and try again."
+                    "This indicates that the runAcquisition() MATLAB function did not run as expected. Re-run the "
+                    "runAcquisition function and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
                 input("Enter anything to retry: ")
@@ -1538,11 +1538,11 @@ class MesoscopeVRSystem:
             self._trial_state.completed = 0
 
         if self._mesoscope_terminated:
-            # If the ScanImagePC or ScanImage software crashed, the user must relaunch the setupAcquisition function
+            # If the ScanImagePC or ScanImage software crashed, the user must relaunch the runAcquisition function
             # before resuming. The recover() command reloads the session estimator and re-arms the mesoscope without
             # regenerating the reference data, after which the start sequence re-triggers frame acquisition.
             message = (
-                "If the ScanImagePC or the ScanImage software crashed, relaunch the setupAcquisition(hSI, hSICtl, "
+                "If the ScanImagePC or the ScanImage software crashed, relaunch the runAcquisition(hSI, hSICtl, "
                 "<parameters>) function in the MATLAB command line interface before resuming the interrupted "
                 "acquisition."
             )

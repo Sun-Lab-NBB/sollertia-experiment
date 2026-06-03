@@ -36,7 +36,7 @@ class _MesoscopeMQTTTopics(StrEnum):
     """
 
     ALIVE = "MesoscopeAlive"
-    """Lifecycle marker published by the ScanImagePC when its setupAcquisition MQTT client connects (empty payload).
+    """Lifecycle marker published by the ScanImagePC when its runAcquisition MQTT client connects (empty payload).
     The ScanImagePC republishes it until it receives a Preload command, closing the connection-ordering race."""
     PRELOAD = "MesoscopePreload"
     """Request to preload a persisted reference estimator as an alignment aid, carrying the estimator path or null in a
@@ -52,11 +52,17 @@ class _MesoscopeMQTTTopics(StrEnum):
     RECOVER = "MesoscopeRecover"
     """Request to reload the session estimator from the shared data directory and re-arm the Mesoscope without
     regenerating the z-stack (empty payload). Used to resume an acquisition interrupted by a transient failure."""
+    QUERY_STATE = "MesoscopeQueryState"
+    """Request for a one-shot snapshot of the Mesoscope stage, fast-Z, and laser state (empty payload). The
+    ScanImagePC replies on the State topic; used to populate a MesoscopePositions instance at runtime boundaries."""
     STATUS = "MesoscopeStatus"
     """Acknowledgement and progress reply published by the ScanImagePC, carrying 'command', 'state', and optional
     'detail' fields."""
     ERROR = "MesoscopeError"
     """Failure reply published by the ScanImagePC, carrying a 'message' field describing the error."""
+    STATE = "MesoscopeState"
+    """State snapshot published by the ScanImagePC in reply to a QueryState request, carrying the 'x', 'y', 'r', 'z',
+    'fast_z', 'tip', 'tilt', and 'power_mW' fields. 'tip' and 'tilt' are hardware placeholders reported as zero."""
 
 
 class _MesoscopeStatusState(StrEnum):
@@ -83,7 +89,7 @@ class _MesoscopeStatusState(StrEnum):
 class MesoscopeDriver:
     """Drives the ScanImage software that controls the Mesoscope over the shared Virtual Reality MQTT broker.
 
-    Encapsulates the MQTT command contract with the setupAcquisition MATLAB function running on the ScanImagePC:
+    Encapsulates the MQTT command contract with the runAcquisition MATLAB function running on the ScanImagePC:
     connection lifecycle, the estimator-preload and reference-generation setup handshake, and the begin, abort, and
     recover acquisition commands. Mesoscope control is tightly coupled to the Virtual Reality task, so the driver
     reuses the Virtual Reality broker discovery configuration rather than defining its own. Each command is dispatched
@@ -129,17 +135,17 @@ class MesoscopeDriver:
         self._mqtt.disconnect()
 
     def await_alive(self) -> None:
-        """Blocks until the ScanImagePC reports that its setupAcquisition MQTT client has connected.
+        """Blocks until the ScanImagePC reports that its runAcquisition MQTT client has connected.
 
         Notes:
             The ScanImagePC publishes the MesoscopeAlive marker once its MQTT client connects and republishes it until
             it receives a Preload command, so the driver catches the marker even if it subscribes slightly late. The
-            operator must launch the setupAcquisition function manually because it requires the ScanImage handles and
+            operator must launch the runAcquisition function manually because it requires the ScanImage handles and
             interactive imaging-parameter confirmations.
         """
         self._clear_buffer()
         message = (
-            "Launch the 'setupAcquisition(hSI, hSICtl, <parameters>)' function in the MATLAB command line on the "
+            "Launch the 'runAcquisition(hSI, hSICtl, <parameters>)' function in the MATLAB command line on the "
             "ScanImagePC to arm the mesoscope control interface."
         )
         console.echo(message=message, level=LogLevel.INFO)
@@ -236,7 +242,7 @@ class MesoscopeDriver:
                 break
             message = (
                 f"The mesoscope control driver sent the '{command}' command to the ScanImagePC but received no "
-                f"acknowledgement within {_ACK_TIMEOUT_MS // 1000} seconds. Ensure the setupAcquisition function is "
+                f"acknowledgement within {_ACK_TIMEOUT_MS // 1000} seconds. Ensure the runAcquisition function is "
                 f"running on the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
