@@ -114,7 +114,6 @@ class ZaberMotors:
             to work for most animals and provide an initial position for the animal to be mounted into the Mesoscope-VR
             enclosure.
         """
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # If previous position data is available, restores all motors to the positions used during previous sessions.
@@ -157,10 +156,8 @@ class ZaberMotors:
             else self._previous_positions.lickport_y,
         )
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def prepare_motors(self) -> None:
@@ -170,7 +167,6 @@ class ZaberMotors:
             This method ensures that all motors have a stable reference point for executing all other methods exposed
             by this instance and must be called before any other method in most use contexts.
         """
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Homes all motors in parallel.
@@ -182,10 +178,8 @@ class ZaberMotors:
         self._lickport_x.home()
         self._lickport_y.home()
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def park_position(self) -> None:
@@ -195,7 +189,6 @@ class ZaberMotors:
             This method should be called as part of the runtime's shutdown sequence to optimally position the motors to
             support homing during the next runtime.
         """
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         self._headbar_z.move(position=self._headbar_z.park_position)
@@ -206,15 +199,12 @@ class ZaberMotors:
         self._lickport_x.move(position=self._lickport_x.park_position)
         self._lickport_y.move(position=self._lickport_y.park_position)
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def maintenance_position(self) -> None:
         """Moves the managed Zaber motors to the Mesoscope-VR system maintenance position in parallel."""
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         self._headbar_z.move(position=self._headbar_z.maintenance_position)
@@ -225,10 +215,8 @@ class ZaberMotors:
         self._lickport_x.move(position=self._lickport_x.maintenance_position)
         self._lickport_y.move(position=self._lickport_y.maintenance_position)
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def mount_position(self) -> None:
@@ -236,7 +224,6 @@ class ZaberMotors:
 
         This motor positioning facilitates mounting the animal into the Mesoscope-VR system enclosure.
         """
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         self._lickport_z.move(position=self._lickport_z.mount_position)
@@ -259,10 +246,8 @@ class ZaberMotors:
             self._headbar_roll.move(position=self._previous_positions.headbar_roll)
             self._wheel_x.move(position=self._previous_positions.wheel_x)
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def unmount_position(self) -> None:
@@ -271,7 +256,6 @@ class ZaberMotors:
 
         This motor positioning facilitates removing the animal from the Mesoscope-VR system enclosure.
         """
-        # Disables the safety motor lock before moving the motors.
         self.unpark_motors()
 
         # Moves the LickPort back to the mount position, while keeping all other motors in their current positions.
@@ -279,10 +263,8 @@ class ZaberMotors:
         self._lickport_z.move(position=self._lickport_z.mount_position)
         self._lickport_x.move(position=self._lickport_x.mount_position)
 
-        # Waits for all motors to finish moving before returning to caller.
         self.wait_until_idle()
 
-        # Prevents further interaction with the motors without manually disabling the parking lock.
         self.park_motors()
 
     def generate_position_snapshot(self) -> ZaberPositions:

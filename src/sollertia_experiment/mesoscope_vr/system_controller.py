@@ -42,12 +42,12 @@ if TYPE_CHECKING:
 from .system import MesoscopeVRStates
 from .acquisition_components import (
     RESPONSE_DELAY,
+    RESPONSE_DELAY_TIMER,
     TrialState,
     MesoscopeVRLogMessageCodes,
     setup_mesoscope,
     reset_zaber_motors,
     setup_zaber_motors,
-    response_delay_timer,
     generate_zaber_snapshot,
     finalize_session_descriptor,
     generate_mesoscope_position_snapshot,
@@ -271,7 +271,7 @@ class MesoscopeVRSystem:
             "Zaber motors."
         )
         console.echo(message=message, level=LogLevel.WARNING)
-        response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
         # If the system has a snapshot of the Zaber positions used during a previous runtime, loads it into memory and
@@ -476,7 +476,7 @@ class MesoscopeVRSystem:
             self._microcontrollers.mesoscope_frame.set_monitoring_state(state=True)
 
             # Ensures that the frame monitoring starts before acquisition.
-            response_delay_timer.delay(delay=1000, block=False)  # Uses the global response delay timer.
+            RESPONSE_DELAY_TIMER.delay(delay=1000, block=False)  # Uses the global response delay timer.
 
             # Starts acquiring mesoscope frames.
             self._start_mesoscope()
@@ -960,8 +960,9 @@ class MesoscopeVRSystem:
         else:
             # It should be impossible to satisfy this error clause, but is kept for safety reasons.
             message = (
-                f"Unsupported session type {self._session_data.session_type} encountered when generating "
-                f"the snapshot of the Mesoscope-VR system's hardware configuration."
+                f"Unable to generate the hardware configuration snapshot for the Mesoscope-VR system. The session "
+                f"type must be one of the supported Mesoscope-VR session types, but got "
+                f"{self._session_data.session_type}."
             )
             console.error(message=message, error=ValueError)
 
@@ -1041,7 +1042,7 @@ class MesoscopeVRSystem:
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
 
             # Verifies that the mesoscope is not already acquiring frames.
-            response_delay_timer.delay(delay=1000, block=False)
+            RESPONSE_DELAY_TIMER.delay(delay=1000, block=False)
             if self._microcontrollers.mesoscope_frame.pulse_count > 0:
                 message = (
                     "Unable to trigger mesoscope frame acquisition, as the mesoscope is already acquiring frames. "
@@ -1069,10 +1070,10 @@ class MesoscopeVRSystem:
             console.echo(message=message, level=LogLevel.INFO)
 
             # Waits for the mesoscope to start acquiring the expected number of frames.
-            response_delay_timer.reset()
-            while response_delay_timer.elapsed < _MESOSCOPE_START_TIMEOUT_MS:
+            RESPONSE_DELAY_TIMER.reset()
+            while RESPONSE_DELAY_TIMER.elapsed < _MESOSCOPE_START_TIMEOUT_MS:
                 # Adds delay to prevent CPU spinning.
-                response_delay_timer.delay(delay=10, block=False)
+                RESPONSE_DELAY_TIMER.delay(delay=10, block=False)
 
                 if self._microcontrollers.mesoscope_frame.pulse_count >= _EXPECTED_FRAME_PULSES:
                     message = "Mesoscope frame acquisition: Started."
@@ -1115,7 +1116,7 @@ class MesoscopeVRSystem:
 
         while True:
             # Waits 2 seconds between checks (mesoscope runs at ~10 Hz, so 2s = ~20 frames if still running).
-            response_delay_timer.delay(delay=2000, block=False)
+            RESPONSE_DELAY_TIMER.delay(delay=2000, block=False)
 
             # If no frames received during the 2-second delay, mesoscope has stopped.
             if self._microcontrollers.mesoscope_frame.pulse_count == 0:

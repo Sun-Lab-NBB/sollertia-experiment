@@ -37,7 +37,7 @@ RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 
-response_delay_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+RESPONSE_DELAY_TIMER: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 """The PrecisionTimer instance used to support the proper rendering of all terminal outputs used during runtime."""
 
 
@@ -202,7 +202,7 @@ def generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_da
     )
     console.echo(message=message, level=LogLevel.INFO)
     # Delays for 2 seconds to ensure the user reads the message before continuing.
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Defines the error message for file formatting issues.
@@ -298,7 +298,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "already positioned inside the Mesoscope enclosure."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     # Blocks until a valid answer is received from the user.
     while True:
@@ -320,7 +320,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "collide with the stopper during homing, which will DAMAGE the motor."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
@@ -330,7 +330,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "VR screens, and make sure the animal is NOT mounted in the Mesoscope's enclosure."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Homes all managed motors in parallel.
@@ -348,7 +348,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "adjust any motors manually at this time. Do NOT install the mesoscope objective."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Restores all motors to the positions used during the previous session's runtime.
@@ -374,7 +374,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "terminating a failed runtime to restart it, enter 'no'. Note! Entering 'yes' does NOT move any motors."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     while True:
         user_input = input("Enter 'yes' or 'no': ").strip().lower()
@@ -402,7 +402,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
 
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Moves all motors to the hardcoded parking positions.
@@ -450,7 +450,7 @@ def setup_mesoscope(
             f"before proceeding."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
@@ -488,7 +488,7 @@ def setup_mesoscope(
             "the imaging plane for the animal."
         )
     console.echo(message=message, level=LogLevel.INFO)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
@@ -497,7 +497,7 @@ def setup_mesoscope(
         "ScanImage acquisition parameters by pressing the 'Win + PrtSc' combination."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Ensures that the screenshot is created before proceeding further.
@@ -513,7 +513,7 @@ def setup_mesoscope(
             f"directory only stores the .png screenshot generated during the previous preparation step."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
@@ -532,7 +532,7 @@ def setup_mesoscope(
         # optionally allows aborting the runtime early for window checking sessions.
         message = "Do you want to generate the ROI and MotionEstimator snapshots for this animal?"
         console.echo(message=message, level=LogLevel.INFO)
-        response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
         # Blocks until a valid answer is received from the user.
         while True:
@@ -579,7 +579,7 @@ def setup_mesoscope(
             f"setupAcquisition function is running on the ScanImagePC and retry."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        response_delay_timer.delay(delay=RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)

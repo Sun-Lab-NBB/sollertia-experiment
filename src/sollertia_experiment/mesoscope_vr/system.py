@@ -416,15 +416,14 @@ class _VRPCPersistentData:
         elif self.session_type == SessionTypes.WINDOW_CHECKING:
             self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_descriptor.yaml")
 
-        else:  # Raises an error for unsupported session types.
+        else:
             message = (
-                f"Unsupported session type '{self.session_type}' encountered when resolving the filesystem layout for "
-                f"the Mesoscope-VR data acquisition system. Currently, only the following data acquisition session "
-                f"types are supported: {','.join(MESOSCOPE_VR_SESSIONS)}."
+                f"Unable to resolve the filesystem layout for the Mesoscope-VR data acquisition system. The session "
+                f"type must be one of the supported types ({','.join(MESOSCOPE_VR_SESSIONS)}), but got "
+                f"'{self.session_type}'."
             )
             console.error(message=message, error=ValueError)
 
-        # Ensures that the target persistent_data directory exists.
         ensure_directory_exists(path=self.persistent_data_path)
 
 
@@ -463,7 +462,6 @@ class _ScanImagePCData:
         self.session_specific_path = self.mesoscope_root_path.joinpath(self.session)
         self.mesoscope_data_path = self.mesoscope_root_path.joinpath("mesoscope_data")
 
-        # Ensures that the shared data directory and the persistent data directory exist.
         ensure_directory_exists(path=self.mesoscope_data_path)
         ensure_directory_exists(path=self.persistent_data_path)
 
@@ -471,7 +469,7 @@ class _ScanImagePCData:
 # Registers the Mesoscope-VR system configuration with the shared cross-system registry so the shared create / resolve
 # / load helpers can operate on it. The shared helpers own the file lifecycle; this package only adds the registration
 # and the typed get_system_configuration() wrapper below. The shared get_system_configuration_path is re-exported as-is.
-register_system_configuration(AcquisitionSystems.MESOSCOPE_VR, MesoscopeSystemConfiguration)
+register_system_configuration(system=AcquisitionSystems.MESOSCOPE_VR, configuration_class=MesoscopeSystemConfiguration)
 
 
 def create_system_configuration_file() -> None:
@@ -482,7 +480,7 @@ def create_system_configuration_file() -> None:
     Mesoscope-VR configuration by delegating to the shared cross-system create_system_configuration_file, which owns
     the file-creation logic.
     """
-    _create_system_configuration_file(AcquisitionSystems.MESOSCOPE_VR)
+    _create_system_configuration_file(system=AcquisitionSystems.MESOSCOPE_VR)
 
 
 def get_system_configuration() -> MesoscopeSystemConfiguration:
@@ -551,7 +549,7 @@ class MesoscopeData:
         )
 
         # Long-term storage destinations. Resolves a StorageDestination only for each storage root that is configured
-        # (set to a non-default path) in the system configuration. This allows operating systems that lack some or all
+        # (set to a non-default path) in the system configuration. This supports host machines that lack some or all
         # long-term storage destinations. Destinations whose root is left unset are recorded under
         # unconfigured_destinations so the preprocessing pipeline can warn about the skipped backups. The configuration
         # order is preserved, defining the preference order used when a single destination is required.

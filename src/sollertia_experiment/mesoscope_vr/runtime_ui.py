@@ -136,6 +136,8 @@ class RuntimeControlUI:
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             state to other processes.
         _mode: The VisualizerMode that determines which UI elements are enabled.
+        _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+        _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
@@ -172,7 +174,7 @@ class RuntimeControlUI:
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
-        # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces.
+        # Does not disconnect or destroy the trackers, as they are owned by their respective interfaces.
 
     def __repr__(self) -> str:
         """Returns a string representation of the RuntimeControlUI instance."""
@@ -483,6 +485,34 @@ class _ControlUIWindow(QMainWindow):
             a centimeter per second, so the speed spinbox is refreshed only when the automatic component changes.
         _last_auto_duration: Tracks the most recently displayed runtime-driven running epoch duration threshold, in
             milliseconds, so the duration spinbox is refreshed only when the automatic component changes.
+        _exit_button: The button that signals the runtime to terminate.
+        _pause_button: The button that toggles the runtime between the paused and running states.
+        _reinforcing_guidance_button: The button that toggles reinforcing trial guidance, or None when the mode does
+            not include reinforcing trials.
+        _aversive_guidance_button: The button that toggles aversive trial guidance, or None when the mode does not
+            include aversive trials.
+        _runtime_status_label: The label that displays the current runtime status.
+        _valve_open_button: The button that opens the water reward valve.
+        _valve_close_button: The button that closes the water reward valve.
+        _reward_button: The button that delivers a single water reward.
+        _volume_spinbox: The spinbox that sets the water reward volume.
+        _valve_status_label: The label that displays the water valve's state.
+        _gas_valve_open_button: The button that opens the gas puff valve, or None when the mode does not include gas
+            puff controls.
+        _gas_valve_close_button: The button that closes the gas puff valve, or None when the mode does not include gas
+            puff controls.
+        _gas_puff_button: The button that delivers a single gas puff, or None when the mode does not include gas puff
+            controls.
+        _gas_duration_spinbox: The spinbox that sets the gas puff duration, or None when the mode does not include gas
+            puff controls.
+        _gas_valve_status_label: The label that displays the gas valve's state, or None when the mode does not include
+            gas puff controls.
+        _speed_group: The widget group containing the running speed threshold controls, or None outside run training.
+        _duration_group: The widget group containing the running epoch duration threshold controls, or None outside
+            run training.
+        _speed_spinbox: The spinbox that sets the running speed threshold, or None outside run training.
+        _duration_spinbox: The spinbox that sets the running epoch duration threshold, or None outside run training.
+        _monitor_timer: The QTimer that periodically polls the shared memory state to refresh the UI.
     """
 
     def __init__(
@@ -519,7 +549,6 @@ class _ControlUIWindow(QMainWindow):
 
         self.setWindowTitle("Mesoscope-VR Control Panel")
 
-        # Calculates window height based on visible elements.
         # Base height includes: runtime control (without guidance buttons) and valve control.
         base_height = 380
         if self._mode == VisualizerMode.RUN_TRAINING:
@@ -535,7 +564,7 @@ class _ControlUIWindow(QMainWindow):
         self._setup_ui()
         self._setup_monitoring()
 
-        self._apply_qt6_styles()
+        self._apply_styles()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         """Handles GUI window close events.
@@ -839,8 +868,8 @@ class _ControlUIWindow(QMainWindow):
             self._speed_spinbox = speed_spinbox
             self._duration_spinbox = duration_spinbox
 
-    def _apply_qt6_styles(self) -> None:
-        """Applies optimized styling to all UI elements managed by this instance."""
+    def _apply_styles(self) -> None:
+        """Applies the styling to all UI elements managed by this instance."""
         self.setStyleSheet("""
                     QMainWindow {
                         background-color: #ecf0f1;
@@ -1443,7 +1472,6 @@ class _ControlUIWindow(QMainWindow):
             self._reinforcing_guidance_button.setText("🎯 Enable Reinforcing Guidance")
             self._reinforcing_guidance_button.setObjectName("reinforcingGuidanceButton")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._reinforcing_guidance_button)
 
     def _update_aversive_guidance_ui(self) -> None:
@@ -1458,7 +1486,6 @@ class _ControlUIWindow(QMainWindow):
             self._aversive_guidance_button.setText("🎯 Enable Aversive Guidance")
             self._aversive_guidance_button.setObjectName("aversiveGuidanceButton")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._aversive_guidance_button)
 
     def _toggle_reinforcing_guidance(self) -> None:
@@ -1486,7 +1513,6 @@ class _ControlUIWindow(QMainWindow):
             self._runtime_status_label.setText("Runtime Status: 🟢 Running")
             self._runtime_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._pause_button)
 
     def _disable_valve_open_close_buttons(self) -> None:
