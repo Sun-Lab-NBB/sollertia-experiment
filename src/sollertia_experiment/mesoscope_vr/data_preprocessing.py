@@ -68,6 +68,14 @@ used by the Mesoscope-VR system."""
 _IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
 """Stores the frame-invariant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
 
+_PREPROCESSING_WORKER_COUNT: int = 31
+"""The number of parallel processes and threads used for the compute- and disk-bound preprocessing steps (log
+assembly, mesoscope data pulling, and mesoscope frame compression) executed on the VRPC."""
+
+_STORAGE_TRANSFER_THREAD_COUNT: int = 15
+"""The number of parallel threads used to push the preprocessed session data to the configured long-term storage
+destinations."""
+
 
 def preprocess_session_data(session_data: SessionData) -> None:
     """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
@@ -103,7 +111,7 @@ def preprocess_session_data(session_data: SessionData) -> None:
     rename_mesoscope_directory(mesoscope_data=mesoscope_data)
 
     # Assembles all log .npy entries into archive .npz files.
-    assemble_session_logs(session_data=session_data, processes=31)
+    assemble_session_logs(session_data=session_data, processes=_PREPROCESSING_WORKER_COUNT)
 
     # Renames all videos to use human-friendly names.
     rename_session_videos(session_data=session_data)
@@ -112,14 +120,14 @@ def preprocess_session_data(session_data: SessionData) -> None:
     _pull_mesoscope_data(
         session_data=session_data,
         mesoscope_data=mesoscope_data,
-        threads=31,
+        threads=_PREPROCESSING_WORKER_COUNT,
     )
 
     # Compresses all mesoscope-acquired frames and extracts their metadata.
     _preprocess_mesoscope_directory(
         session_data=session_data,
         mesoscope_data=mesoscope_data,
-        processes=31,
+        processes=_PREPROCESSING_WORKER_COUNT,
     )
 
     # Extracts and saves the animal's surgery data to the session's data directory and updates the water restriction
@@ -127,7 +135,11 @@ def preprocess_session_data(session_data: SessionData) -> None:
     _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
     # Sends preprocessed data to all configured long-term storage destinations.
-    push_session_data(session_data=session_data, destinations=mesoscope_data.destinations, threads=15)
+    push_session_data(
+        session_data=session_data,
+        destinations=mesoscope_data.destinations,
+        threads=_STORAGE_TRANSFER_THREAD_COUNT,
+    )
 
     message = f"Session {session_data.session_name} data preprocessing: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
@@ -567,25 +579,25 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     ensure_directory_exists(destination)
 
     # Defines the set of extensions and filenames to look for when verifying source directory contents.
-    _extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
-    _required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack.tiff"}
+    extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
+    required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack.tiff"}
 
     # Verifies that all required files are present in the source directory.
 
     # Extracts the names of files stored in the source directory.
-    files: tuple[Path, ...] = tuple(path for extension in _extensions for path in source.glob(extension))
+    files: tuple[Path, ...] = tuple(path for extension in extensions for path in source.glob(extension))
     file_names: set[str] = {file.name for file in files}
 
     # Checks which required files are missing.
-    missing_files = _required_mesoscope_files - file_names
+    missing_files = required_mesoscope_files - file_names
 
     # Raises a runtime error if any required files are missing.
     if missing_files:
-        missing_files_str = ", ".join(sorted(missing_files))
+        missing_files_listing = ", ".join(sorted(missing_files))
         message = (
             f"Unable to pull the mesoscope-acquired data from the ScanImagePC to the VRPC. The "
             f"'mesoscope_frames' ScanImage PC directory for the session {session_name} is missing the "
-            f"following required files: {missing_files_str}. Ensure that all required files are stored in the "
+            f"following required files: {missing_files_listing}. Ensure that all required files are stored in the "
             f"session-specific 'mesoscope_frames' directory on the ScanImagePC and rerun the command that caused this "
             f"error."
         )
@@ -593,8 +605,8 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
 
     # Removes all binary files from the source directory before transferring. This ensures that the directory
     # does not contain any marker files used during runtime.
-    for bin_file in source.glob("*.bin"):
-        bin_file.unlink(missing_ok=True)
+    for binary_file in source.glob("*.bin"):
+        binary_file.unlink(missing_ok=True)
 
     # Transfers the mesoscope frames data from the ScanImagePC to the local machine and removes the source directory
     # after the transfer is complete.

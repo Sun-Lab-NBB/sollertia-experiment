@@ -24,22 +24,24 @@ from sollertia_shared_assets import (
 )
 
 from .system import MesoscopeData, MesoscopePositions
+from .runtime_ui import collect_experimenter_notes
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .binding_classes import ZaberMotors
+    from .mesoscope_driver import MesoscopeDriver
 
 
-_RESPONSE_DELAY: int = 2000
+RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 
-_response_delay_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+RESPONSE_DELAY_TIMER: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 """The PrecisionTimer instance used to support the proper rendering of all terminal outputs used during runtime."""
 
 
-class _MesoscopeVRLogMessageCodes(IntEnum):
+class MesoscopeVRLogMessageCodes(IntEnum):
     """Defines the set of codes used by the Mesoscope-VR data acquisition to specify the ongoing events when logging
     the system data acquired during runtime.
     """
@@ -58,7 +60,7 @@ class _MesoscopeVRLogMessageCodes(IntEnum):
 
 
 @dataclass(slots=True)
-class _TrialState:
+class TrialState:
     """Tracks the state of the Mesoscope-VR-acquired session's task trials.
 
     This dataclass consolidates all trial-related state tracking attributes used during experiment runtimes to
@@ -176,88 +178,47 @@ class _TrialState:
         return self.reinforcing_failed_trials
 
 
-def _generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_data: MesoscopeData) -> None:
-    """Forces the user to update the mesoscope_positions.yaml file to reflect the current mesoscope's imaging position
-    coordinates and copies the validated file into the animal's persistent directory.
+def generate_mesoscope_position_snapshot(
+    session_data: SessionData, mesoscope_data: MesoscopeData, mesoscope_driver: MesoscopeDriver
+) -> None:
+    """Queries the current Mesoscope imaging position from the ScanImagePC and writes it as a mesoscope_positions.yaml
+    file to the session and the animal's persistent directories.
+
+    Notes:
+        Most position fields are queried directly from the ScanImage software over MQTT, so the mesoscope control
+        driver must still be connected and idle when this function runs. The red-dot alignment position is the only
+        field that cannot be queried, so it is entered manually, defaulting to the previous runtime's value.
 
     Args:
         session_data: The SessionData instance that defines the session for which the snapshot is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
+        mesoscope_driver: The MesoscopeDriver instance used to query the Mesoscope state over MQTT.
     """
     # If the session was not fully initialized (nk.bin marker exists), skips the snapshot generation.
     if session_data.raw_data.nk_path.exists():
         return
 
-    # Loads the previous position data into memory.
-    previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-        file_path=mesoscope_data.vrpc_data.mesoscope_positions_path,
-    )
+    # Loads the previous runtime's red-dot alignment position, if available, to offer as the default. This is the only
+    # position field that cannot be queried from the ScanImage software.
+    previous_red_dot_alignment_z = 0.0
+    if mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
+        previous_positions = MesoscopePositions.from_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
+        previous_red_dot_alignment_z = previous_positions.red_dot_alignment_z
 
-    # Forces the user to update the cached mesoscope position coordinates with the current data.
-    message = (
-        f"Update the data inside the mesoscope_positions.yaml file stored under the {session_data.session_name} "
-        f"session's 'raw_data' directory to reflect the current mesoscope objective position."
-    )
-    console.echo(message=message, level=LogLevel.INFO)
-    # Delays for 2 seconds to ensure the user reads the message before continuing.
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    # Queries the live mesoscope positions from the ScanImagePC, then fills in the red-dot alignment Z position from
+    # operator input, as it is the only field the ScanImage software cannot report.
+    mesoscope_positions = mesoscope_driver.query_state()
+    mesoscope_positions.red_dot_alignment_z = _prompt_red_dot_alignment(previous_value=previous_red_dot_alignment_z)
 
-    # Defines the error message for file formatting issues.
-    io_error_message = (
-        f"Unable to read the data from the {session_data.session_name} session's mesoscope_positions.yaml file. This "
-        f"indicates that the file was mis-formatted during editing. Make sure the file contents follow the .YAML "
-        f"format before retrying."
-    )
+    # Writes the snapshot to the session's raw_data directory and to the animal's persistent directory, overwriting any
+    # existing persistent file so it can seed the next runtime.
+    mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+    mesoscope_positions.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
-    # Defines the validation error message for unchanged positions.
-    validation_error_message = (
-        f"Failed to verify that the mesoscope_positions.yaml file stored inside the {session_data.session_name} "
-        f"session's raw_data directory has been updated to include the mesoscope imaging coordinates used during "
-        f"runtime. Edit the mesoscope_positions.yaml file to update the position fields with coordinates "
-        f"displayed in the ScanImage software or on the ThorLabs pad. Make sure to save the changes by pressing "
-        f"the 'CTRL+S' combination."
-    )
-
-    # Continuously attempts to read and validate the Mesoscope positions data until successful.
-    while True:
-        # Attempts to read the current mesoscope positions from the session file.
-        # noinspection PyBroadException
-        try:
-            mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-                file_path=session_data.system_raw_data.mesoscope_positions_path,
-            )
-        except Exception:
-            console.echo(message=io_error_message, level=LogLevel.ERROR)
-            input("Enter anything to continue: ")
-            continue
-
-        # Validates that the user has updated the position data.
-        if (
-            mesoscope_positions.mesoscope_x != previous_mesoscope_positions.mesoscope_x
-            or mesoscope_positions.mesoscope_y != previous_mesoscope_positions.mesoscope_y
-            or mesoscope_positions.mesoscope_z != previous_mesoscope_positions.mesoscope_z
-            or mesoscope_positions.mesoscope_roll != previous_mesoscope_positions.mesoscope_roll
-            or mesoscope_positions.mesoscope_fast_z != previous_mesoscope_positions.mesoscope_fast_z
-            or mesoscope_positions.mesoscope_tip != previous_mesoscope_positions.mesoscope_tip
-            or mesoscope_positions.mesoscope_tilt != previous_mesoscope_positions.mesoscope_tilt
-            or mesoscope_positions.laser_power_mw != previous_mesoscope_positions.laser_power_mw
-            or mesoscope_positions.red_dot_alignment_z != previous_mesoscope_positions.red_dot_alignment_z
-        ):
-            break
-
-        # If positions match, requests the user to update the file.
-        console.echo(message=validation_error_message, level=LogLevel.ERROR)
-        input("Enter anything to continue: ")
-
-    # Copies the updated mesoscope positions data into the animal's persistent directory.
-    shutil.copy2(
-        src=session_data.system_raw_data.mesoscope_positions_path,
-        dst=mesoscope_data.vrpc_data.mesoscope_positions_path,
-    )
+    console.echo(message="Mesoscope positions: Saved.", level=LogLevel.SUCCESS)
 
 
-def _generate_zaber_snapshot(
+def generate_zaber_snapshot(
     session_data: SessionData, mesoscope_data: MesoscopeData, zaber_motors: ZaberMotors
 ) -> None:
     """Creates a snapshot of the current Zaber motor positions and saves it as a zaber_positions.yaml file.
@@ -284,7 +245,7 @@ def _generate_zaber_snapshot(
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
+def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     """If necessary, carries out the Zaber motor setup and positioning sequence.
 
     Args:
@@ -296,7 +257,7 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "already positioned inside the Mesoscope enclosure."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     # Blocks until a valid answer is received from the user.
     while True:
@@ -318,7 +279,7 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "collide with the stopper during homing, which will DAMAGE the motor."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
@@ -328,7 +289,7 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "VR screens, and make sure the animal is NOT mounted in the Mesoscope's enclosure."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Homes all managed motors in parallel.
@@ -346,7 +307,7 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "adjust any motors manually at this time. Do NOT install the mesoscope objective."
     )
     console.echo(message=message, level=LogLevel.WARNING)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Restores all motors to the positions used during the previous session's runtime.
@@ -356,7 +317,7 @@ def _setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
+def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     """If necessary, carries out the Zaber motor parking and shutdown sequence.
 
     Args:
@@ -372,7 +333,7 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
         "terminating a failed runtime to restart it, enter 'no'. Note! Entering 'yes' does NOT move any motors."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     while True:
         user_input = input("Enter 'yes' or 'no': ").strip().lower()
@@ -400,7 +361,7 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
 
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Moves all motors to the hardcoded parking positions.
@@ -414,12 +375,20 @@ def _reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
-def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -> None:
+def setup_mesoscope(
+    session_data: SessionData, mesoscope_data: MesoscopeData, mesoscope_driver: MesoscopeDriver
+) -> None:
     """Guides the user through the sequence of steps that prepares the Mesoscope for the data acquisition runtime.
+
+    Notes:
+        The mesoscope is controlled over MQTT. After the ScanImagePC reports that the runAcquisition function has
+        connected, this function preloads the persisted reference estimator as an alignment aid, guides the user
+        through mounting and alignment, and commands the reference generation once the alignment screenshot appears.
 
     Args:
         session_data: The SessionData instance that defines the session for which the Mesoscope is being prepared.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
+        mesoscope_driver: The MesoscopeDriver instance used to command the ScanImage software over MQTT.
     """
     # Determines whether the acquired session is a Window Checking session.
     window_checking: bool = session_data.session_type == SessionTypes.WINDOW_CHECKING
@@ -440,8 +409,15 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
             f"before proceeding."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
+
+    # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
+    # exists for the animal) as an alignment aid. Automatic motion correction stays disabled so the user aligns the
+    # mesoscope manually during the next step.
+    mesoscope_driver.await_alive()
+    persisted_estimator_path = mesoscope_data.scanimagepc_data.motion_estimator_path
+    mesoscope_driver.preload(estimator_path=persisted_estimator_path if persisted_estimator_path.exists() else None)
 
     # Step 1: Resolves the imaging plane.
     # If the previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
@@ -471,7 +447,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
             "the imaging plane for the animal."
         )
     console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
@@ -480,7 +456,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         "ScanImage acquisition parameters by pressing the 'Win + PrtSc' combination."
     )
     console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
     # Ensures that the screenshot is created before proceeding further.
@@ -496,7 +472,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
             f"directory only stores the .png screenshot generated during the previous preparation step."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
@@ -515,7 +491,7 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
         # optionally allows aborting the runtime early for window checking sessions.
         message = "Do you want to generate the ROI and MotionEstimator snapshots for this animal?"
         console.echo(message=message, level=LogLevel.INFO)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
         # Blocks until a valid answer is received from the user.
         while True:
@@ -531,27 +507,29 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
                 # Proceeds with the metadata file acquisition sequence.
                 break
 
-        # Ensures that kinase is removed, while the phosphatase is present. This aborts the runtime
-        # after generating the zstack.tiff and the MotionEstimator.me files.
-        mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
-        mesoscope_data.scanimagepc_data.phosphatase_path.touch()
+    # Step 3: Commands the ScanImagePC to generate the new session estimator and high-definition z-stack and arm the
+    # mesoscope for acquisition. The alignment screenshot detected above gates this lengthy preparation step.
 
-    else:
-        # For all other runtimes, resets the kinase and phosphatase markers before instructing the user to start the
-        # acquisition preparation function.
-        mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
-        mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
-
-    # Step 3: Generates the new MotionEstimator file and arms the mesoscope for acquisition.
+    # Verifies the ScanImage imaging parameters before the lengthy reference generation. The runAcquisition function no
+    # longer blocks on this confirmation once launched, so it is surfaced here, immediately before the
+    # reference-generation command is dispatched.
     message = (
-        "Call the 'setupAcquisition(hSI, hSICtl)' function via MATLAB's command line interface on the ScanImagePC to "
-        "prepare and arm the mesoscope to acquire the session's data."
+        "Ensure the following ScanImage imaging parameters are applied before generating the reference: the laser is "
+        "enabled and its power is set, the ROI frame rate is ~10 Hz, the scan phase is ~0.8888, and PMT AutoOn is "
+        "enabled."
     )
-    console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+    console.echo(message=message, level=LogLevel.WARNING)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     input("Enter anything to continue: ")
 
-    # The preparation function generates 3 files: MotionEstimator.me, fov.roi, and zstack.tiff.
+    mesoscope_driver.generate_reference()
+
+    # Window checking sessions only need the generated reference files, so they release the mesoscope without acquiring
+    # any session frames.
+    if window_checking:
+        mesoscope_driver.abort()
+
+    # The reference generation produces 3 files: MotionEstimator.me, fov.roi, and zstack.tiff.
     target_files = (
         mesoscope_data.scanimagepc_data.mesoscope_data_path.joinpath("MotionEstimator.me"),
         mesoscope_data.scanimagepc_data.mesoscope_data_path.joinpath("fov.roi"),
@@ -569,17 +547,17 @@ def _setup_mesoscope(session_data: SessionData, mesoscope_data: MesoscopeData) -
 
         message = (
             f"Unable to confirm that the ScanImagePC has generated the required acquisition data files, as the "
-            f"following expected files are missing from the 'mesoscope_data' directory: {missing_names}. Rerun the "
-            f"setupAcquisition(hSI, hSICtl) function to generate the requested files."
+            f"following expected files are missing from the 'mesoscope_data' directory: {missing_names}. Ensure the "
+            f"runAcquisition function is running on the ScanImagePC and retry."
         )
         console.echo(message=message, level=LogLevel.ERROR)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
 
 
-def _verify_descriptor_update(
+def finalize_session_descriptor(
     descriptor: MesoscopeExperimentDescriptor
     | LickTrainingDescriptor
     | RunTrainingDescriptor
@@ -587,67 +565,63 @@ def _verify_descriptor_update(
     session_data: SessionData,
     mesoscope_data: MesoscopeData,
 ) -> None:
-    """Caches the input session's descriptor to disk and forces the user supervising the session's data acquisition to
-    update the data stored inside the cached descriptor file with the notes made during runtime.
+    """Collects the supervising experimenter's session notes through a GUI window, writes the completed descriptor to
+    the session's raw_data directory, and caches a copy to the animal's persistent directory.
+
+    The notes are entered through a blocking text-entry window instead of by manually editing the
+    session_descriptor.yaml file, removing the filesystem round-trip previously required to annotate each session.
 
     Args:
-        descriptor: The session_descriptor.yaml-convertible instance to cache to the acquired session's data directory.
+        descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
+            data directory.
         session_data: The SessionData instance that defines the session for which the descriptor file is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
-    # Saves the descriptor as a .yaml file.
+    # Collects the experimenter notes through a GUI window and stores them inside the descriptor. The runtime control
+    # UI is already shut down at this point, so the notes window runs on the main thread without competing GUIs.
+    descriptor.experimenter_notes = collect_experimenter_notes(session_name=session_data.session_name)
+
+    # Saves the completed descriptor as a .yaml file inside the session's raw_data directory.
     descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
-    console.echo(message="Session descriptor precursor file: Created.", level=LogLevel.SUCCESS)
+    console.echo(message="Session descriptor file: Created.", level=LogLevel.SUCCESS)
 
-    # Instructs the user to add user-collected data to the cached descriptor file.
-    message = (
-        f"Update the data inside the session_descriptor.yaml file stored under the {session_data.session_name} "
-        f"session's 'raw_data' directory to include the notes and data collected by the user supervising the runtime "
-        f"during the session's data acquisition."
-    )
-
-    console.echo(message=message, level=LogLevel.INFO)
-    _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
-
-    # Defines error messages for file operations.
-    io_error_message = (
-        f"Unable to read the data from the {session_data.session_name} session's session_descriptor.yaml file. This "
-        f"indicates that the file was mis-formatted during editing. Make sure the file contents follow the .YAML "
-        f"format before retrying."
-    )
-    validation_error_message = (
-        f"Failed to verify that the session_descriptor.yaml file stored inside the {session_data.session_name} "
-        f"session's raw_data directory has been updated to include the supervising user's notes taken during "
-        f"runtime. Manually edit the session_descriptor.yaml file and replace the default text under the "
-        f"'experimenter_notes' field with the notes taken during runtime. Make sure to save the changes by pressing "
-        f"the 'CTRL+S' combination."
-    )
-
-    # Continuously attempts to read and validate the session descriptor until successful.
-    while True:
-        # Attempts to read the session's descriptor data from the .yaml file.
-        # noinspection PyBroadException
-        try:
-            descriptor = descriptor.from_yaml(file_path=session_data.raw_data.session_descriptor_path)
-        except Exception:
-            console.echo(message=io_error_message, level=LogLevel.ERROR)
-            input("Enter anything to continue: ")
-            continue
-
-        # Validates that the user has updated the experimenter notes.
-        # noinspection PyUnresolvedReferences
-        if "Replace this with your notes." not in descriptor.experimenter_notes:
-            break
-
-        # If validation fails, prompts the user to update the file.
-        console.echo(message=validation_error_message, level=LogLevel.ERROR)
-        input("Enter anything to continue: ")
-
-    # If the descriptor has passed the verification, copies it up to the animal's persistent directory. This is a
-    # feature primarily used during training to restore the training parameters between training sessions of the
-    # same type.
+    # Copies the descriptor to the animal's persistent directory. This is primarily used during training to restore
+    # the training parameters between training sessions of the same type.
     shutil.copy2(
         src=session_data.raw_data.session_descriptor_path,
         dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
+
+
+def _prompt_red_dot_alignment(previous_value: float) -> float:
+    """Prompts the operator for the red-dot alignment Z position, defaulting to the currently stored value.
+
+    Notes:
+        The red-dot alignment Z position is the only Mesoscope position field that cannot be queried from the
+        ScanImage software, so it is entered manually. Submitting an empty response keeps the stored value.
+
+    Args:
+        previous_value: The currently stored red-dot alignment Z position, offered as the default.
+
+    Returns:
+        The red-dot alignment Z position to record, in micrometers.
+    """
+    message = (
+        f"Enter the red-dot alignment Z position, in micrometers, used during this runtime. The currently stored "
+        f"value is {previous_value}. Leave the response empty to keep the stored value."
+    )
+    console.echo(message=message, level=LogLevel.INFO)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+
+    while True:
+        response = input("Enter the red-dot alignment Z position: ").strip()
+        if not response:
+            return previous_value
+        try:
+            return float(response)
+        except ValueError:
+            error_message = (
+                f"Unable to interpret '{response}' as a number. Enter a numeric value or leave the response empty to "
+                f"keep the stored value."
+            )
+            console.echo(message=error_message, level=LogLevel.ERROR)

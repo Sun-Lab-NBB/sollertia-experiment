@@ -11,10 +11,11 @@ import contextlib
 from multiprocessing import Process
 
 import numpy as np
-from PySide6.QtGui import QFont, QCloseEvent
+from PySide6.QtGui import QFont, QShortcut, QCloseEvent, QKeySequence
 from PySide6.QtCore import Qt, QTimer, QSignalBlocker
 from PySide6.QtWidgets import (
     QLabel,
+    QDialog,
     QWidget,
     QGroupBox,
     QHBoxLayout,
@@ -24,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QApplication,
     QDoubleSpinBox,
+    QPlainTextEdit,
 )
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
@@ -134,6 +136,8 @@ class RuntimeControlUI:
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             state to other processes.
         _mode: The VisualizerMode that determines which UI elements are enabled.
+        _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
+        _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
@@ -170,7 +174,7 @@ class RuntimeControlUI:
     def __del__(self) -> None:
         """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
         self.shutdown()
-        # Note: Does not disconnect or destroy the trackers as they're owned by their respective interfaces.
+        # Does not disconnect or destroy the trackers, as they are owned by their respective interfaces.
 
     def __repr__(self) -> str:
         """Returns a string representation of the RuntimeControlUI instance."""
@@ -422,6 +426,41 @@ class RuntimeControlUI:
             self._gas_puff_tracker.disconnect()
 
 
+def collect_experimenter_notes(session_name: str) -> str:
+    """Opens a blocking text-entry window that captures the supervising experimenter's notes for a session.
+
+    The window runs a modal Qt dialog on the calling thread and stays open until the experimenter saves a non-empty
+    note. It is intended to run during the session's teardown, after the runtime control UI has shut down, to replace
+    the manual session_descriptor.yaml editing step.
+
+    Args:
+        session_name: The name of the session being annotated, shown in the window so the experimenter can confirm
+            they are documenting the correct session.
+
+    Returns:
+        The experimenter notes entered through the window.
+    """
+    # Reuses an existing QApplication when one is present, otherwise creates one. The main runtime process does not
+    # host a QApplication at teardown, since the runtime control UI runs in a separate process.
+    if QApplication.instance() is None:
+        application = QApplication(sys.argv)
+        application.setApplicationName("Mesoscope-VR Session Notes")
+        application.setOrganizationName("Sollertia")
+        application.setStyle("Fusion")
+
+    try:
+        dialog = _ExperimenterNotesDialog(session_name=session_name)
+        dialog.exec()
+    except Exception as error:
+        message = (
+            f"Unable to collect the experimenter notes for session {session_name} through the graphical user "
+            f"interface. Encountered the following error: {error}."
+        )
+        console.error(message=message, error=RuntimeError)
+    else:
+        return dialog.notes
+
+
 class _ControlUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's runtime GUI application window.
 
@@ -446,6 +485,34 @@ class _ControlUIWindow(QMainWindow):
             a centimeter per second, so the speed spinbox is refreshed only when the automatic component changes.
         _last_auto_duration: Tracks the most recently displayed runtime-driven running epoch duration threshold, in
             milliseconds, so the duration spinbox is refreshed only when the automatic component changes.
+        _exit_button: The button that signals the runtime to terminate.
+        _pause_button: The button that toggles the runtime between the paused and running states.
+        _reinforcing_guidance_button: The button that toggles reinforcing trial guidance, or None when the mode does
+            not include reinforcing trials.
+        _aversive_guidance_button: The button that toggles aversive trial guidance, or None when the mode does not
+            include aversive trials.
+        _runtime_status_label: The label that displays the current runtime status.
+        _valve_open_button: The button that opens the water reward valve.
+        _valve_close_button: The button that closes the water reward valve.
+        _reward_button: The button that delivers a single water reward.
+        _volume_spinbox: The spinbox that sets the water reward volume.
+        _valve_status_label: The label that displays the water valve's state.
+        _gas_valve_open_button: The button that opens the gas puff valve, or None when the mode does not include gas
+            puff controls.
+        _gas_valve_close_button: The button that closes the gas puff valve, or None when the mode does not include gas
+            puff controls.
+        _gas_puff_button: The button that delivers a single gas puff, or None when the mode does not include gas puff
+            controls.
+        _gas_duration_spinbox: The spinbox that sets the gas puff duration, or None when the mode does not include gas
+            puff controls.
+        _gas_valve_status_label: The label that displays the gas valve's state, or None when the mode does not include
+            gas puff controls.
+        _speed_group: The widget group containing the running speed threshold controls, or None outside run training.
+        _duration_group: The widget group containing the running epoch duration threshold controls, or None outside
+            run training.
+        _speed_spinbox: The spinbox that sets the running speed threshold, or None outside run training.
+        _duration_spinbox: The spinbox that sets the running epoch duration threshold, or None outside run training.
+        _monitor_timer: The QTimer that periodically polls the shared memory state to refresh the UI.
     """
 
     def __init__(
@@ -482,7 +549,6 @@ class _ControlUIWindow(QMainWindow):
 
         self.setWindowTitle("Mesoscope-VR Control Panel")
 
-        # Calculates window height based on visible elements.
         # Base height includes: runtime control (without guidance buttons) and valve control.
         base_height = 380
         if self._mode == VisualizerMode.RUN_TRAINING:
@@ -498,7 +564,7 @@ class _ControlUIWindow(QMainWindow):
         self._setup_ui()
         self._setup_monitoring()
 
-        self._apply_qt6_styles()
+        self._apply_styles()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         """Handles GUI window close events.
@@ -802,8 +868,8 @@ class _ControlUIWindow(QMainWindow):
             self._speed_spinbox = speed_spinbox
             self._duration_spinbox = duration_spinbox
 
-    def _apply_qt6_styles(self) -> None:
-        """Applies optimized styling to all UI elements managed by this instance."""
+    def _apply_styles(self) -> None:
+        """Applies the styling to all UI elements managed by this instance."""
         self.setStyleSheet("""
                     QMainWindow {
                         background-color: #ecf0f1;
@@ -1406,7 +1472,6 @@ class _ControlUIWindow(QMainWindow):
             self._reinforcing_guidance_button.setText("🎯 Enable Reinforcing Guidance")
             self._reinforcing_guidance_button.setObjectName("reinforcingGuidanceButton")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._reinforcing_guidance_button)
 
     def _update_aversive_guidance_ui(self) -> None:
@@ -1421,7 +1486,6 @@ class _ControlUIWindow(QMainWindow):
             self._aversive_guidance_button.setText("🎯 Enable Aversive Guidance")
             self._aversive_guidance_button.setObjectName("aversiveGuidanceButton")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._aversive_guidance_button)
 
     def _toggle_reinforcing_guidance(self) -> None:
@@ -1449,7 +1513,6 @@ class _ControlUIWindow(QMainWindow):
             self._runtime_status_label.setText("Runtime Status: 🟢 Running")
             self._runtime_status_label.setStyleSheet("QLabel { color: #27ae60; font-weight: bold; }")
 
-        # Refreshes styles after object name change.
         self._refresh_button_style(button=self._pause_button)
 
     def _disable_valve_open_close_buttons(self) -> None:
@@ -1487,3 +1550,77 @@ class _ControlUIWindow(QMainWindow):
         if self._gas_valve_status_label is not None:
             self._gas_valve_status_label.setText("Valve: 💨 Puffing")
             self._gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
+
+
+class _ExperimenterNotesDialog(QDialog):
+    """Renders a modal text-entry window used to capture the supervising experimenter's notes for a single session.
+
+    The window stays open until the experimenter saves a non-empty note, preserving the mandatory annotation step
+    that previously required editing the session_descriptor.yaml file by hand.
+
+    Attributes:
+        _editor: The multi-line text field that holds the entered experimenter notes.
+        _save_button: The button that confirms the entered notes and closes the window.
+    """
+
+    def __init__(self, session_name: str) -> None:
+        super().__init__()
+
+        self.setWindowTitle("Session Notes")
+        self.setModal(True)
+        self.setMinimumSize(500, 320)
+
+        instruction = QLabel(
+            f"Record the notes collected while supervising session {session_name}. The window cannot be closed until "
+            f"the notes are saved."
+        )
+        instruction.setWordWrap(True)
+
+        self._editor: QPlainTextEdit = QPlainTextEdit()
+        self._editor.setPlaceholderText("Enter the notes collected while supervising this session...")
+
+        self._save_button: QPushButton = QPushButton("Save Notes")
+        self._save_button.setEnabled(False)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self._save_button)
+
+        layout = QVBoxLayout()
+        layout.addWidget(instruction)
+        layout.addWidget(self._editor)
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+        # Enables the save button only while the field holds notes and wires the button and the Ctrl+Enter shortcut
+        # to confirm the entered notes.
+        self._editor.textChanged.connect(self._refresh_save_button_state)
+        self._save_button.clicked.connect(self.accept)
+        save_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        save_shortcut.activated.connect(self._confirm_notes)
+
+    @property
+    def notes(self) -> str:
+        """Returns the experimenter notes entered into the text field with surrounding whitespace removed."""
+        return self._editor.toPlainText().strip()
+
+    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
+        """Blocks window-manager close requests so the window can only be dismissed by saving notes.
+
+        Args:
+            event: The Qt-generated window shutdown event instance.
+        """
+        if event is not None:
+            event.ignore()
+
+    def reject(self) -> None:
+        """Suppresses the dialog's cancel action so the window cannot be dismissed without saving notes."""
+
+    def _refresh_save_button_state(self) -> None:
+        """Enables the save button only when the notes field holds at least one non-whitespace character."""
+        self._save_button.setEnabled(bool(self.notes))
+
+    def _confirm_notes(self) -> None:
+        """Confirms the entered notes through the Ctrl+Enter shortcut when the field is not empty."""
+        if self.notes:
+            self.accept()

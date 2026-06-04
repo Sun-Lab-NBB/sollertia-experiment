@@ -30,7 +30,14 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import DataLogger
 from ataraxis_communication_interface import MicroControllerInterface
 
-from .system import MesoscopeData, ZaberPositions, MesoscopePositions, get_system_configuration
+from .system import (
+    RUN_TRAINING_THRESHOLD_LIMITS,
+    MesoscopeData,
+    ZaberPositions,
+    MesoscopeVRStates,
+    MesoscopePositions,
+    get_system_configuration,
+)
 from ..cross_system import (
     BrakeInterface,
     WaterValveInterface,
@@ -40,26 +47,24 @@ from ..cross_system import (
 )
 from .maintenance_ui import MaintenanceControlUI
 from .binding_classes import ZaberMotors, VideoSystems
+from .mesoscope_driver import MesoscopeDriver
+from .system_controller import MesoscopeVRSystem
 from .data_preprocessing import purge_session, preprocess_session_data
+from .acquisition_components import (
+    RESPONSE_DELAY,
+    RESPONSE_DELAY_TIMER,
+    setup_mesoscope,
+    reset_zaber_motors,
+    setup_zaber_motors,
+    generate_zaber_snapshot,
+    finalize_session_descriptor,
+    generate_mesoscope_position_snapshot,
+)
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .system import MesoscopeSystemConfiguration
-
-
-from .system import RUN_TRAINING_THRESHOLD_LIMITS, MesoscopeVRStates
-from .system_controller import _MesoscopeVRSystem
-from .acquisition_components import (
-    _RESPONSE_DELAY,
-    _setup_mesoscope,
-    _reset_zaber_motors,
-    _setup_zaber_motors,
-    _response_delay_timer,
-    _generate_zaber_snapshot,
-    _verify_descriptor_update,
-    _generate_mesoscope_position_snapshot,
-)
 
 _RENDERING_SEPARATION_DELAY: int = 500
 """Specifies the number of milliseconds to delay between rendering console outputs (stderr) and non-console outputs
@@ -132,6 +137,13 @@ def window_checking_logic(
     precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
     zaber_motors: ZaberMotors | None = None
+
+    # Builds the mesoscope control driver used to command the ScanImage software over the shared Virtual Reality MQTT
+    # broker. The driver is connected just before the mesoscope preparation sequence and disconnected during cleanup.
+    mesoscope_driver = MesoscopeDriver(
+        configuration=system_configuration.assets.vr_task,
+        acquisition=system_configuration.acquisition,
+    )
     try:
         # If the animal has a snapshot of Zaber motor positions used during a previous runtime, loads and uses these
         # positions. Otherwise, uses the default positions hardcoded in the Zaber controller's non-volatile memory.
@@ -141,7 +153,7 @@ def window_checking_logic(
             else None
         )
 
-        # Initializes the data logger. This initialization follows the same procedure as the _MesoscopeVRSystem class.
+        # Initializes the data logger. This initialization follows the same procedure as the MesoscopeVRSystem class.
         logger: DataLogger = DataLogger(
             output_directory=session_data.raw_data_path,
             # Creates the behavior_log subdirectory under raw_data.
@@ -171,7 +183,7 @@ def window_checking_logic(
             "Zaber motors."
         )
         console.echo(message=message, level=LogLevel.WARNING)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
         # Establishes communication with Zaber motors.
@@ -181,23 +193,27 @@ def window_checking_logic(
         session_data.mark_runtime_initialized()
 
         # Prepares Zaber motors for data acquisition.
-        _setup_zaber_motors(zaber_motors=zaber_motors)
+        setup_zaber_motors(zaber_motors=zaber_motors)
 
-        # Runs the user through the process of preparing the mesoscope and assessing the quality of the animal's cranial
-        # window.
-        _setup_mesoscope(session_data=session_data, mesoscope_data=mesoscope_data)
+        # Connects to the ScanImagePC over MQTT, then runs the user through the process of preparing the mesoscope and
+        # assessing the quality of the animal's cranial window.
+        mesoscope_driver.connect()
+        setup_mesoscope(session_data=session_data, mesoscope_data=mesoscope_data, mesoscope_driver=mesoscope_driver)
 
         # Retrieves current motor positions and packages them into a ZaberPositions object.
-        _generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
+        generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
 
-        # Instructs the user to update the session descriptor file.
-        _verify_descriptor_update(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
+        # Collects the experimenter notes through a GUI window and writes the completed session descriptor.
+        finalize_session_descriptor(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
 
-        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking.
-        _generate_mesoscope_position_snapshot(session_data=session_data, mesoscope_data=mesoscope_data)
+        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking by
+        # querying the still-connected ScanImagePC.
+        generate_mesoscope_position_snapshot(
+            session_data=session_data, mesoscope_data=mesoscope_data, mesoscope_driver=mesoscope_driver
+        )
 
         # Resets Zaber motors to their original positions.
-        _reset_zaber_motors(zaber_motors=zaber_motors)
+        reset_zaber_motors(zaber_motors=zaber_motors)
 
         # Terminates the face camera.
         cameras.stop()
@@ -223,7 +239,10 @@ def window_checking_logic(
 
         # If Zaber motors were connected, attempts to gracefully shut down the motors.
         if zaber_motors is not None:
-            _reset_zaber_motors(zaber_motors=zaber_motors)
+            reset_zaber_motors(zaber_motors=zaber_motors)
+
+        # Disconnects from the ScanImagePC. The disconnect is a no-op if the driver never connected.
+        mesoscope_driver.disconnect()
 
         # Ends the runtime.
         message = "Window checking session: Complete."
@@ -438,10 +457,9 @@ def lick_training_logic(
     if disable_unconsumed_limit:
         descriptor.maximum_unconsumed_rewards = len(reward_delays)
 
-    system: _MesoscopeVRSystem | None = None
+    system: MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class.
-        system = _MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
+        system = MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
 
         # Initializes all system assets and guides the user through hardware-specific session preparation steps.
         system.start()
@@ -758,10 +776,9 @@ def run_training_logic(
     descriptor.final_run_speed_threshold_cm_s = descriptor.initial_run_speed_threshold_cm_s
     descriptor.final_run_duration_threshold_s = descriptor.initial_run_duration_threshold_s
 
-    system: _MesoscopeVRSystem | None = None
+    system: MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class.
-        system = _MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
+        system = MesoscopeVRSystem(session_data=session_data, session_descriptor=descriptor)
 
         # Initializes all system assets and guides the user through hardware-specific session preparation steps.
         system.start()
@@ -921,14 +938,12 @@ def run_training_logic(
             if elapsed_time > previous_time:
                 previous_time = elapsed_time
 
-                # Updates the time display without advancing the progress bar.
                 elapsed_minutes = int(elapsed_time // 60)
                 elapsed_seconds = int(elapsed_time % 60)
                 progress_bar.set_postfix_str(
                     f"Time: {elapsed_minutes:02d}:{elapsed_seconds:02d}/{descriptor.maximum_training_time_min:02d}:00"
                 )
 
-                # Refreshes the display to show updated time without changing progress.
                 progress_bar.refresh()
 
             # If the total volume of water dispensed during the session exceeds the maximum allowed volume, aborts the
@@ -1110,10 +1125,9 @@ def experiment_logic(
     # Initializes the timer to enforce experiment state durations.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
 
-    system: _MesoscopeVRSystem | None = None
+    system: MesoscopeVRSystem | None = None
     try:
-        # Initializes the system class.
-        system = _MesoscopeVRSystem(
+        system = MesoscopeVRSystem(
             session_data=session_data, session_descriptor=descriptor, experiment_configuration=experiment_config
         )
 
@@ -1298,7 +1312,7 @@ def maintenance_logic() -> None:
             console.echo(message=message, level=LogLevel.SUCCESS)
 
             # Avoids the visual clash with the Zaber positioning dialog.
-            _response_delay_timer.delay(delay=_RENDERING_SEPARATION_DELAY, block=False)
+            RESPONSE_DELAY_TIMER.delay(delay=_RENDERING_SEPARATION_DELAY, block=False)
 
             # If Zaber motors are being used, initializes and moves them to the maintenance positions.
             if move_zaber_motors == "y":
@@ -1315,7 +1329,7 @@ def maintenance_logic() -> None:
                 console.echo(message=message, level=LogLevel.WARNING)
 
                 # Delays to ensure the user reads the message before continuing.
-                _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+                RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
                 input("Press Enter to continue: ")
                 zaber_motors.prepare_motors()
@@ -1393,7 +1407,7 @@ def maintenance_logic() -> None:
                 console.echo(message=message, level=LogLevel.WARNING)
 
                 # Delays for 2 seconds to ensure the user reads the message before continuing.
-                _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+                RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
                 input("Press Enter to continue: ")
                 zaber_motors.park_position()

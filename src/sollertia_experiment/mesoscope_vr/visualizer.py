@@ -618,14 +618,14 @@ class BehaviorVisualizer:
                     )
 
         # Updates x-axis labels. Empty positions get empty labels, filled positions get trial numbers.
-        num_displayed = min(self._total_trials, _TRIAL_HISTORY_SIZE)
-        start_trial_number = self._total_trials - num_displayed + 1
+        displayed_trial_count = min(self._total_trials, _TRIAL_HISTORY_SIZE)
+        start_trial_number = self._total_trials - displayed_trial_count + 1
         labels: list[str] = []
         for index in range(_TRIAL_HISTORY_SIZE):
             if self._trial_types[index] == -1:
                 labels.append("")
             else:
-                labels.append(str(start_trial_number + index - (_TRIAL_HISTORY_SIZE - num_displayed)))
+                labels.append(str(start_trial_number + index - (_TRIAL_HISTORY_SIZE - displayed_trial_count)))
         self._trial_axis.set_xticklabels(labels=labels)
 
         # Rebuilds the cached background so the updated trial rectangles and tick labels persist
@@ -682,7 +682,7 @@ class BehaviorVisualizer:
     def _setup_trial_axis(self) -> None:
         """Initializes the trial performance panel with empty rectangle patches.
 
-        This method creates a visualization showing the most recent trials. The layout adapts based on which trial
+        Builds a visualization showing the most recent trials. The layout adapts based on which trial
         types are enabled: when both reinforcing and aversive trials are enabled, trials appear in a 2-row layout
         with reinforcing trials on the bottom and aversive trials on top. When only one trial type is enabled,
         a single-row layout is used.
@@ -814,8 +814,8 @@ def _plt_palette(color: str) -> tuple[float, float, float]:
         return _PALETTE_DICT[color]
     except KeyError:
         message = (
-            f"Unexpected color name '{color}' encountered when converting the colloquial color name to RGB array. "
-            f"Provide one of the supported color arguments: {', '.join(_PALETTE_DICT.keys())}."
+            f"Unable to convert the colloquial color name to an RGB array. The color must be one of the supported "
+            f"options ({', '.join(_PALETTE_DICT.keys())}), but got '{color}'."
         )
         console.error(message=message, error=KeyError)
 
@@ -837,9 +837,8 @@ def _plt_line_styles(line_style: str) -> str:
         return str(_LINE_STYLE_DICT[line_style])
     except KeyError:
         message = (
-            f"Unexpected line style name '{line_style}' encountered when converting the colloquial line style name to "
-            f"the pyplot linestyle string. Provide one of the supported line style arguments: "
-            f"{', '.join(_LINE_STYLE_DICT.keys())}."
+            f"Unable to convert the colloquial line style name to the pyplot linestyle string. The line style must "
+            f"be one of the supported options ({', '.join(_LINE_STYLE_DICT.keys())}), but got '{line_style}'."
         )
         console.error(message=message, error=KeyError)
 

@@ -178,7 +178,7 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Note: Does not disconnect trackers here - they're owned by their respective interfaces and disconnecting
+        # Does not disconnect the trackers here. They are owned by their respective interfaces, and disconnecting
         # them would break access to delivered_volume when generating the session descriptor during shutdown.
 
         self._started = False
@@ -190,49 +190,49 @@ class MaintenanceControlUI:
 
     @property
     def valve_open_signal(self) -> bool:
-        """Returns True if the user has requested to open the valve."""
+        """Returns True if the user has requested to open the valve and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.VALVE_OPEN])
         self._data_array[_DataArrayIndex.VALVE_OPEN] = 0
         return signal
 
     @property
     def valve_close_signal(self) -> bool:
-        """Returns True if the user has requested to close the valve."""
+        """Returns True if the user has requested to close the valve and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.VALVE_CLOSE])
         self._data_array[_DataArrayIndex.VALVE_CLOSE] = 0
         return signal
 
     @property
     def valve_reward_signal(self) -> bool:
-        """Returns True if the user has requested to deliver a reward."""
+        """Returns True if the user has requested to deliver a reward and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.VALVE_REWARD])
         self._data_array[_DataArrayIndex.VALVE_REWARD] = 0
         return signal
 
     @property
     def valve_reference_signal(self) -> bool:
-        """Returns True if the user has requested to run valve reference calibration."""
+        """Returns True if the user has requested valve reference calibration and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.VALVE_REFERENCE])
         self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 0
         return signal
 
     @property
     def valve_calibrate_signal(self) -> bool:
-        """Returns True if the user has requested valve calibration."""
+        """Returns True if the user has requested valve calibration and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.VALVE_CALIBRATE])
         self._data_array[_DataArrayIndex.VALVE_CALIBRATE] = 0
         return signal
 
     @property
     def brake_lock_signal(self) -> bool:
-        """Returns True if the user has requested to lock the brake."""
+        """Returns True if the user has requested to lock the brake and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.BRAKE_LOCK])
         self._data_array[_DataArrayIndex.BRAKE_LOCK] = 0
         return signal
 
     @property
     def brake_unlock_signal(self) -> bool:
-        """Returns True if the user has requested to unlock the brake."""
+        """Returns True if the user has requested to unlock the brake and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.BRAKE_UNLOCK])
         self._data_array[_DataArrayIndex.BRAKE_UNLOCK] = 0
         return signal
@@ -249,21 +249,21 @@ class MaintenanceControlUI:
 
     @property
     def gas_valve_open_signal(self) -> bool:
-        """Returns True if the user has requested to open the gas puff valve."""
+        """Returns True if the user has requested to open the gas puff valve and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_OPEN])
         self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 0
         return signal
 
     @property
     def gas_valve_close_signal(self) -> bool:
-        """Returns True if the user has requested to close the gas puff valve."""
+        """Returns True if the user has requested to close the gas puff valve and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE])
         self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
         return signal
 
     @property
     def gas_valve_pulse_signal(self) -> bool:
-        """Returns True if the user has requested to pulse the gas puff valve."""
+        """Returns True if the user has requested to pulse the gas puff valve and clears the request when read."""
         signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PULSE])
         self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 0
         return signal
@@ -315,6 +315,25 @@ class _MaintenanceUIWindow(QMainWindow):
         _calibration_in_progress: Tracks whether a calibration procedure is in progress.
         _referencing_in_progress: Tracks whether a referencing procedure is in progress.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
+        _valve_open_button: The button that opens the water valve.
+        _valve_close_button: The button that closes the water valve.
+        _volume_spinbox: The spinbox that sets the water reward volume.
+        _valve_reward_button: The button that delivers a single water reward.
+        _valve_status_label: The label that displays the water valve's state.
+        _valve_reference_button: The button that runs the valve reference calibration sequence.
+        _pulse_duration_spinbox: The spinbox that sets the valve calibration pulse duration.
+        _calibrate_button: The button that runs the valve calibration sequence.
+        _calibration_status_label: The label that displays the calibration status.
+        _brake_lock_button: The button that locks the wheel brake.
+        _brake_unlock_button: The button that unlocks the wheel brake.
+        _brake_status_label: The label that displays the brake's state.
+        _gas_valve_open_button: The button that opens the gas puff valve.
+        _gas_valve_close_button: The button that closes the gas puff valve.
+        _gas_puff_duration_spinbox: The spinbox that sets the gas puff duration.
+        _gas_valve_puff_button: The button that delivers a single gas puff.
+        _gas_valve_status_label: The label that displays the gas valve's state.
+        _terminate_button: The button that signals the maintenance runtime to terminate.
+        _monitor_timer: The QTimer that periodically polls the shared memory state to refresh the UI.
     """
 
     def __init__(
@@ -336,7 +355,7 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._setup_ui()
         self._setup_monitoring()
-        self._apply_qt6_styles()
+        self._apply_styles()
 
     def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
         """Handles GUI window close events.
@@ -592,7 +611,7 @@ class _MaintenanceUIWindow(QMainWindow):
 
         main_layout.addWidget(self._terminate_button)
 
-    def _apply_qt6_styles(self) -> None:
+    def _apply_styles(self) -> None:
         """Applies styling to all UI elements."""
         self.setStyleSheet("""
             QMainWindow {

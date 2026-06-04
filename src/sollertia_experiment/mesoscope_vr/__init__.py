@@ -6,7 +6,9 @@ from .system import (
     MesoscopeVRAssets,
     MesoscopePositions,
     MesoscopeFileSystem,
+    MesoscopeAcquisition,
     MesoscopeGoogleSheets,
+    MesoscopeAcquisitionOrder,
     MesoscopeMicroControllers,
     MesoscopeStorageDestination,
     MesoscopeSystemConfiguration,
@@ -21,6 +23,7 @@ from .data_acquisition import (
     lick_training_logic,
     window_checking_logic,
 )
+from .mesoscope_driver import MesoscopeDriver
 from .data_preprocessing import (
     purge_session,
     preprocess_session_data,
@@ -28,7 +31,10 @@ from .data_preprocessing import (
 )
 
 __all__ = [
+    "MesoscopeAcquisition",
+    "MesoscopeAcquisitionOrder",
     "MesoscopeCameras",
+    "MesoscopeDriver",
     "MesoscopeFileSystem",
     "MesoscopeGoogleSheets",
     "MesoscopeMicroControllers",

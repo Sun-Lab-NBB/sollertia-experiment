@@ -31,6 +31,7 @@ from ..vr_task import (
 from .runtime_ui import RuntimeControlUI
 from .visualizer import VisualizerMode, BehaviorVisualizer
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
+from .mesoscope_driver import MesoscopeDriver
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
 
 if TYPE_CHECKING:
@@ -40,16 +41,16 @@ if TYPE_CHECKING:
 
 from .system import MesoscopeVRStates
 from .acquisition_components import (
-    _RESPONSE_DELAY,
-    _TrialState,
-    _setup_mesoscope,
-    _reset_zaber_motors,
-    _setup_zaber_motors,
-    _response_delay_timer,
-    _generate_zaber_snapshot,
-    _verify_descriptor_update,
-    _MesoscopeVRLogMessageCodes,
-    _generate_mesoscope_position_snapshot,
+    RESPONSE_DELAY,
+    RESPONSE_DELAY_TIMER,
+    TrialState,
+    MesoscopeVRLogMessageCodes,
+    setup_mesoscope,
+    reset_zaber_motors,
+    setup_zaber_motors,
+    generate_zaber_snapshot,
+    finalize_session_descriptor,
+    generate_mesoscope_position_snapshot,
 )
 
 _MINIMUM_CPU_COUNT: int = 10
@@ -74,7 +75,7 @@ _MICROLITERS_PER_MILLILITER: float = 1000.0
 milliliters."""
 
 
-class _MesoscopeVRSystem:
+class MesoscopeVRSystem:
     """Provides methods for conducting data acquisition sessions using the Mesoscope-VR system.
 
     Notes:
@@ -149,7 +150,7 @@ class _MesoscopeVRSystem:
             None, if the managed runtime does not require behavior visualization.
         _mesoscope_timer: The PrecisionTimer instance used to track the delay between receiving consecutive
             mesoscope frame acquisition pulses.
-        _trial_state: The _TrialState instance that tracks the progression of trials during experiment runtimes.
+        _trial_state: The TrialState instance that tracks the progression of trials during experiment runtimes.
 
     Raises:
         RuntimeError: If the host-machine does not have enough logical CPU cores to support the runtime.
@@ -240,7 +241,7 @@ class _MesoscopeVRSystem:
         self._paused_water_volume: np.float64 = np.float64(0.0)
 
         # Initializes the trial state tracking dataclass.
-        self._trial_state: _TrialState = _TrialState()
+        self._trial_state: TrialState = TrialState()
 
         # Initializes the DataLogger instance used to log data from all microcontrollers, camera frame savers, and this
         # class instance.
@@ -270,7 +271,7 @@ class _MesoscopeVRSystem:
             "Zaber motors."
         )
         console.echo(message=message, level=LogLevel.WARNING)
-        _response_delay_timer.delay(delay=_RESPONSE_DELAY, block=False)
+        RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         input("Enter anything to continue: ")
 
         # If the system has a snapshot of the Zaber positions used during a previous runtime, loads it into memory and
@@ -301,6 +302,14 @@ class _MesoscopeVRSystem:
                 task_template=task_template,
                 expected_scene_name=self._experiment_configuration.unity_scene_name,
             )
+
+        # Builds the mesoscope control driver. It reuses the shared Virtual Reality MQTT broker to command the
+        # ScanImage software running on the ScanImagePC, and is connected only for mesoscope experiment sessions.
+        self._mesoscope: MesoscopeDriver = MesoscopeDriver(
+            configuration=self._system_configuration.assets.vr_task,
+            acquisition=self._system_configuration.acquisition,
+        )
+
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
         # Initializes but does not start the assets used by all runtimes. These assets need to be started in a
@@ -313,9 +322,9 @@ class _MesoscopeVRSystem:
         self._visualizer: BehaviorVisualizer = BehaviorVisualizer()
 
     def __repr__(self) -> str:
-        """Returns a string representation of the _MesoscopeVRSystem instance."""
+        """Returns a string representation of the MesoscopeVRSystem instance."""
         return (
-            f"_MesoscopeVRSystem(session_type={self._session_data.session_type}, started={self._started}, "
+            f"MesoscopeVRSystem(session_type={self._session_data.session_type}, started={self._started}, "
             f"paused={self._paused})"
         )
 
@@ -391,15 +400,20 @@ class _MesoscopeVRSystem:
         # non-graceful way (without running the stop() sequence). This way, the next runtime restarts with the
         # calibrated zaber positions. The snapshot includes any adjustment to the HeadBar positions performed during
         # the red-dot alignment.
-        _setup_zaber_motors(zaber_motors=self._zaber_motors)
-        _generate_zaber_snapshot(
+        setup_zaber_motors(zaber_motors=self._zaber_motors)
+        generate_zaber_snapshot(
             session_data=self._session_data, mesoscope_data=self._mesoscope_data, zaber_motors=self._zaber_motors
         )
 
         # If the session is a mesoscope experiment, initializes the mesoscope.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            # Instructs the user to prepare the mesoscope for data acquisition.
-            _setup_mesoscope(session_data=self._session_data, mesoscope_data=self._mesoscope_data)
+            # Connects to the ScanImagePC over MQTT, then instructs the user to prepare the mesoscope for acquisition.
+            self._mesoscope.connect()
+            setup_mesoscope(
+                session_data=self._session_data,
+                mesoscope_data=self._mesoscope_data,
+                mesoscope_driver=self._mesoscope,
+            )
 
         # Determines the visualizer mode based on session type. This mode is used by both the runtime control UI and
         # the behavior visualizer to conditionally enable/disable UI elements.
@@ -465,7 +479,7 @@ class _MesoscopeVRSystem:
             self._microcontrollers.mesoscope_frame.set_monitoring_state(state=True)
 
             # Ensures that the frame monitoring starts before acquisition.
-            _response_delay_timer.delay(delay=1000, block=False)  # Uses the global response delay timer.
+            RESPONSE_DELAY_TIMER.delay(delay=1000, block=False)  # Uses the global response delay timer.
 
             # Starts acquiring mesoscope frames.
             self._start_mesoscope()
@@ -516,22 +530,33 @@ class _MesoscopeVRSystem:
 
         # Generates the snapshot of the current Zaber motor positions and saves them as a .yaml file. This has
         # to be done before Zaber motors are potentially reset back to parking position.
-        _generate_zaber_snapshot(
+        generate_zaber_snapshot(
             session_data=self._session_data, mesoscope_data=self._mesoscope_data, zaber_motors=self._zaber_motors
         )
 
-        # Updates the internally stored SessionDescriptor instance with runtime data, saves it to disk, and instructs
-        # the user to add experimenter notes and other user-defined information to the descriptor file.
+        # Updates the internally stored SessionDescriptor instance with runtime data, collects the experimenter notes
+        # through a GUI window, and saves the completed descriptor to disk.
         self._generate_session_descriptor()
 
-        # Generates the snapshot of the positions used by all mesoscope's imaging axes.
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            _generate_mesoscope_position_snapshot(session_data=self._session_data, mesoscope_data=self._mesoscope_data)
+        # Generates the snapshot of the positions used by all mesoscope's imaging axes by querying the ScanImagePC. This
+        # runs after frame acquisition is stopped (when it was started) but while the mesoscope control driver is still
+        # connected, so the mesoscope is sitting at the acquisition position with the laser still configured.
+        try:
+            if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+                generate_mesoscope_position_snapshot(
+                    session_data=self._session_data,
+                    mesoscope_data=self._mesoscope_data,
+                    mesoscope_driver=self._mesoscope,
+                )
+        finally:
+            # Disconnects from the ScanImagePC MQTT broker. Runs from a finally so it still executes if the position
+            # query raises; it is a no-op when the driver was never connected (non-mesoscope sessions).
+            self._mesoscope.disconnect()
 
         # Optionally resets Zaber motors by moving them to the dedicated parking position before shutting down Zaber
         # connection. Regardless of whether the motors are moved, disconnects from the motors at the end of the method's
         # runtime.
-        _reset_zaber_motors(zaber_motors=self._zaber_motors)
+        reset_zaber_motors(zaber_motors=self._zaber_motors)
 
         # Stops all microcontroller interfaces.
         self._microcontrollers.stop()
@@ -600,7 +625,7 @@ class _MesoscopeVRSystem:
         log_package = LogPackage(
             source_id=self._source_id,
             acquisition_time=np.uint64(self._timestamp_timer.elapsed),
-            serialized_data=np.array([_MesoscopeVRLogMessageCodes.RUNTIME_STATE, new_state], dtype=np.uint8),
+            serialized_data=np.array([MesoscopeVRLogMessageCodes.RUNTIME_STATE, new_state], dtype=np.uint8),
         )
         self._logger.input_queue.put(log_package)
 
@@ -945,8 +970,9 @@ class _MesoscopeVRSystem:
         else:
             # It should be impossible to satisfy this error clause, but is kept for safety reasons.
             message = (
-                f"Unsupported session type {self._session_data.session_type} encountered when generating "
-                f"the snapshot of the Mesoscope-VR system's hardware configuration."
+                f"Unable to generate the hardware configuration snapshot for the Mesoscope-VR system. The session "
+                f"type must be one of the supported Mesoscope-VR session types, but got "
+                f"{self._session_data.session_type}."
             )
             console.error(message=message, error=ValueError)
 
@@ -1014,24 +1040,24 @@ class _MesoscopeVRSystem:
         self._ui.set_setup_complete()
 
     def _start_mesoscope(self) -> None:
-        """Generates the mesoscope acquisition start marker file on the ScanImagePC and waits for the frame acquisition
-        to begin.
-        """
-        # Clears the mesoscope marker files before attempting to start acquisition.
-        self._clear_mesoscope_markers()
+        """Commands the ScanImagePC to begin frame acquisition over MQTT and waits for the frame acquisition to begin.
 
+        Notes:
+            The MQTT command only triggers acquisition; the hardware TTL frame stream remains the authoritative
+            confirmation that the mesoscope actually started acquiring frames.
+        """
         # Continuously retries starting the mesoscope acquisition until successful.
         while True:
             # Resets the frame counter.
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
 
             # Verifies that the mesoscope is not already acquiring frames.
-            _response_delay_timer.delay(delay=1000, block=False)
+            RESPONSE_DELAY_TIMER.delay(delay=1000, block=False)
             if self._microcontrollers.mesoscope_frame.pulse_count > 0:
                 message = (
                     "Unable to trigger mesoscope frame acquisition, as the mesoscope is already acquiring frames. "
-                    "This indicates that the setupAcquisition() MATLAB function did not run as expected. Re-run the "
-                    "setupAcquisition function and try again."
+                    "This indicates that the runAcquisition() MATLAB function did not run as expected. Re-run the "
+                    "runAcquisition function and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
                 input("Enter anything to retry: ")
@@ -1047,17 +1073,17 @@ class _MesoscopeVRSystem:
                         if "zstack" not in file.name:
                             file.unlink(missing_ok=True)
 
-            # Sends the acquisition trigger by creating the kinase marker file.
-            self._mesoscope_data.scanimagepc_data.kinase_path.touch()
+            # Sends the acquisition trigger to the ScanImagePC over MQTT.
+            self._mesoscope.begin_acquisition()
 
             message = "Mesoscope acquisition trigger: Sent. Waiting for the mesoscope frame acquisition to start..."
             console.echo(message=message, level=LogLevel.INFO)
 
             # Waits for the mesoscope to start acquiring the expected number of frames.
-            _response_delay_timer.reset()
-            while _response_delay_timer.elapsed < _MESOSCOPE_START_TIMEOUT_MS:
+            RESPONSE_DELAY_TIMER.reset()
+            while RESPONSE_DELAY_TIMER.elapsed < _MESOSCOPE_START_TIMEOUT_MS:
                 # Adds delay to prevent CPU spinning.
-                _response_delay_timer.delay(delay=10, block=False)
+                RESPONSE_DELAY_TIMER.delay(delay=10, block=False)
 
                 if self._microcontrollers.mesoscope_frame.pulse_count >= _EXPECTED_FRAME_PULSES:
                     message = "Mesoscope frame acquisition: Started."
@@ -1069,9 +1095,9 @@ class _MesoscopeVRSystem:
                     self._mesoscope_started = True
                     return
 
-            # If the timeout window expires without receiving any mesoscope frames, clears the markers and prompts the
-            # user to reconfigure the mesoscope.
-            self._clear_mesoscope_markers()
+            # If the timeout window expires without receiving any mesoscope frames, aborts the acquisition and prompts
+            # the user to reconfigure the mesoscope.
+            self._mesoscope.abort()
             message = (
                 "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
                 "receive 10 frame acquisition triggers over 15 seconds. It is likely that the mesoscope has not "
@@ -1081,29 +1107,16 @@ class _MesoscopeVRSystem:
             console.echo(message=message, level=LogLevel.ERROR)
             input("Enter anything to retry: ")
 
-    def _clear_mesoscope_markers(self) -> None:
-        """Clears all mesoscope acquisition marker files from the ScanImagePC's shared mesoscope data directory.
-
-        This utility method removes both the kinase (start) and phosphatase (stop) marker files, ensuring
-        a clean directory state before sending new acquisition commands to the mesoscope.
-        """
-        self._mesoscope_data.scanimagepc_data.kinase_path.unlink(missing_ok=True)
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
-
     def _stop_mesoscope(self) -> None:
-        """Sends the frame acquisition stop TTL pulse to the mesoscope and waits for the frame acquisition to stop.
-
-        This method is used internally to stop the mesoscope frame acquisition as part of the stop() method runtime.
+        """Commands the ScanImagePC to abort frame acquisition over MQTT and waits for the frame acquisition to stop.
 
         Notes:
-            This method contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
-            triggers.
+            This method is used internally to stop the mesoscope frame acquisition as part of the stop() method
+            runtime. It contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
+            triggers, treating the hardware TTL frame stream as the authoritative confirmation that acquisition stopped.
         """
-        # Clears the mesoscope marker files to trigger acquisition shutdown.
-        self._clear_mesoscope_markers()
-
-        # Creates the phosphatase marker as a fallback termination mechanism.
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.touch()
+        # Commands the ScanImagePC to abort the acquisition over MQTT.
+        self._mesoscope.abort()
 
         message = "Waiting for the Mesoscope to stop acquiring frames..."
         console.echo(message=message, level=LogLevel.INFO)
@@ -1113,7 +1126,7 @@ class _MesoscopeVRSystem:
 
         while True:
             # Waits 2 seconds between checks (mesoscope runs at ~10 Hz, so 2s = ~20 frames if still running).
-            _response_delay_timer.delay(delay=2000, block=False)
+            RESPONSE_DELAY_TIMER.delay(delay=2000, block=False)
 
             # If no frames received during the 2-second delay, mesoscope has stopped.
             if self._microcontrollers.mesoscope_frame.pulse_count == 0:
@@ -1121,9 +1134,6 @@ class _MesoscopeVRSystem:
 
             # Resets counter and continues monitoring.
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
-
-        # Cleans up the phosphatase marker file.
-        self._mesoscope_data.scanimagepc_data.phosphatase_path.unlink(missing_ok=True)
 
     def _change_system_state(self, new_state: int) -> None:
         """Updates and logs the new Mesoscope-VR system state.
@@ -1141,7 +1151,7 @@ class _MesoscopeVRSystem:
         log_package = LogPackage(
             source_id=self._source_id,
             acquisition_time=np.uint64(self._timestamp_timer.elapsed),
-            serialized_data=np.array([_MesoscopeVRLogMessageCodes.SYSTEM_STATE, new_state], dtype=np.uint8),
+            serialized_data=np.array([MesoscopeVRLogMessageCodes.SYSTEM_STATE, new_state], dtype=np.uint8),
         )
         self._logger.input_queue.put(log_package)
 
@@ -1162,7 +1172,7 @@ class _MesoscopeVRSystem:
                 source_id=self._source_id,
                 acquisition_time=np.uint64(self._timestamp_timer.elapsed),
                 serialized_data=np.array(
-                    [_MesoscopeVRLogMessageCodes.REINFORCING_GUIDANCE_STATE, enabled], dtype=np.uint8
+                    [MesoscopeVRLogMessageCodes.REINFORCING_GUIDANCE_STATE, enabled], dtype=np.uint8
                 ),
             )
         )
@@ -1173,9 +1183,7 @@ class _MesoscopeVRSystem:
             LogPackage(
                 source_id=self._source_id,
                 acquisition_time=np.uint64(self._timestamp_timer.elapsed),
-                serialized_data=np.array(
-                    [_MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enabled], dtype=np.uint8
-                ),
+                serialized_data=np.array([MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enabled], dtype=np.uint8),
             )
         )
 
@@ -1192,8 +1200,17 @@ class _MesoscopeVRSystem:
             reinforcing_guided_trials, aversive_guided_trials) or the running trial position (_trial_state.completed).
             Callers handle sequence-local resets (encoder distance tracker, _distance, _trial_state.completed)
             independently around this refresh.
+
+        Raises:
+            RuntimeError: If the Virtual Reality task driver is not initialized, which indicates the method was called
+                outside a mesoscope experiment session.
         """
-        assert self._vr_task is not None  # noqa: S101  # guarded by caller
+        if self._vr_task is None:
+            message = (
+                "Unable to refresh the trial state from the Virtual Reality cue decomposition. The Virtual Reality "
+                "task driver is not initialized. This method must only be called for mesoscope experiment sessions."
+            )
+            console.error(message=message, error=RuntimeError)
         self._log_cue_sequence(cue_sequence=self._vr_task.state.cue_sequence)
         self._trial_state.distances = self._vr_task.cue_sequence_distances
         self._trial_state.reinforcing_rewards, self._trial_state.aversive_puff_durations = (
@@ -1220,10 +1237,17 @@ class _MesoscopeVRSystem:
             per-trial aversive puff durations in milliseconds.
 
         Raises:
+            RuntimeError: If the experiment configuration is not initialized, which indicates the method was called
+                outside a mesoscope experiment session.
             ValueError: If a trial name produced by the decomposer has no matching entry in the experiment
                 configuration's trial structures.
         """
-        assert self._experiment_configuration is not None  # noqa: S101  # guarded by caller
+        if self._experiment_configuration is None:
+            message = (
+                "Unable to build the trial parameter arrays for the Mesoscope-VR system. The experiment configuration "
+                "is not initialized. This method must only be called for mesoscope experiment sessions."
+            )
+            console.error(message=message, error=RuntimeError)
         trial_structures = self._experiment_configuration.trial_structures
 
         reinforcing_rewards: list[tuple[float, int]] = []
@@ -1403,7 +1427,7 @@ class _MesoscopeVRSystem:
                 source_id=self._source_id,
                 acquisition_time=np.uint64(self._timestamp_timer.elapsed),
                 serialized_data=np.concatenate(
-                    [np.array([_MesoscopeVRLogMessageCodes.DISTANCE_SNAPSHOT], dtype=np.uint8), distance_bytes]
+                    [np.array([MesoscopeVRLogMessageCodes.DISTANCE_SNAPSHOT], dtype=np.uint8), distance_bytes]
                 ),
             )
             self._logger.input_queue.put(log_package)
@@ -1524,15 +1548,16 @@ class _MesoscopeVRSystem:
             self._trial_state.completed = 0
 
         if self._mesoscope_terminated:
-            # Restarting the Mesoscope is slightly different from starting it, as the user needs to call the
-            # setupAcquisition() function with a special argument. Instructs the user to call the function and then
-            # enters the Mesoscope start sequence.
+            # If the ScanImagePC or ScanImage software crashed, the user must relaunch the runAcquisition function
+            # before resuming. The recover() command reloads the session estimator and re-arms the mesoscope without
+            # regenerating the reference data, after which the start sequence re-triggers frame acquisition.
             message = (
-                "If necessary call the setupAcquisition(hSI, hSICtl, recovery=true) command in the MATLAB command line "
-                "interface before proceeding to resume an interrupted acquisition."
+                "If the ScanImagePC or the ScanImage software crashed, relaunch the runAcquisition(hSI, hSICtl, "
+                "<parameters>) function in the MATLAB command line interface before resuming the interrupted "
+                "acquisition."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything to continue: ")
+            self._mesoscope.recover()
 
             self._start_mesoscope()
 
@@ -1625,9 +1650,10 @@ class _MesoscopeVRSystem:
         if total_delivered_volume < 1:
             self.descriptor.experimenter_given_water_volume_ml = float(round(1 - total_delivered_volume, ndigits=3))
 
-        # Ensures that the user updates the descriptor file. The descriptor union accepted by the runtime is a strict
-        # subset of the union accepted by _verify_descriptor_update, so the assignment is type-safe.
+        # Collects the experimenter notes and writes the completed descriptor. The descriptor union accepted by the
+        # runtime is a strict subset of the union accepted by finalize_session_descriptor, so the assignment is
+        # type-safe.
         # noinspection PyTypeChecker
-        _verify_descriptor_update(
+        finalize_session_descriptor(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
         )
