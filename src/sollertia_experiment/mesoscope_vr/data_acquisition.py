@@ -11,6 +11,7 @@ import tempfile
 
 from tqdm import tqdm
 import numpy as np
+import questionary
 from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
@@ -184,7 +185,7 @@ def window_checking_logic(
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
         # Establishes communication with Zaber motors.
         zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
@@ -1266,10 +1267,7 @@ def maintenance_logic() -> None:
         message="Do you want to position the managed Zaber motors for valve calibration or referencing procedure?",
         level=LogLevel.INFO,
     )
-    move_zaber_motors = ""
-    while move_zaber_motors not in ["y", "n"]:
-        user_input = input("Enter 'yes' or 'no': ").strip().lower()
-        move_zaber_motors = user_input[0] if user_input else ""
+    move_zaber_motors: bool = questionary.confirm("Position the managed Zaber motors?", default=False).unsafe_ask()
 
     # All calibration procedures are executed in a temporary directory deleted after runtime.
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:
@@ -1315,7 +1313,7 @@ def maintenance_logic() -> None:
             RESPONSE_DELAY_TIMER.delay(delay=_RENDERING_SEPARATION_DELAY, block=False)
 
             # If Zaber motors are being used, initializes and moves them to the maintenance positions.
-            if move_zaber_motors == "y":
+            if move_zaber_motors:
                 message = "Initializing Zaber motors..."
                 console.echo(message=message, level=LogLevel.INFO)
                 zaber_motors: ZaberMotors = ZaberMotors(
@@ -1331,7 +1329,7 @@ def maintenance_logic() -> None:
                 # Delays to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                input("Press Enter to continue: ")
+                questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
                 zaber_motors.prepare_motors()
                 zaber_motors.maintenance_position()
 
@@ -1399,7 +1397,7 @@ def maintenance_logic() -> None:
             console.echo(message=message, level=LogLevel.INFO)
 
             # If Zaber motors were used and are still connected, moves them to the park position.
-            if move_zaber_motors == "y" and zaber_motors.is_connected:
+            if move_zaber_motors and zaber_motors.is_connected:
                 message = (
                     "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, "
                     "such as water collection flasks, from the Mesoscope-VR cage."
@@ -1409,7 +1407,7 @@ def maintenance_logic() -> None:
                 # Delays for 2 seconds to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                input("Press Enter to continue: ")
+                questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
                 zaber_motors.park_position()
                 zaber_motors.disconnect()
 

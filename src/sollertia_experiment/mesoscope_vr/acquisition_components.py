@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
 
 import numpy as np
+import questionary
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
@@ -259,18 +260,10 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until a valid answer is received from the user.
-    while True:
-        user_input = input("Enter 'yes' or 'no': ").strip().lower()
-        answer = user_input[0] if user_input else ""
-
-        if answer == "n":
-            # Aborts method runtime, as no further Zaber setup is required.
-            return
-
-        if answer == "y":
-            # Proceeds with the setup sequence.
-            break
+    # Blocks until the operator confirms or declines the Zaber motor setup sequence.
+    if not questionary.confirm("Carry out the Zaber motor setup sequence?", default=False).unsafe_ask():
+        # Aborts method runtime, as no further Zaber setup is required.
+        return
 
     # Since it is now possible to shut down Zaber motors without fixing HeadBarRoll position, requests the user
     # to verify this manually.
@@ -280,7 +273,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
     # safe to proceed with motor movements.
@@ -290,7 +283,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Homes all managed motors in parallel.
     zaber_motors.prepare_motors()
@@ -308,7 +301,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Restores all motors to the positions used during the previous session's runtime.
     zaber_motors.restore_position()
@@ -335,20 +328,12 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    while True:
-        user_input = input("Enter 'yes' or 'no': ").strip().lower()
-        answer = user_input[0] if user_input else ""
-
-        # Continues with the rest of the shutdown runtime.
-        if answer == "y":
-            break
-
-        # Ends the runtime, as there is no need to move Zaber motors.
-        if answer == "n":
-            # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
-            # before disconnecting.
-            zaber_motors.disconnect()
-            return
+    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence.
+    if not questionary.confirm("Carry out the Zaber motor shutdown sequence?", default=False).unsafe_ask():
+        # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
+        # before disconnecting.
+        zaber_motors.disconnect()
+        return
 
     # Helps with removing the animal from the enclosure by retracting the LickPort in the Y-axis (moving it away
     # from the animal).
@@ -362,7 +347,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Moves all motors to the hardcoded parking positions.
     zaber_motors.park_position()
@@ -410,7 +395,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
     # exists for the animal) as an alignment aid. Automatic motion correction stays disabled so the user aligns the
@@ -448,7 +433,7 @@ def setup_mesoscope(
         )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
     message = (
@@ -457,7 +442,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Ensures that the screenshot is created before proceeding further.
     while True:
@@ -473,7 +458,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
@@ -493,19 +478,13 @@ def setup_mesoscope(
         console.echo(message=message, level=LogLevel.INFO)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-        # Blocks until a valid answer is received from the user.
-        while True:
-            user_input = input("Enter 'yes' or 'no': ").strip().lower()
-            answer = user_input[0] if user_input else ""
-
-            if answer == "n":
-                # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
-                console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
-                return
-
-            if answer == "y":
-                # Proceeds with the metadata file acquisition sequence.
-                break
+        # Blocks until the operator confirms or declines generating the metadata snapshots.
+        if not questionary.confirm(
+            "Generate the ROI and MotionEstimator snapshots for this animal?", default=False
+        ).unsafe_ask():
+            # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
+            console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
+            return
 
     # Step 3: Commands the ScanImagePC to generate the new session estimator and high-definition z-stack and arm the
     # mesoscope for acquisition. The alignment screenshot detected above gates this lengthy preparation step.
@@ -520,7 +499,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     mesoscope_driver.generate_reference()
 
@@ -552,7 +531,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
 
@@ -613,15 +592,28 @@ def _prompt_red_dot_alignment(previous_value: float) -> float:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    while True:
-        response = input("Enter the red-dot alignment Z position: ").strip()
-        if not response:
-            return previous_value
-        try:
-            return float(response)
-        except ValueError:
-            error_message = (
-                f"Unable to interpret '{response}' as a number. Enter a numeric value or leave the response empty to "
-                f"keep the stored value."
-            )
-            console.echo(message=error_message, level=LogLevel.ERROR)
+    response: str = questionary.text(
+        "Enter the red-dot alignment Z position, in micrometers:",
+        validate=_validate_red_dot_response,
+    ).unsafe_ask()
+    if not response.strip():
+        return previous_value
+    return float(response)
+
+
+def _validate_red_dot_response(response: str) -> bool | str:
+    """Validates a red-dot alignment Z position response, accepting a number or an empty response.
+
+    Args:
+        response: The raw text entered by the operator.
+
+    Returns:
+        True when the response is empty or parses as a number, or an error message describing the constraint.
+    """
+    if not response.strip():
+        return True
+    try:
+        float(response)
+    except ValueError:
+        return "Enter a numeric value or leave the response empty to keep the stored value."
+    return True

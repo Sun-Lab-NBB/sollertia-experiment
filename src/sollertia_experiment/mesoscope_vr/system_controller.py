@@ -6,6 +6,7 @@ import os
 from typing import TYPE_CHECKING
 
 import numpy as np
+import questionary
 from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
 from ataraxis_base_utilities import LogLevel, console, convert_scalar_to_bytes
 from sollertia_shared_assets import (
@@ -272,7 +273,7 @@ class MesoscopeVRSystem:
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
         # If the system has a snapshot of the Zaber positions used during a previous runtime, loads it into memory and
         # restores all Zaber motors to that snapshot. Otherwise, uses predefined default positions and expects the
@@ -588,23 +589,18 @@ class MesoscopeVRSystem:
             "safe storage."
         )
         console.echo(message=message, level=LogLevel.WARNING)
-        while True:
-            answer = input("Enter 'yes', 'no' or 'purge session': ")
+        choice: str = questionary.select(
+            "How should the acquired session's data be handled?",
+            choices=["preprocess", "skip preprocessing", "purge session"],
+        ).unsafe_ask()
 
-            # Default case: preprocesses the data.
-            if answer.lower() == "yes":
-                preprocess_session_data(session_data=self._session_data)
-                break
+        # Preprocesses the data to ensure safe long-term storage. This is the default, recommended action.
+        if choice == "preprocess":
+            preprocess_session_data(session_data=self._session_data)
 
-            # Does not carry out data preprocessing or purging. In certain scenarios, it may be necessary to skip data
-            # preprocessing in favor of faster animal turnover.
-            if answer.lower() == "no":
-                break
-
-            # Exclusively for failed runtimes: removes all session data from all destinations.
-            if answer.lower() == "purge session":
-                purge_session(session_data=self._session_data)
-                break
+        # Permanently removes all session data from every destination. Reserved for failed runtimes.
+        elif choice == "purge session":
+            purge_session(session_data=self._session_data)
 
         message = "Mesoscope-VR system runtime: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -1060,7 +1056,7 @@ class MesoscopeVRSystem:
                     "runAcquisition function and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                input("Enter anything to retry: ")
+                questionary.press_any_key_to_continue("Press any key to retry.").unsafe_ask()
                 continue
 
             # Clears any unexpected TIFF files the first time the method is called for a session. This ensures that the
@@ -1105,7 +1101,7 @@ class MesoscopeVRSystem:
                 "module is not functioning. Make sure the Mesoscope is configured for data acquisition and try again."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            input("Enter anything to retry: ")
+            questionary.press_any_key_to_continue("Press any key to retry.").unsafe_ask()
 
     def _stop_mesoscope(self) -> None:
         """Commands the ScanImagePC to abort frame acquisition over MQTT and waits for the frame acquisition to stop.
@@ -1597,19 +1593,11 @@ class MesoscopeVRSystem:
         # Verifies that the user intends to abort the runtime to avoid 'misclick' terminations.
         message = "Runtime abort signal: Received. Are you sure you want to abort the runtime?"
         console.echo(message=message, level=LogLevel.WARNING)
-        while True:
-            user_input = input("Enter 'yes' or 'no': ").strip().lower()
-            answer = user_input[0] if user_input else ""
 
-            # Sets the runtime into the termination state, which aborts all instance cycles and the outer logic function
-            # cycle.
-            if answer == "y":
-                self._terminated = True
-                return
-
-            # Returns without terminating the runtime.
-            if answer == "n":
-                return
+        # Sets the runtime into the termination state, which aborts all instance cycles and the outer logic function
+        # cycle, only when the operator explicitly confirms the abort.
+        if questionary.confirm("Abort the runtime?", default=False).unsafe_ask():
+            self._terminated = True
 
     def _generate_session_descriptor(self) -> None:
         """Updates the contents of the acquired session's descriptor file with data collected during runtime and caches

@@ -75,6 +75,7 @@ dependencies = [
 
     # CLI and Utilities
     "click==8.4.1",
+    "questionary==2.1.1",
     "crc==7.1.0",
     "tabulate2==1.10.2",
     "tqdm==4.67.3",

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+import questionary
 from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import SessionData
@@ -267,15 +268,11 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
-        while True:
-            answer = input("Enter 'yes' (to proceed) or 'no' (to abort): ")
-
-            if answer.lower() == "yes":
-                break
-
-            if answer.lower() == "no":
-                console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
-                return False
+        if not questionary.confirm(
+            f"Permanently delete all data for session {session_name}?", default=False
+        ).unsafe_ask():
+            console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
+            return False
 
     for candidate in console.track(iterable=candidates, description="Deleting session directories", unit="directory"):
         delete_directory(directory_path=candidate)
