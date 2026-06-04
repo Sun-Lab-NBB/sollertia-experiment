@@ -36,8 +36,9 @@ class _MesoscopeMQTTTopics(StrEnum):
     """
 
     ALIVE = "MesoscopeAlive"
-    """Lifecycle marker published by the ScanImagePC when its runAcquisition MQTT client connects (empty payload).
-    The ScanImagePC republishes it until it receives a Preload command, closing the connection-ordering race."""
+    """Liveness probe published by the VRPC (empty payload). The ScanImagePC replies on the Status topic with a
+    reception acknowledgement; the VRPC treats the absence of a reply within the acknowledgement timeout as the
+    runAcquisition command loop not running. Mirrors the request-reply presence check used for the Unity bridge."""
     PRELOAD = "MesoscopePreload"
     """Request to preload a persisted reference estimator as an alignment aid, carrying the estimator path or null in a
     'path' field. Automatic motion correction stays disabled so the operator enables it manually during alignment."""
@@ -110,8 +111,9 @@ class MesoscopeDriver:
     def __init__(self, configuration: VRTaskConfiguration) -> None:
         self._configuration: VRTaskConfiguration = configuration
 
+        # The ScanImagePC replies to every command, including the liveness probe, on the Status topic, so the driver
+        # only monitors the Status and Error reply topics.
         monitored_topics: tuple[_MesoscopeMQTTTopics, ...] = (
-            _MesoscopeMQTTTopics.ALIVE,
             _MesoscopeMQTTTopics.STATUS,
             _MesoscopeMQTTTopics.ERROR,
         )
@@ -135,21 +137,22 @@ class MesoscopeDriver:
         self._mqtt.disconnect()
 
     def await_alive(self) -> None:
-        """Blocks until the ScanImagePC reports that its runAcquisition MQTT client has connected.
+        """Blocks until the ScanImagePC's runAcquisition MQTT client replies to a liveness probe.
 
         Notes:
-            The ScanImagePC publishes the MesoscopeAlive marker once its MQTT client connects and republishes it until
-            it receives a Preload command, so the driver catches the marker even if it subscribes slightly late. The
-            operator must launch the runAcquisition function manually because it requires the ScanImage handles and
-            interactive imaging-parameter confirmations.
+            The driver probes liveness by publishing a MesoscopeAlive request and waiting for the ScanImagePC to
+            acknowledge it on the Status topic, mirroring the request-reply presence check used for the Unity bridge.
+            A reply confirms that the command loop is running, while the absence of a reply within the acknowledgement
+            timeout indicates that it is not. The probe is resent on each timeout because the operator must launch the
+            runAcquisition function manually; it requires the ScanImage handles and interactive imaging-parameter
+            confirmations.
         """
-        self._clear_buffer()
         message = (
             "Launch the 'runAcquisition(hSI, hSICtl, <parameters>)' function in the MATLAB command line on the "
             "ScanImagePC to arm the mesoscope control interface."
         )
         console.echo(message=message, level=LogLevel.INFO)
-        self._wait_for_topic(expected_topic=_MesoscopeMQTTTopics.ALIVE)
+        self._dispatch_command(command=_MesoscopeMQTTTopics.ALIVE)
         console.echo(message="Mesoscope control interface: Connected.", level=LogLevel.SUCCESS)
 
     def preload(self, estimator_path: Path | None) -> None:
@@ -306,16 +309,6 @@ class MesoscopeDriver:
         """Surfaces an intermediate ScanImagePC status state to the operator as a progress message."""
         message = f"Mesoscope status: {state}.{f' {detail}' if detail else ''}"
         console.echo(message=message, level=LogLevel.INFO)
-
-    def _wait_for_topic(self, expected_topic: str) -> bytes | bytearray:
-        """Blocks until the ScanImagePC sends a message on the specified topic and returns the payload."""
-        while True:
-            self._polling_timer.delay(delay=_BROKER_POLL_DELAY_MS, block=False)
-            data = self._mqtt.get_data()
-            if data is not None:
-                topic, payload = data
-                if topic == expected_topic:
-                    return payload
 
     def _clear_buffer(self) -> None:
         """Drains all pending messages from the MQTT buffer used to communicate with the ScanImagePC."""

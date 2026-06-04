@@ -41,7 +41,7 @@ function runAcquisition(hSI, hSICtl, arguments)
     % - zmirror: Only for two-plane imaging. When imaging two planes separated by a non-imaged volume, e.g. when imaging
     % only at the very top and bottom of the fastZ range, provide a numeric array of exclusion zone boundaries in the
     % order [min, max]. Note, both boundaries must be within the overall slice dimensions defined by the zrange, e.g.
-    % [40, 300]. The acquisition in this example case would be set to image data in the regions 30-40 and 300-400.
+    % [40, 300]. With overall boundaries [20, 400], the function will image data in the regions 30-40 and 300-400.
     % - order: The order to use for z-stack acquisition. Supported options are '' (default) and 'smooth'. Default
     % acquisition order iterates over the slices at each volume acquisition, e.g.: Z1, Z2, Z1, Z2. The 'smooth' order
     % instead acquires all frames at the given z-plane before moving to the next one, e.g. Z1, Z1, Z2, Z2.
@@ -93,8 +93,8 @@ function runAcquisition(hSI, hSICtl, arguments)
     clc;
 
     % Statically defines the MQTT topics used to communicate with the VRPC. The VRPC publishes the command topics
-    % (including the state query) and subscribes to the status, error, and state reply topics; this namespace does not
-    % overlap with the Unity task topics.
+    % (including the liveness probe and the state query) and subscribes to the status, error, and state reply topics;
+    % this namespace does not overlap with the Unity task topics.
     topics = struct( ...
         'alive',    "MesoscopeAlive", ...
         'preload',  "MesoscopePreload", ...
@@ -181,6 +181,7 @@ function runAcquisition(hSI, hSICtl, arguments)
 
     % Connects to the shared broker and subscribes to the VRPC command topics.
     mqttClient = mqttclient(broker);
+    subscribe(mqttClient, topics.alive);
     subscribe(mqttClient, topics.preload);
     subscribe(mqttClient, topics.generate);
     subscribe(mqttClient, topics.begin);
@@ -191,30 +192,23 @@ function runAcquisition(hSI, hSICtl, arguments)
     fprintf('Mesoscope control interface: Connected to %s.\n', broker);
     fprintf('Waiting for the VRPC to issue acquisition commands...\n');
 
-    % Tracks whether the alive marker still needs to be republished and the timestamp of the last alive publication.
-    announceAlive = true;
-    aliveTimer = tic;
-
     % Services commands until the client loses its broker connection. Each iteration yields to the event queue so the
     % operator retains full control of the ScanImage GUI to align the mesoscope between commands.
     while mqttClient.Connected
-        % Republishes the alive marker once per second until the first command arrives, closing the race where the
-        % VRPC subscribes after the initial publication.
-        if announceAlive && toc(aliveTimer) >= 1
-            write(mqttClient, topics.alive, "");
-            aliveTimer = tic;
-        end
-
         % Drains and processes every message received since the previous iteration. read() returns the unread messages
         % as a timetable with Topic and Data variables, or an empty timetable when nothing arrived.
         messages = read(mqttClient);
         for index = 1 : height(messages)
             topic = string(messages.Topic(index));
             payload = string(messages.Data(index));
-            announceAlive = false;
 
             try
-                if topic == topics.preload
+                if topic == topics.alive
+                    % Replies to the VRPC liveness probe. The reply itself confirms that the command loop is running;
+                    % the VRPC treats the absence of a reply within its timeout as the control interface being offline.
+                    publishStatus(mqttClient, topics.status, topic, "received");
+
+                elseif topic == topics.preload
                     publishStatus(mqttClient, topics.status, topic, "received");
                     publishStatus(mqttClient, topics.status, topic, "preloading");
                     preloadEstimator(hSI, hSICtl, payload, config);
