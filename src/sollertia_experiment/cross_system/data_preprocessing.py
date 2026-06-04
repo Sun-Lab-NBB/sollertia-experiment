@@ -19,6 +19,7 @@ from ataraxis_data_structures import (
     calculate_directory_checksum,
 )
 
+from .terminal_prompts import request_confirmation
 from .google_sheet_tools import SurgeryLog
 
 if TYPE_CHECKING:
@@ -267,15 +268,11 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
-        while True:
-            answer = input("Enter 'yes' (to proceed) or 'no' (to abort): ")
-
-            if answer.lower() == "yes":
-                break
-
-            if answer.lower() == "no":
-                console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
-                return False
+        if not request_confirmation(
+            message=f"Permanently delete all data for session {session_name}?", default=False
+        ):
+            console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
+            return False
 
     for candidate in console.track(iterable=candidates, description="Deleting session directories", unit="directory"):
         delete_directory(directory_path=candidate)

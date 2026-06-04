@@ -12,6 +12,8 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
 
+from .terminal_prompts import request_confirmation
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -768,19 +770,15 @@ class ZaberDevice:
             )
             console.echo(message=message, level=LogLevel.WARNING)
 
-            # Blocks until a valid answer is received from the user.
-            while True:
-                answer = input("Enter 'yes' or 'no': ").lower()
-                if answer and answer[0] == "n":
-                    message = (
-                        f"Unsafe automatic reset procedure for the {self._controller.label} "
-                        f"({self._controller.name}) device: Declined. Manually set the value of the shutdown tracker "
-                        f"to 1 after ensuring the device is positioned correctly for homing. The non-volatile memory "
-                        f"variable used to store this data is USER_DATA_1."
-                    )
-                    console.error(message=message, error=ValueError)
-                if answer and answer[0] == "y":
-                    break
+            # Blocks until the user confirms or declines the unsupervised reset procedure.
+            if not request_confirmation(message="Proceed with initializing this motor?", default=False):
+                message = (
+                    f"Unsafe automatic reset procedure for the {self._controller.label} "
+                    f"({self._controller.name}) device: Declined. Manually set the value of the shutdown tracker "
+                    f"to 1 after ensuring the device is positioned correctly for homing. The non-volatile memory "
+                    f"variable used to store this data is USER_DATA_1."
+                )
+                console.error(message=message, error=ValueError)
 
         # Sets the device's shutdown tracker to 0. This tracker is used to detect when a device is not properly shut
         # down, which may have implications for the use of the device, such as the ability to home the device.

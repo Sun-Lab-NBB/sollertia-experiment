@@ -5,9 +5,11 @@ Mesoscope-VR data acquisition runtime.
 from __future__ import annotations
 
 from enum import IntEnum
+import math
+import atexit
 import shutil
 from typing import TYPE_CHECKING
-from dataclasses import field, dataclass
+from dataclasses import field, fields, dataclass
 
 import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
@@ -24,9 +26,12 @@ from sollertia_shared_assets import (
 )
 
 from .system import MesoscopeData, MesoscopePositions
-from .runtime_ui import collect_experimenter_notes
+from .runtime_ui import collect_surgery_quality, collect_experimenter_notes
+from ..cross_system import request_text, wait_for_enter, request_confirmation
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
 
     from .binding_classes import ZaberMotors
@@ -37,8 +42,48 @@ RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 
-RESPONSE_DELAY_TIMER: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
-"""The PrecisionTimer instance used to support the proper rendering of all terminal outputs used during runtime."""
+
+class _ResponseDelayTimer:
+    """Owns the shared PrecisionTimer used to pace the rendering of terminal outputs during runtime.
+
+    Notes:
+        The timer is wrapped in this holder, rather than stored directly as a module constant, so that its underlying
+        nanobind-bound C++ object can be released at interpreter shutdown. If that object is still referenced when the
+        ataraxis_time extension is finalized, nanobind prints a spurious 'leaked instance' warning to the terminal.
+        Since every runtime module shares this single holder by reference, the holder owns the only reference to the
+        C++ timer, so releasing it here frees the object before the extension teardown check runs.
+    """
+
+    def __init__(self) -> None:
+        self._timer: PrecisionTimer | None = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        atexit.register(self._release)
+
+    def _release(self) -> None:
+        """Drops the wrapped PrecisionTimer so its C++ object is freed before the ataraxis_time extension teardown."""
+        self._timer = None
+
+    def delay(self, delay: int, *, allow_sleep: bool = False, block: bool = False) -> None:
+        """Delays for the requested number of milliseconds, forwarding to the wrapped PrecisionTimer."""
+        if self._timer is None:
+            return
+        self._timer.delay(delay=delay, allow_sleep=allow_sleep, block=block)
+
+    def reset(self) -> None:
+        """Resets the reference point of the wrapped PrecisionTimer to the current time."""
+        if self._timer is None:
+            return
+        self._timer.reset()
+
+    @property
+    def elapsed(self) -> int:
+        """Returns the number of milliseconds elapsed since the last reset of the wrapped PrecisionTimer."""
+        if self._timer is None:
+            return 0
+        return self._timer.elapsed
+
+
+RESPONSE_DELAY_TIMER: _ResponseDelayTimer = _ResponseDelayTimer()
+"""The shared timer used to pace the rendering of terminal outputs that require user interaction during runtime."""
 
 
 class MesoscopeVRLogMessageCodes(IntEnum):
@@ -210,6 +255,12 @@ def generate_mesoscope_position_snapshot(
     mesoscope_positions = mesoscope_driver.query_state()
     mesoscope_positions.red_dot_alignment_z = _prompt_red_dot_alignment(previous_value=previous_red_dot_alignment_z)
 
+    # Rounds every position down to at most three decimal places, discarding the spurious sub-micrometer and
+    # sub-millidegree precision reported by the ScanImage software before the snapshot is persisted.
+    for position_field in fields(mesoscope_positions):
+        rounded_value = _floor_to_three_decimals(value=getattr(mesoscope_positions, position_field.name))
+        setattr(mesoscope_positions, position_field.name, rounded_value)
+
     # Writes the snapshot to the session's raw_data directory and to the animal's persistent directory, overwriting any
     # existing persistent file so it can seed the next runtime.
     mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
@@ -259,18 +310,10 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until a valid answer is received from the user.
-    while True:
-        user_input = input("Enter 'yes' or 'no': ").strip().lower()
-        answer = user_input[0] if user_input else ""
-
-        if answer == "n":
-            # Aborts method runtime, as no further Zaber setup is required.
-            return
-
-        if answer == "y":
-            # Proceeds with the setup sequence.
-            break
+    # Blocks until the operator confirms or declines the Zaber motor setup sequence.
+    if not request_confirmation(message="Carry out the Zaber motor setup sequence?", default=False):
+        # Aborts method runtime, as no further Zaber setup is required.
+        return
 
     # Since it is now possible to shut down Zaber motors without fixing HeadBarRoll position, requests the user
     # to verify this manually.
@@ -280,7 +323,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
     # safe to proceed with motor movements.
@@ -290,7 +333,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Homes all managed motors in parallel.
     zaber_motors.prepare_motors()
@@ -308,13 +351,36 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Restores all motors to the positions used during the previous session's runtime.
     zaber_motors.restore_position()
 
     message = "Motor Positioning: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def run_shutdown_step(description: str, step: Callable[[], None]) -> None:
+    """Executes a single shutdown callable, isolating it so that an error or interrupt does not propagate.
+
+    The Mesoscope-VR shutdown sequences tear down several subprocess-backed assets in turn. Allowing an exception or a
+    repeated KeyboardInterrupt from one asset to propagate would skip the remaining teardown steps and leave the
+    orphaned subprocesses to be collected by the garbage collector, which tears down their shared-memory managers out
+    of order and cascades into multiprocessing errors. This helper contains each failure so the remaining steps still
+    run, while the originally propagating exception (if any) resumes once the shutdown sequence completes.
+
+    Args:
+        description: A short gerund phrase naming the step, used to contextualize an error encountered while running it.
+        step: The zero-argument callable that performs the shutdown step.
+    """
+    try:
+        step()
+    except (Exception, KeyboardInterrupt) as error:
+        message = (
+            f"Encountered an error while {description} during the Mesoscope-VR shutdown sequence: {error!r}. "
+            f"Continuing with the remaining shutdown steps."
+        )
+        console.echo(message=message, level=LogLevel.ERROR)
 
 
 def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
@@ -335,20 +401,12 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    while True:
-        user_input = input("Enter 'yes' or 'no': ").strip().lower()
-        answer = user_input[0] if user_input else ""
-
-        # Continues with the rest of the shutdown runtime.
-        if answer == "y":
-            break
-
-        # Ends the runtime, as there is no need to move Zaber motors.
-        if answer == "n":
-            # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
-            # before disconnecting.
-            zaber_motors.disconnect()
-            return
+    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence.
+    if not request_confirmation(message="Carry out the Zaber motor shutdown sequence?", default=False):
+        # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
+        # before disconnecting.
+        zaber_motors.disconnect()
+        return
 
     # Helps with removing the animal from the enclosure by retracting the LickPort in the Y-axis (moving it away
     # from the animal).
@@ -362,7 +420,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Moves all motors to the hardcoded parking positions.
     zaber_motors.park_position()
@@ -410,14 +468,15 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        wait_for_enter(message="Press Enter to continue.")
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
-    # exists for the animal) as an alignment aid. Automatic motion correction stays disabled so the user aligns the
-    # mesoscope manually during the next step.
+    # exists for the animal) as an alignment aid. The estimator path is local to the ScanImagePC filesystem, so the
+    # VRPC sends only the project and animal identifiers and the ScanImagePC resolves the path under its own Mesoscope
+    # data root. Automatic motion correction stays disabled so the user aligns the mesoscope manually during the next
+    # step.
     mesoscope_driver.await_alive()
-    persisted_estimator_path = mesoscope_data.scanimagepc_data.motion_estimator_path
-    mesoscope_driver.preload(estimator_path=persisted_estimator_path if persisted_estimator_path.exists() else None)
+    mesoscope_driver.preload(project=session_data.project_name, animal=session_data.animal_id)
 
     # Step 1: Resolves the imaging plane.
     # If the previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
@@ -448,7 +507,7 @@ def setup_mesoscope(
         )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
     message = (
@@ -457,7 +516,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     # Ensures that the screenshot is created before proceeding further.
     while True:
@@ -473,7 +532,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        wait_for_enter(message="Press Enter to continue.")
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
@@ -493,19 +552,13 @@ def setup_mesoscope(
         console.echo(message=message, level=LogLevel.INFO)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-        # Blocks until a valid answer is received from the user.
-        while True:
-            user_input = input("Enter 'yes' or 'no': ").strip().lower()
-            answer = user_input[0] if user_input else ""
-
-            if answer == "n":
-                # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
-                console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
-                return
-
-            if answer == "y":
-                # Proceeds with the metadata file acquisition sequence.
-                break
+        # Blocks until the operator confirms or declines generating the metadata snapshots.
+        if not request_confirmation(
+            message="Generate the ROI and MotionEstimator snapshots for this animal?", default=False
+        ):
+            # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
+            console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
+            return
 
     # Step 3: Commands the ScanImagePC to generate the new session estimator and high-definition z-stack and arm the
     # mesoscope for acquisition. The alignment screenshot detected above gates this lengthy preparation step.
@@ -520,7 +573,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    wait_for_enter(message="Press Enter to continue.")
 
     mesoscope_driver.generate_reference()
 
@@ -552,7 +605,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        wait_for_enter(message="Press Enter to continue.")
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
 
@@ -565,11 +618,13 @@ def finalize_session_descriptor(
     session_data: SessionData,
     mesoscope_data: MesoscopeData,
 ) -> None:
-    """Collects the supervising experimenter's session notes through a GUI window, writes the completed descriptor to
-    the session's raw_data directory, and caches a copy to the animal's persistent directory.
+    """Collects the supervising experimenter's session notes, writes the completed descriptor to the session's
+    raw_data directory, and caches a copy to the animal's persistent directory.
 
-    The notes are entered through a blocking text-entry window instead of by manually editing the
-    session_descriptor.yaml file, removing the filesystem round-trip previously required to annotate each session.
+    The notes are entered through a blocking terminal prompt instead of by manually editing the session_descriptor.yaml
+    file, removing the filesystem round-trip previously required to annotate each session. For window checking
+    sessions, the experimenter is additionally prompted for the cranial window quality rating, which is otherwise left
+    at its default value.
 
     Args:
         descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
@@ -577,8 +632,15 @@ def finalize_session_descriptor(
         session_data: The SessionData instance that defines the session for which the descriptor file is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
-    # Collects the experimenter notes through a GUI window and stores them inside the descriptor. The runtime control
-    # UI is already shut down at this point, so the notes window runs on the main thread without competing GUIs.
+    # Window checking sessions additionally capture the experimenter's cranial window quality rating on a 0-3 scale.
+    # The rating is propagated to the surgery log Google Sheet during preprocessing; the other session types do not
+    # track a window quality rating.
+    if isinstance(descriptor, WindowCheckingDescriptor):
+        descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
+
+    # Collects the experimenter notes through a blocking terminal prompt and stores them inside the descriptor. The
+    # runtime control UI is already shut down at this point, so the prompt runs on the main thread without competing
+    # GUIs.
     descriptor.experimenter_notes = collect_experimenter_notes(session_name=session_data.session_name)
 
     # Saves the completed descriptor as a .yaml file inside the session's raw_data directory.
@@ -613,15 +675,44 @@ def _prompt_red_dot_alignment(previous_value: float) -> float:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    while True:
-        response = input("Enter the red-dot alignment Z position: ").strip()
-        if not response:
-            return previous_value
-        try:
-            return float(response)
-        except ValueError:
-            error_message = (
-                f"Unable to interpret '{response}' as a number. Enter a numeric value or leave the response empty to "
-                f"keep the stored value."
-            )
-            console.echo(message=error_message, level=LogLevel.ERROR)
+    response: str = request_text(
+        message="Enter the red-dot alignment Z position, in micrometers:",
+        validate=_validate_red_dot_response,
+    )
+    if not response.strip():
+        return previous_value
+    return float(response)
+
+
+def _validate_red_dot_response(response: str) -> bool | str:
+    """Validates a red-dot alignment Z position response, accepting a number or an empty response.
+
+    Args:
+        response: The raw text entered by the operator.
+
+    Returns:
+        True when the response is empty or parses as a number, or an error message describing the constraint.
+    """
+    if not response.strip():
+        return True
+    try:
+        float(response)
+    except ValueError:
+        return "Enter a numeric value or leave the response empty to keep the stored value."
+    return True
+
+
+def _floor_to_three_decimals(value: float) -> float:
+    """Rounds the given value down to at most three decimal places.
+
+    Notes:
+        The value is floored toward negative infinity rather than truncated toward zero, so negative inputs round
+        down to the next lower three-decimal value.
+
+    Args:
+        value: The floating-point position value to round down.
+
+    Returns:
+        The value rounded down to at most three decimal places.
+    """
+    return math.floor(value * 1000.0) / 1000.0

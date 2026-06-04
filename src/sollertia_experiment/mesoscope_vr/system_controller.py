@@ -30,6 +30,7 @@ from ..vr_task import (
 )
 from .runtime_ui import RuntimeControlUI
 from .visualizer import VisualizerMode, BehaviorVisualizer
+from ..cross_system import wait_for_enter, request_selection, request_confirmation
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from .mesoscope_driver import MesoscopeDriver
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
@@ -46,6 +47,7 @@ from .acquisition_components import (
     TrialState,
     MesoscopeVRLogMessageCodes,
     setup_mesoscope,
+    run_shutdown_step,
     reset_zaber_motors,
     setup_zaber_motors,
     generate_zaber_snapshot,
@@ -272,7 +274,7 @@ class MesoscopeVRSystem:
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        input("Enter anything to continue: ")
+        wait_for_enter(message="Press Enter to continue.")
 
         # If the system has a snapshot of the Zaber positions used during a previous runtime, loads it into memory and
         # restores all Zaber motors to that snapshot. Otherwise, uses predefined default positions and expects the
@@ -492,8 +494,12 @@ class MesoscopeVRSystem:
 
     def stop(self) -> None:
         """Stops all Mesoscope-VR system components, external assets, and ends the session's data acquisition."""
-        # If all assets are already stopped, aborts the runtime early.
+        # If start() was interrupted before completing initialization, the full graceful shutdown sequence below is
+        # unsafe because it queries and commands assets that may never have been brought up. Instead, performs a
+        # best-effort teardown of whatever assets start() did manage to initialize and aborts the runtime. The caller's
+        # cleanup branch then purges the partially initialized session.
         if not self._started:
+            self._emergency_shutdown()
             return
 
         # Resets the _started tracker before attempting the shutdown sequence.
@@ -588,25 +594,51 @@ class MesoscopeVRSystem:
             "safe storage."
         )
         console.echo(message=message, level=LogLevel.WARNING)
-        while True:
-            answer = input("Enter 'yes', 'no' or 'purge session': ")
+        choice: str = request_selection(
+            message="How should the acquired session's data be handled?",
+            choices=["preprocess", "skip preprocessing", "purge session"],
+        )
 
-            # Default case: preprocesses the data.
-            if answer.lower() == "yes":
-                preprocess_session_data(session_data=self._session_data)
-                break
+        # Preprocesses the data to ensure safe long-term storage. This is the default, recommended action.
+        if choice == "preprocess":
+            preprocess_session_data(session_data=self._session_data)
 
-            # Does not carry out data preprocessing or purging. In certain scenarios, it may be necessary to skip data
-            # preprocessing in favor of faster animal turnover.
-            if answer.lower() == "no":
-                break
-
-            # Exclusively for failed runtimes: removes all session data from all destinations.
-            if answer.lower() == "purge session":
-                purge_session(session_data=self._session_data)
-                break
+        # Permanently removes all session data from every destination. Reserved for failed runtimes.
+        elif choice == "purge session":
+            purge_session(session_data=self._session_data)
 
         message = "Mesoscope-VR system runtime: Terminated."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+    def _emergency_shutdown(self) -> None:
+        """Performs a best-effort teardown of any assets brought up by an interrupted or failed start() call.
+
+        Notes:
+            This runs when stop() is invoked after start() failed or was interrupted before completing initialization.
+            It stops the subprocess-backed assets while their shared-memory managers are still alive, which prevents the
+            multiprocessing teardown cascade that occurs if the partially initialized assets are instead collected by
+            the garbage collector. Every teardown target is idempotent and self-guards against never having been
+            started, so each step is safe to run regardless of how far initialization progressed. Each step is also
+            isolated so that a failure or repeated interrupt in one asset does not prevent the rest from shutting down.
+        """
+        message = "Mesoscope-VR system initialization did not complete. Shutting down all initialized system assets..."
+        console.echo(message=message, level=LogLevel.ERROR)
+
+        # Closes the Qt-backed visualizer and control UI first to release the shared Qt backend, then tears down the
+        # acquisition assets so that the frame producers (cameras) and the microcontrollers stop before the data logger
+        # they feed. The Zaber motors are disconnected without the interactive parking sequence used during a graceful
+        # shutdown, because the runtime is aborting.
+        run_shutdown_step(description="closing the behavior visualizer", step=self._visualizer.close)
+        run_shutdown_step(description="shutting down the runtime control UI", step=self._ui.shutdown)
+        if self._vr_task is not None:
+            run_shutdown_step(description="disconnecting from the VR task", step=self._vr_task.disconnect)
+        run_shutdown_step(description="stopping the cameras", step=self._cameras.stop)
+        run_shutdown_step(description="disconnecting from the ScanImagePC", step=self._mesoscope.disconnect)
+        run_shutdown_step(description="disconnecting from the Zaber motors", step=self._zaber_motors.disconnect)
+        run_shutdown_step(description="stopping the microcontrollers", step=self._microcontrollers.stop)
+        run_shutdown_step(description="stopping the data logger", step=self._logger.stop)
+
+        message = "Mesoscope-VR system assets: Shut down."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     def change_runtime_state(self, new_state: int) -> None:
@@ -1060,7 +1092,7 @@ class MesoscopeVRSystem:
                     "runAcquisition function and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                input("Enter anything to retry: ")
+                wait_for_enter(message="Press Enter to retry.")
                 continue
 
             # Clears any unexpected TIFF files the first time the method is called for a session. This ensures that the
@@ -1105,7 +1137,7 @@ class MesoscopeVRSystem:
                 "module is not functioning. Make sure the Mesoscope is configured for data acquisition and try again."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            input("Enter anything to retry: ")
+            wait_for_enter(message="Press Enter to retry.")
 
     def _stop_mesoscope(self) -> None:
         """Commands the ScanImagePC to abort frame acquisition over MQTT and waits for the frame acquisition to stop.
@@ -1597,19 +1629,11 @@ class MesoscopeVRSystem:
         # Verifies that the user intends to abort the runtime to avoid 'misclick' terminations.
         message = "Runtime abort signal: Received. Are you sure you want to abort the runtime?"
         console.echo(message=message, level=LogLevel.WARNING)
-        while True:
-            user_input = input("Enter 'yes' or 'no': ").strip().lower()
-            answer = user_input[0] if user_input else ""
 
-            # Sets the runtime into the termination state, which aborts all instance cycles and the outer logic function
-            # cycle.
-            if answer == "y":
-                self._terminated = True
-                return
-
-            # Returns without terminating the runtime.
-            if answer == "n":
-                return
+        # Sets the runtime into the termination state, which aborts all instance cycles and the outer logic function
+        # cycle, only when the operator explicitly confirms the abort.
+        if request_confirmation(message="Abort the runtime?", default=False):
+            self._terminated = True
 
     def _generate_session_descriptor(self) -> None:
         """Updates the contents of the acquired session's descriptor file with data collected during runtime and caches

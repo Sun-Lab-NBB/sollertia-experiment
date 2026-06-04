@@ -11,11 +11,11 @@ import contextlib
 from multiprocessing import Process
 
 import numpy as np
-from PySide6.QtGui import QFont, QShortcut, QCloseEvent, QKeySequence
+import questionary
+from PySide6.QtGui import QFont, QCloseEvent
 from PySide6.QtCore import Qt, QTimer, QSignalBlocker
 from PySide6.QtWidgets import (
     QLabel,
-    QDialog,
     QWidget,
     QGroupBox,
     QHBoxLayout,
@@ -25,13 +25,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QApplication,
     QDoubleSpinBox,
-    QPlainTextEdit,
 )
 from ataraxis_base_utilities import console
 from ataraxis_data_structures import SharedMemoryArray
 
 from .system import RUN_TRAINING_THRESHOLD_LIMITS
 from .visualizer import VisualizerMode
+from ..cross_system import request_text, request_selection
 
 _SPEED_THRESHOLD_SCALE: int = 100
 """Converts between centimeters per second and the hundredths-of-a-centimeter-per-second integer units used to store
@@ -427,38 +427,55 @@ class RuntimeControlUI:
 
 
 def collect_experimenter_notes(session_name: str) -> str:
-    """Opens a blocking text-entry window that captures the supervising experimenter's notes for a session.
+    """Prompts the supervising experimenter for the session's notes through a blocking terminal prompt.
 
-    The window runs a modal Qt dialog on the calling thread and stays open until the experimenter saves a non-empty
-    note. It is intended to run during the session's teardown, after the runtime control UI has shut down, to replace
-    the manual session_descriptor.yaml editing step.
+    The prompt runs during the session's teardown and re-asks until the experimenter submits a non-empty note,
+    preserving the mandatory annotation step that previously required editing the session_descriptor.yaml file by hand.
 
     Args:
-        session_name: The name of the session being annotated, shown in the window so the experimenter can confirm
+        session_name: The name of the session being annotated, shown in the prompt so the experimenter can confirm
             they are documenting the correct session.
 
     Returns:
-        The experimenter notes entered through the window.
+        The experimenter notes entered through the terminal.
     """
-    # Reuses an existing QApplication when one is present, otherwise creates one. The main runtime process does not
-    # host a QApplication at teardown, since the runtime control UI runs in a separate process.
-    if QApplication.instance() is None:
-        application = QApplication(sys.argv)
-        application.setApplicationName("Mesoscope-VR Session Notes")
-        application.setOrganizationName("Sollertia")
-        application.setStyle("Fusion")
+    prompt = (
+        f"Record the notes collected while supervising session {session_name} (press Esc then Enter to submit):"
+    )
+    notes: str = request_text(
+        message=prompt,
+        multiline=True,
+        validate=lambda text: bool(text.strip()) or "The session notes cannot be empty.",
+    )
+    return notes.strip()
 
-    try:
-        dialog = _ExperimenterNotesDialog(session_name=session_name)
-        dialog.exec()
-    except Exception as error:
-        message = (
-            f"Unable to collect the experimenter notes for session {session_name} through the graphical user "
-            f"interface. Encountered the following error: {error}."
-        )
-        console.error(message=message, error=RuntimeError)
-    else:
-        return dialog.notes
+
+def collect_surgery_quality(session_name: str) -> int:
+    """Prompts the supervising experimenter for the cranial window quality rating through a blocking terminal prompt.
+
+    The prompt runs during a window checking session's teardown and records the experimenter's assessment of the
+    cranial window and surgical intervention. The rating is propagated to the surgery log during preprocessing.
+
+    Args:
+        session_name: The name of the session being rated, shown in the prompt so the experimenter can confirm they
+            are rating the correct session.
+
+    Returns:
+        The cranial window quality rating on a scale from 0 (non-usable) to 3 (high-tier publication grade) inclusive.
+    """
+    prompt = (
+        f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):"
+    )
+    quality: int = request_selection(
+        message=prompt,
+        choices=[
+            questionary.Choice(title="0 - Non-usable", value=0),
+            questionary.Choice(title="1 - Has signal, but not publication grade", value=1),
+            questionary.Choice(title="2 - Publication grade", value=2),
+            questionary.Choice(title="3 - High-tier publication grade", value=3),
+        ],
+    )
+    return quality
 
 
 class _ControlUIWindow(QMainWindow):
@@ -1550,77 +1567,3 @@ class _ControlUIWindow(QMainWindow):
         if self._gas_valve_status_label is not None:
             self._gas_valve_status_label.setText("Valve: 💨 Puffing")
             self._gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
-
-
-class _ExperimenterNotesDialog(QDialog):
-    """Renders a modal text-entry window used to capture the supervising experimenter's notes for a single session.
-
-    The window stays open until the experimenter saves a non-empty note, preserving the mandatory annotation step
-    that previously required editing the session_descriptor.yaml file by hand.
-
-    Attributes:
-        _editor: The multi-line text field that holds the entered experimenter notes.
-        _save_button: The button that confirms the entered notes and closes the window.
-    """
-
-    def __init__(self, session_name: str) -> None:
-        super().__init__()
-
-        self.setWindowTitle("Session Notes")
-        self.setModal(True)
-        self.setMinimumSize(500, 320)
-
-        instruction = QLabel(
-            f"Record the notes collected while supervising session {session_name}. The window cannot be closed until "
-            f"the notes are saved."
-        )
-        instruction.setWordWrap(True)
-
-        self._editor: QPlainTextEdit = QPlainTextEdit()
-        self._editor.setPlaceholderText("Enter the notes collected while supervising this session...")
-
-        self._save_button: QPushButton = QPushButton("Save Notes")
-        self._save_button.setEnabled(False)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(self._save_button)
-
-        layout = QVBoxLayout()
-        layout.addWidget(instruction)
-        layout.addWidget(self._editor)
-        layout.addLayout(button_layout)
-        self.setLayout(layout)
-
-        # Enables the save button only while the field holds notes and wires the button and the Ctrl+Enter shortcut
-        # to confirm the entered notes.
-        self._editor.textChanged.connect(self._refresh_save_button_state)
-        self._save_button.clicked.connect(self.accept)
-        save_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        save_shortcut.activated.connect(self._confirm_notes)
-
-    @property
-    def notes(self) -> str:
-        """Returns the experimenter notes entered into the text field with surrounding whitespace removed."""
-        return self._editor.toPlainText().strip()
-
-    def closeEvent(self, event: QCloseEvent | None) -> None:  # noqa: N802
-        """Blocks window-manager close requests so the window can only be dismissed by saving notes.
-
-        Args:
-            event: The Qt-generated window shutdown event instance.
-        """
-        if event is not None:
-            event.ignore()
-
-    def reject(self) -> None:
-        """Suppresses the dialog's cancel action so the window cannot be dismissed without saving notes."""
-
-    def _refresh_save_button_state(self) -> None:
-        """Enables the save button only when the notes field holds at least one non-whitespace character."""
-        self._save_button.setEnabled(bool(self.notes))
-
-    def _confirm_notes(self) -> None:
-        """Confirms the entered notes through the Ctrl+Enter shortcut when the field is not empty."""
-        if self.notes:
-            self.accept()

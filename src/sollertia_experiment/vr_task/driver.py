@@ -17,6 +17,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
 from .bridge import UnityBridgeError, UnityBridgeClient
+from ..cross_system import wait_for_enter, request_confirmation
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
@@ -369,7 +370,7 @@ class VRTaskDriver:
                 "automatically. Run 'sle get unity' to verify the connection."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything once the Unity Editor is running: ")
+            wait_for_enter(message="Press Enter once the Unity Editor is running.")
         console.echo(message="Unity bridge: Connected.", level=LogLevel.SUCCESS)
 
     def _activate_scene(self) -> None:
@@ -409,7 +410,7 @@ class VRTaskDriver:
             except UnityBridgeError as exception:
                 message = f"Unable to arm Unity through the bridge. {exception}"
                 console.echo(message=message, level=LogLevel.WARNING)
-                input("Enter anything to retry arming Unity: ")
+                wait_for_enter(message="Press Enter to retry arming Unity.")
                 continue
 
             if self._wait_for_topic_bounded(
@@ -427,7 +428,7 @@ class VRTaskDriver:
                 "scene's MQTT settings are correct."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything to retry arming Unity: ")
+            wait_for_enter(message="Press Enter to retry arming Unity.")
 
     def _stop_unity(self) -> None:
         """Stops Unity Play Mode through the bridge and drains the resulting SessionStop message.
@@ -500,7 +501,7 @@ class VRTaskDriver:
                 f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            input("Enter anything to retry: ")
+            wait_for_enter(message="Press Enter to retry.")
 
     def _verify_scene_name(self) -> None:
         """Verifies that the armed Unity scene matches the expected scene name.
@@ -554,12 +555,7 @@ class VRTaskDriver:
             message = "Did the Virtual Reality display render correctly on the VR screens?"
             console.echo(message=message, level=LogLevel.INFO)
 
-            answer = ""
-            while answer not in {"y", "n"}:
-                user_input = input("Enter 'yes' or 'no': ").strip().lower()
-                answer = user_input[0] if user_input else ""
-
-            if answer == "y":
+            if request_confirmation(message="Did the display render correctly?", default=True):
                 self._arm_unity()
                 return
 
@@ -567,7 +563,7 @@ class VRTaskDriver:
                 "Adjust the Unity configuration as needed, then confirm when you are ready to re-verify the display."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            input("Enter anything once you are ready to re-verify: ")
+            wait_for_enter(message="Press Enter once you are ready to re-verify.")
             self._arm_unity()
 
     def _animate_until_satisfied(self) -> None:
