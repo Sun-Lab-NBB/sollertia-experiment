@@ -446,6 +446,31 @@ def collect_experimenter_notes(session_name: str) -> str:
     return notes.strip()
 
 
+def collect_surgery_quality(session_name: str) -> int:
+    """Prompts the supervising experimenter for the cranial window quality rating through a blocking terminal prompt.
+
+    The prompt runs during a window checking session's teardown and records the experimenter's assessment of the
+    cranial window and surgical intervention. The rating is propagated to the surgery log during preprocessing.
+
+    Args:
+        session_name: The name of the session being rated, shown in the prompt so the experimenter can confirm they
+            are rating the correct session.
+
+    Returns:
+        The cranial window quality rating on a scale from 0 (non-usable) to 3 (high-tier publication grade) inclusive.
+    """
+    quality: int = questionary.select(
+        f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):",
+        choices=[
+            questionary.Choice(title="0 - Non-usable", value=0),
+            questionary.Choice(title="1 - Has signal, but not publication grade", value=1),
+            questionary.Choice(title="2 - Publication grade", value=2),
+            questionary.Choice(title="3 - High-tier publication grade", value=3),
+        ],
+    ).unsafe_ask()
+    return quality
+
+
 class _ControlUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's runtime GUI application window.
 

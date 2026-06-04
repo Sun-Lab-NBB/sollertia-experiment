@@ -36,9 +36,12 @@ function runAcquisition(hSI, hSICtl, arguments)
     % Arguments:
     % - hSI: The ScanImage handle object.
     % - hSICtl: The ScanImage Controller.
-    % - root: The path at which to output the generated MotionEstimator.me and zstack.tiff files. On the Sollertia
-    % platform, this is always set to the 'shared' mesoscope data folder. This path is local to the ScanImagePC
-    % filesystem, so it remains a function argument rather than part of the MQTT-delivered configuration.
+    % - root: The path to the ScanImagePC Mesoscope data root directory. The function resolves the shared
+    % 'mesoscope_data' output folder for the generated MotionEstimator.me, zstack.tiff, and fov.roi files as the
+    % 'mesoscope_data' subdirectory of this root. It also assumes the project/animal persistent data hierarchy lives
+    % under the same root and uses that assumption to resolve the persisted per-animal reference estimator for the
+    % preload command. This path is local to the ScanImagePC filesystem, so it remains a function argument rather than
+    % part of the MQTT-delivered configuration.
     % - broker: The address of the MQTT broker shared with the Unity Virtual Reality task, in the 'tcp://host:port'
     % format. The broker runs on the VRPC, not on this ScanImagePC. The default targets the current VRPC at
     % 'tcp://192.168.0.13:1883', which matches the broker listener configured on the VRPC's local network interface.
@@ -55,12 +58,16 @@ function runAcquisition(hSI, hSICtl, arguments)
     arguments
         hSI  % Cannot be validated due to how MBF implemented the class.
         hSICtl  % Cannot be validated due to how MBF implemented the class.
-        arguments.root (1,:) char {mustBeNonempty} = 'F:\mesodata\mesoscope_data'
+        arguments.root (1,:) char {mustBeNonempty} = 'F:\mesodata'
         arguments.broker (1,:) char {mustBeNonempty} = 'tcp://192.168.0.13:1883'
     end
 
     root = arguments.root;
     broker = arguments.broker;
+
+    % Resolves the shared Mesoscope data output directory under the data root. The generated reference files and the
+    % session frames are written here, and the recovery command reloads the session estimator from here.
+    dataRoot = fullfile(root, 'mesoscope_data');
 
     % Clears the CLI
     clc;
@@ -114,12 +121,12 @@ function runAcquisition(hSI, hSICtl, arguments)
                 elseif topic == topics.preload
                     publishStatus(mqttClient, topics.status, topic, "received");
                     publishStatus(mqttClient, topics.status, topic, "preloading");
-                    preloadEstimator(hSI, hSICtl, payload);
+                    preloadEstimator(hSI, hSICtl, payload, root);
                     publishStatus(mqttClient, topics.status, topic, "preload_complete");
 
                 elseif topic == topics.generate
                     publishStatus(mqttClient, topics.status, topic, "received");
-                    config = buildAcquisitionConfig(payload, root, true);
+                    config = buildAcquisitionConfig(payload, dataRoot, true);
                     applyFieldCurvature(hSI, config.curvcorrection);
                     generateReference(hSI, config, mqttClient, topics);
                     armMesoscope(hSI, hSICtl, config, true);
@@ -127,7 +134,7 @@ function runAcquisition(hSI, hSICtl, arguments)
 
                 elseif topic == topics.recover
                     publishStatus(mqttClient, topics.status, topic, "received");
-                    config = buildAcquisitionConfig(payload, root, false);
+                    config = buildAcquisitionConfig(payload, dataRoot, false);
                     recoverAcquisition(hSI, hSICtl, config);
                     publishStatus(mqttClient, topics.status, topic, "armed");
 
@@ -171,7 +178,9 @@ function config = buildAcquisitionConfig(payload, root, full)
     %
     %   The geometry fields (root, nzhalf, centerZs, refZs) are always resolved, as both reference generation and
     %   recovery require them. The remaining acquisition fields (channel, naverage, scalefactor, curvcorrection) are
-    %   resolved only for the full reference-generation payload.
+    %   resolved only for the full reference-generation payload. The 'root' argument is the shared Mesoscope data output
+    %   directory (the 'mesoscope_data' subdirectory of the data root), where the session reference files are written
+    %   and from which the recovery command reloads the session estimator.
 
     params = jsondecode(payload);
     [nzhalf, centerZs, refZs] = computeReferencePlanes( ...
@@ -243,11 +252,13 @@ function applyFieldCurvature(hSI, enable)
 end
 
 
-function preloadEstimator(hSI, hSICtl, payload)
+function preloadEstimator(hSI, hSICtl, payload, root)
     % PRELOADESTIMATOR Loads the persisted reference estimator as an alignment aid with correction disabled.
     %
     %   The estimator restores the imaging field to approximately the same location across days. Automatic correction
-    %   is left disabled so the operator can run manual enable/disable cycles while aligning the mesoscope.
+    %   is left disabled so the operator can run manual enable/disable cycles while aligning the mesoscope. The VRPC
+    %   sends only the project and animal identifiers, and this function resolves the persisted estimator path locally
+    %   under the project/animal persistent data hierarchy assumed to live beneath the ScanImagePC data root.
 
     % Aborts any active acquisition before reconfiguring the motion manager.
     hSI.abort();
@@ -257,19 +268,22 @@ function preloadEstimator(hSI, hSICtl, payload)
     hSI.hMotionManager.estimatorClassName = 'scanimage.components.motionEstimators.MariusMotionEstimator';
     hSI.hMotionManager.correctorClassName = 'scanimage.components.motionCorrectors.MariusMotionCorrector2';
 
-    % Loads the persisted estimator when the VRPC dispatched a path. A null path indicates that no persisted estimator
-    % exists for the animal (for example, on the first imaging day), so alignment proceeds without an aid.
+    % Resolves the persisted estimator path from the project and animal identifiers. The 'persistent_data' folder name
+    % mirrors the Sollertia platform per-animal persistent data directory. A missing file indicates that no persisted
+    % estimator exists for the animal (for example, on the first imaging day), so alignment proceeds without an aid.
     decoded = jsondecode(payload);
-    if isfield(decoded, 'path') && ~isempty(decoded.path) && (ischar(decoded.path) || isstring(decoded.path))
-        estimatorPath = char(decoded.path);
+    if isfield(decoded, 'project') && isfield(decoded, 'animal') ...
+            && ~isempty(decoded.project) && ~isempty(decoded.animal)
+        estimatorPath = fullfile( ...
+            root, char(decoded.project), char(decoded.animal), 'persistent_data', 'MotionEstimator.me');
         if isfile(estimatorPath)
             hSI.hMotionManager.loadEstimators(estimatorPath);
             fprintf('Preloaded reference estimator: %s\n', estimatorPath);
         else
-            warning('Preload estimator path does not exist: %s', estimatorPath);
+            fprintf('No persisted estimator found for this animal; proceeding without an alignment aid.\n');
         end
     else
-        fprintf('No persisted estimator provided; proceeding without an alignment aid.\n');
+        fprintf('No project/animal provided; proceeding without an alignment aid.\n');
     end
 
     % Shows the estimator so the operator can align the field, but leaves automatic correction disabled.

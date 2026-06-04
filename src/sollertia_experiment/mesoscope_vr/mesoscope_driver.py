@@ -16,8 +16,6 @@ from ataraxis_communication_interface import MQTTCommunication
 from .system import MesoscopePositions
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from .system import MesoscopeAcquisition
     from ..vr_task import VRTaskConfiguration
 
@@ -44,8 +42,9 @@ class _MesoscopeMQTTTopics(StrEnum):
     reception acknowledgement; the VRPC treats the absence of a reply within the acknowledgement timeout as the
     runAcquisition command loop not running. Mirrors the request-reply presence check used for the Unity bridge."""
     PRELOAD = "MesoscopePreload"
-    """Request to preload a persisted reference estimator as an alignment aid, carrying the estimator path or null in a
-    'path' field. Automatic motion correction stays disabled so the operator enables it manually during alignment."""
+    """Request to preload a persisted reference estimator as an alignment aid, carrying the 'project' and 'animal'
+    identifiers the ScanImagePC uses to resolve the estimator path under its local Mesoscope data root. Automatic motion
+    correction stays disabled so the operator enables it manually during alignment."""
     GENERATE_REFERENCE = "MesoscopeGenerateReference"
     """Request to run the lengthy reference sequence (fresh session estimator plus high-definition z-stack) and arm the
     Mesoscope. Carries the full acquisition parameter set as a JSON payload. Dispatched once the acquisition runtime
@@ -167,19 +166,23 @@ class MesoscopeDriver:
         self._dispatch_command(command=_MesoscopeMQTTTopics.ALIVE)
         console.echo(message="Mesoscope control interface: Connected.", level=LogLevel.SUCCESS)
 
-    def preload(self, estimator_path: Path | None) -> None:
+    def preload(self, project: str, animal: str) -> None:
         """Instructs the ScanImagePC to preload the persisted reference estimator as an alignment aid.
 
         Notes:
             The ScanImagePC enables the motion manager so the estimator is visible but leaves automatic correction
-            disabled; the operator enables correction manually while aligning the Mesoscope.
+            disabled; the operator enables correction manually while aligning the Mesoscope. The persisted estimator
+            path is local to the ScanImagePC filesystem, so the VRPC sends only the project and animal identifiers and
+            the ScanImagePC resolves the path under its own Mesoscope data root. When no persisted estimator exists for
+            the animal (for example, on the first imaging day), the ScanImagePC proceeds without an alignment aid.
 
         Args:
-            estimator_path: The path to the persisted reference estimator on the shared mesoscope directory, or None
-                when no persisted estimator exists for the animal (for example, on the first imaging day).
+            project: The name of the project the animal belongs to, used by the ScanImagePC to resolve the persisted
+                estimator path.
+            animal: The unique identifier of the animal, used by the ScanImagePC to resolve the persisted estimator
+                path.
         """
-        path_value = str(estimator_path) if estimator_path is not None else None
-        payload = json.dumps(obj={"path": path_value}).encode("utf-8")
+        payload = json.dumps(obj={"project": project, "animal": animal}).encode("utf-8")
         self._dispatch_command(
             command=_MesoscopeMQTTTopics.PRELOAD,
             payload=payload,

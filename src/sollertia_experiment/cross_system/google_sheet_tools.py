@@ -255,8 +255,11 @@ class SurgeryLog:
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to fetch the sheet data via HTTP request(s).
-        self._service: Resource = build(serviceName="sheets", version="v4", credentials=credentials)
+        # used to fetch the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
+        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        self._service: Resource = build(
+            serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
+        )
 
         # Retrieves all values stored in the first row of the target sheet tab. Each tab represents a particular
         # project. The first row contains the headers for all data columns stored in the sheet.
@@ -641,8 +644,11 @@ class WaterLog:
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to write the sheet data via HTTP request(s).
-        self._service: Resource = build(serviceName="sheets", version="v4", credentials=credentials)
+        # used to write the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
+        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        self._service: Resource = build(
+            serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
+        )
 
         # Gets all tab names from the sheet metadata
         # noinspection PyUnresolvedReferences

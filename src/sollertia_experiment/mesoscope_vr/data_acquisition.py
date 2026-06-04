@@ -204,7 +204,8 @@ def window_checking_logic(
         # Retrieves current motor positions and packages them into a ZaberPositions object.
         generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
 
-        # Collects the experimenter notes through a GUI window and writes the completed session descriptor.
+        # Collects the experimenter notes and the cranial window quality rating, then writes the completed session
+        # descriptor.
         finalize_session_descriptor(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
 
         # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking by

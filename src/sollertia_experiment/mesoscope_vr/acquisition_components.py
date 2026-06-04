@@ -5,6 +5,7 @@ Mesoscope-VR data acquisition runtime.
 from __future__ import annotations
 
 from enum import IntEnum
+import atexit
 import shutil
 from typing import TYPE_CHECKING
 from dataclasses import field, dataclass
@@ -25,7 +26,7 @@ from sollertia_shared_assets import (
 )
 
 from .system import MesoscopeData, MesoscopePositions
-from .runtime_ui import collect_experimenter_notes
+from .runtime_ui import collect_surgery_quality, collect_experimenter_notes
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -38,8 +39,48 @@ RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 
-RESPONSE_DELAY_TIMER: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
-"""The PrecisionTimer instance used to support the proper rendering of all terminal outputs used during runtime."""
+
+class _ResponseDelayTimer:
+    """Owns the shared PrecisionTimer used to pace the rendering of terminal outputs during runtime.
+
+    Notes:
+        The timer is wrapped in this holder, rather than stored directly as a module constant, so that its underlying
+        nanobind-bound C++ object can be released at interpreter shutdown. If that object is still referenced when the
+        ataraxis_time extension is finalized, nanobind prints a spurious 'leaked instance' warning to the terminal.
+        Since every runtime module shares this single holder by reference, the holder owns the only reference to the
+        C++ timer, so releasing it here frees the object before the extension teardown check runs.
+    """
+
+    def __init__(self) -> None:
+        self._timer: PrecisionTimer | None = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        atexit.register(self._release)
+
+    def _release(self) -> None:
+        """Drops the wrapped PrecisionTimer so its C++ object is freed before the ataraxis_time extension teardown."""
+        self._timer = None
+
+    def delay(self, delay: int, *, allow_sleep: bool = False, block: bool = False) -> None:
+        """Delays for the requested number of milliseconds, forwarding to the wrapped PrecisionTimer."""
+        if self._timer is None:
+            return
+        self._timer.delay(delay=delay, allow_sleep=allow_sleep, block=block)
+
+    def reset(self) -> None:
+        """Resets the reference point of the wrapped PrecisionTimer to the current time."""
+        if self._timer is None:
+            return
+        self._timer.reset()
+
+    @property
+    def elapsed(self) -> int:
+        """Returns the number of milliseconds elapsed since the last reset of the wrapped PrecisionTimer."""
+        if self._timer is None:
+            return 0
+        return self._timer.elapsed
+
+
+RESPONSE_DELAY_TIMER: _ResponseDelayTimer = _ResponseDelayTimer()
+"""The shared timer used to pace the rendering of terminal outputs that require user interaction during runtime."""
 
 
 class MesoscopeVRLogMessageCodes(IntEnum):
@@ -398,11 +439,12 @@ def setup_mesoscope(
         questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
-    # exists for the animal) as an alignment aid. Automatic motion correction stays disabled so the user aligns the
-    # mesoscope manually during the next step.
+    # exists for the animal) as an alignment aid. The estimator path is local to the ScanImagePC filesystem, so the
+    # VRPC sends only the project and animal identifiers and the ScanImagePC resolves the path under its own Mesoscope
+    # data root. Automatic motion correction stays disabled so the user aligns the mesoscope manually during the next
+    # step.
     mesoscope_driver.await_alive()
-    persisted_estimator_path = mesoscope_data.scanimagepc_data.motion_estimator_path
-    mesoscope_driver.preload(estimator_path=persisted_estimator_path if persisted_estimator_path.exists() else None)
+    mesoscope_driver.preload(project=session_data.project_name, animal=session_data.animal_id)
 
     # Step 1: Resolves the imaging plane.
     # If the previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
@@ -544,11 +586,13 @@ def finalize_session_descriptor(
     session_data: SessionData,
     mesoscope_data: MesoscopeData,
 ) -> None:
-    """Collects the supervising experimenter's session notes through a GUI window, writes the completed descriptor to
-    the session's raw_data directory, and caches a copy to the animal's persistent directory.
+    """Collects the supervising experimenter's session notes, writes the completed descriptor to the session's
+    raw_data directory, and caches a copy to the animal's persistent directory.
 
-    The notes are entered through a blocking text-entry window instead of by manually editing the
-    session_descriptor.yaml file, removing the filesystem round-trip previously required to annotate each session.
+    The notes are entered through a blocking terminal prompt instead of by manually editing the session_descriptor.yaml
+    file, removing the filesystem round-trip previously required to annotate each session. For window checking
+    sessions, the experimenter is additionally prompted for the cranial window quality rating, which is otherwise left
+    at its default value.
 
     Args:
         descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
@@ -556,8 +600,15 @@ def finalize_session_descriptor(
         session_data: The SessionData instance that defines the session for which the descriptor file is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
-    # Collects the experimenter notes through a GUI window and stores them inside the descriptor. The runtime control
-    # UI is already shut down at this point, so the notes window runs on the main thread without competing GUIs.
+    # Window checking sessions additionally capture the experimenter's cranial window quality rating on a 0-3 scale.
+    # The rating is propagated to the surgery log Google Sheet during preprocessing; the other session types do not
+    # track a window quality rating.
+    if isinstance(descriptor, WindowCheckingDescriptor):
+        descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
+
+    # Collects the experimenter notes through a blocking terminal prompt and stores them inside the descriptor. The
+    # runtime control UI is already shut down at this point, so the prompt runs on the main thread without competing
+    # GUIs.
     descriptor.experimenter_notes = collect_experimenter_notes(session_name=session_data.session_name)
 
     # Saves the completed descriptor as a .yaml file inside the session's raw_data directory.
