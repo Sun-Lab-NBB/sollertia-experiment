@@ -5,13 +5,13 @@ Mesoscope-VR data acquisition runtime.
 from __future__ import annotations
 
 from enum import IntEnum
+import math
 import atexit
 import shutil
 from typing import TYPE_CHECKING
-from dataclasses import field, dataclass
+from dataclasses import field, fields, dataclass
 
 import numpy as np
-import questionary
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
@@ -27,8 +27,11 @@ from sollertia_shared_assets import (
 
 from .system import MesoscopeData, MesoscopePositions
 from .runtime_ui import collect_surgery_quality, collect_experimenter_notes
+from ..cross_system import request_text, wait_for_enter, request_confirmation
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from numpy.typing import NDArray
 
     from .binding_classes import ZaberMotors
@@ -252,6 +255,12 @@ def generate_mesoscope_position_snapshot(
     mesoscope_positions = mesoscope_driver.query_state()
     mesoscope_positions.red_dot_alignment_z = _prompt_red_dot_alignment(previous_value=previous_red_dot_alignment_z)
 
+    # Rounds every position down to at most three decimal places, discarding the spurious sub-micrometer and
+    # sub-millidegree precision reported by the ScanImage software before the snapshot is persisted.
+    for position_field in fields(mesoscope_positions):
+        rounded_value = _floor_to_three_decimals(value=getattr(mesoscope_positions, position_field.name))
+        setattr(mesoscope_positions, position_field.name, rounded_value)
+
     # Writes the snapshot to the session's raw_data directory and to the animal's persistent directory, overwriting any
     # existing persistent file so it can seed the next runtime.
     mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
@@ -302,7 +311,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     # Blocks until the operator confirms or declines the Zaber motor setup sequence.
-    if not questionary.confirm("Carry out the Zaber motor setup sequence?", default=False).unsafe_ask():
+    if not request_confirmation(message="Carry out the Zaber motor setup sequence?", default=False):
         # Aborts method runtime, as no further Zaber setup is required.
         return
 
@@ -314,7 +323,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
     # safe to proceed with motor movements.
@@ -324,7 +333,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Homes all managed motors in parallel.
     zaber_motors.prepare_motors()
@@ -342,13 +351,36 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Restores all motors to the positions used during the previous session's runtime.
     zaber_motors.restore_position()
 
     message = "Motor Positioning: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def run_shutdown_step(description: str, step: Callable[[], None]) -> None:
+    """Executes a single shutdown callable, isolating it so that an error or interrupt does not propagate.
+
+    The Mesoscope-VR shutdown sequences tear down several subprocess-backed assets in turn. Allowing an exception or a
+    repeated KeyboardInterrupt from one asset to propagate would skip the remaining teardown steps and leave the
+    orphaned subprocesses to be collected by the garbage collector, which tears down their shared-memory managers out
+    of order and cascades into multiprocessing errors. This helper contains each failure so the remaining steps still
+    run, while the originally propagating exception (if any) resumes once the shutdown sequence completes.
+
+    Args:
+        description: A short gerund phrase naming the step, used to contextualize an error encountered while running it.
+        step: The zero-argument callable that performs the shutdown step.
+    """
+    try:
+        step()
+    except (Exception, KeyboardInterrupt) as error:
+        message = (
+            f"Encountered an error while {description} during the Mesoscope-VR shutdown sequence: {error!r}. "
+            f"Continuing with the remaining shutdown steps."
+        )
+        console.echo(message=message, level=LogLevel.ERROR)
 
 
 def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
@@ -370,7 +402,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
     # Blocks until the operator confirms or declines the Zaber motor shutdown sequence.
-    if not questionary.confirm("Carry out the Zaber motor shutdown sequence?", default=False).unsafe_ask():
+    if not request_confirmation(message="Carry out the Zaber motor shutdown sequence?", default=False):
         # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
         # before disconnecting.
         zaber_motors.disconnect()
@@ -388,7 +420,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Moves all motors to the hardcoded parking positions.
     zaber_motors.park_position()
@@ -436,7 +468,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+        wait_for_enter(message="Press Enter to continue.")
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
     # exists for the animal) as an alignment aid. The estimator path is local to the ScanImagePC filesystem, so the
@@ -475,7 +507,7 @@ def setup_mesoscope(
         )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
     message = (
@@ -484,7 +516,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     # Ensures that the screenshot is created before proceeding further.
     while True:
@@ -500,7 +532,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+        wait_for_enter(message="Press Enter to continue.")
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
@@ -521,9 +553,9 @@ def setup_mesoscope(
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
         # Blocks until the operator confirms or declines generating the metadata snapshots.
-        if not questionary.confirm(
-            "Generate the ROI and MotionEstimator snapshots for this animal?", default=False
-        ).unsafe_ask():
+        if not request_confirmation(
+            message="Generate the ROI and MotionEstimator snapshots for this animal?", default=False
+        ):
             # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
             console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
             return
@@ -541,7 +573,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+    wait_for_enter(message="Press Enter to continue.")
 
     mesoscope_driver.generate_reference()
 
@@ -573,7 +605,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+        wait_for_enter(message="Press Enter to continue.")
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
 
@@ -643,10 +675,10 @@ def _prompt_red_dot_alignment(previous_value: float) -> float:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    response: str = questionary.text(
-        "Enter the red-dot alignment Z position, in micrometers:",
+    response: str = request_text(
+        message="Enter the red-dot alignment Z position, in micrometers:",
         validate=_validate_red_dot_response,
-    ).unsafe_ask()
+    )
     if not response.strip():
         return previous_value
     return float(response)
@@ -668,3 +700,19 @@ def _validate_red_dot_response(response: str) -> bool | str:
     except ValueError:
         return "Enter a numeric value or leave the response empty to keep the stored value."
     return True
+
+
+def _floor_to_three_decimals(value: float) -> float:
+    """Rounds the given value down to at most three decimal places.
+
+    Notes:
+        The value is floored toward negative infinity rather than truncated toward zero, so negative inputs round
+        down to the next lower three-decimal value.
+
+    Args:
+        value: The floating-point position value to round down.
+
+    Returns:
+        The value rounded down to at most three decimal places.
+    """
+    return math.floor(value * 1000.0) / 1000.0

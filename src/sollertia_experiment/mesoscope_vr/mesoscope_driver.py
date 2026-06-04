@@ -8,12 +8,12 @@ from enum import StrEnum
 import json
 from typing import TYPE_CHECKING
 
-import questionary
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
 from .system import MesoscopePositions
+from ..cross_system import wait_for_enter
 
 if TYPE_CHECKING:
     from .system import MesoscopeAcquisition
@@ -275,7 +275,7 @@ class MesoscopeDriver:
                 f"the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            questionary.press_any_key_to_continue("Press any key to retry.").unsafe_ask()
+            wait_for_enter(message="Press Enter to retry.")
 
     def _encode_acquisition(self, *, geometry_only: bool) -> bytes:
         """Serializes the acquisition parameters a command consumes into a JSON MQTT payload.
@@ -336,7 +336,7 @@ class MesoscopeDriver:
                 f"running on the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            questionary.press_any_key_to_continue("Press any key to retry.").unsafe_ask()
+            wait_for_enter(message="Press Enter to retry.")
 
         if terminal_state is not None:
             self._await_status(command=command, state=terminal_state, timeout_ms=None)

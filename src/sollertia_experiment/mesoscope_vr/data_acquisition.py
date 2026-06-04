@@ -11,7 +11,6 @@ import tempfile
 
 from tqdm import tqdm
 import numpy as np
-import questionary
 from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
@@ -43,7 +42,9 @@ from ..cross_system import (
     BrakeInterface,
     WaterValveInterface,
     GasPuffValveInterface,
+    wait_for_enter,
     get_version_data,
+    request_confirmation,
     get_project_experiments,
 )
 from .maintenance_ui import MaintenanceControlUI
@@ -55,6 +56,7 @@ from .acquisition_components import (
     RESPONSE_DELAY,
     RESPONSE_DELAY_TIMER,
     setup_mesoscope,
+    run_shutdown_step,
     reset_zaber_motors,
     setup_zaber_motors,
     generate_zaber_snapshot,
@@ -138,6 +140,8 @@ def window_checking_logic(
     precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
     zaber_motors: ZaberMotors | None = None
+    logger: DataLogger | None = None
+    cameras: VideoSystems | None = None
 
     # Builds the mesoscope control driver used to command the ScanImage software over the shared Virtual Reality MQTT
     # broker. The driver is connected just before the mesoscope preparation sequence and disconnected during cleanup.
@@ -155,7 +159,7 @@ def window_checking_logic(
         )
 
         # Initializes the data logger. This initialization follows the same procedure as the MesoscopeVRSystem class.
-        logger: DataLogger = DataLogger(
+        logger = DataLogger(
             output_directory=session_data.raw_data_path,
             # Creates the behavior_log subdirectory under raw_data.
             instance_name="behavior",
@@ -185,13 +189,10 @@ def window_checking_logic(
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+        wait_for_enter(message="Press Enter to continue.")
 
         # Establishes communication with Zaber motors.
         zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
-
-        # Removes the nk.bin marker to avoid automatic session cleanup during post-processing.
-        session_data.mark_runtime_initialized()
 
         # Prepares Zaber motors for data acquisition.
         setup_zaber_motors(zaber_motors=zaber_motors)
@@ -200,6 +201,11 @@ def window_checking_logic(
         # assessing the quality of the animal's cranial window.
         mesoscope_driver.connect()
         setup_mesoscope(session_data=session_data, mesoscope_data=mesoscope_data, mesoscope_driver=mesoscope_driver)
+
+        # Removes the nk.bin marker now that all hardware assets are running. Marking initialization only after the
+        # mesoscope handshake succeeds ensures that aborting an unresponsive handshake purges the session instead of
+        # leaving partial data behind.
+        session_data.mark_runtime_initialized()
 
         # Retrieves current motor positions and packages them into a ZaberPositions object.
         generate_zaber_snapshot(session_data=session_data, mesoscope_data=mesoscope_data, zaber_motors=zaber_motors)
@@ -228,8 +234,29 @@ def window_checking_logic(
         preprocess_session_data(session_data=session_data)
 
     finally:
-        # If the session runtime terminates before the session was initialized, removes session data from all sources
-        # before shutting down.
+        # Tears down the runtime in a fixed order, isolating each step so that an asset error or a repeated
+        # KeyboardInterrupt during cleanup cannot skip the remaining steps. The camera and data logger processes are
+        # stopped first, while their shared-memory managers are still alive; deferring this to garbage collection tears
+        # down the managers first, which crashes the __del__ finalizers and cascades into multiprocessing errors. Both
+        # stop() methods are idempotent, so re-running them after the success path is a no-op.
+        if cameras is not None:
+            run_shutdown_step(description="stopping the cameras", step=cameras.stop)
+        if logger is not None:
+            run_shutdown_step(description="stopping the data logger", step=logger.stop)
+
+        # If Zaber motors were connected, attempts to gracefully shut down the motors.
+        if zaber_motors is not None:
+            motors = zaber_motors
+            run_shutdown_step(
+                description="resetting the Zaber motors", step=lambda: reset_zaber_motors(zaber_motors=motors)
+            )
+
+        # Disconnects from the ScanImagePC. The disconnect is a no-op if the driver never connected.
+        run_shutdown_step(description="disconnecting from the ScanImagePC", step=mesoscope_driver.disconnect)
+
+        # If the session runtime terminates before the session was initialized, removes session data from all sources.
+        # This runs after the data logger has stopped so that the raw_data directory is fully flushed and released
+        # before it is deleted.
         if session_data.raw_data.nk_path.exists():
             message = (
                 f"The runtime was unexpectedly terminated before it was able to initialize all required Mesoscope-VR "
@@ -237,14 +264,9 @@ def window_checking_logic(
                 f"to the {system_configuration.name} data acquisition system..."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            purge_session(session_data=session_data)
-
-        # If Zaber motors were connected, attempts to gracefully shut down the motors.
-        if zaber_motors is not None:
-            reset_zaber_motors(zaber_motors=zaber_motors)
-
-        # Disconnects from the ScanImagePC. The disconnect is a no-op if the driver never connected.
-        mesoscope_driver.disconnect()
+            run_shutdown_step(
+                description="purging the uninitialized session", step=lambda: purge_session(session_data=session_data)
+            )
 
         # Ends the runtime.
         message = "Window checking session: Complete."
@@ -1268,7 +1290,7 @@ def maintenance_logic() -> None:
         message="Do you want to position the managed Zaber motors for valve calibration or referencing procedure?",
         level=LogLevel.INFO,
     )
-    move_zaber_motors: bool = questionary.confirm("Position the managed Zaber motors?", default=False).unsafe_ask()
+    move_zaber_motors: bool = request_confirmation(message="Position the managed Zaber motors?", default=False)
 
     # All calibration procedures are executed in a temporary directory deleted after runtime.
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:
@@ -1330,7 +1352,7 @@ def maintenance_logic() -> None:
                 # Delays to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+                wait_for_enter(message="Press Enter to continue.")
                 zaber_motors.prepare_motors()
                 zaber_motors.maintenance_position()
 
@@ -1408,7 +1430,7 @@ def maintenance_logic() -> None:
                 # Delays for 2 seconds to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                questionary.press_any_key_to_continue("Press any key to continue.").unsafe_ask()
+                wait_for_enter(message="Press Enter to continue.")
                 zaber_motors.park_position()
                 zaber_motors.disconnect()
 

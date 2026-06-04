@@ -13,6 +13,12 @@ from .zaber_bindings import (
     get_zaber_device_settings,
     validate_zaber_device_configuration,
 )
+from .terminal_prompts import (
+    request_text,
+    wait_for_enter,
+    request_selection,
+    request_confirmation,
+)
 from .module_interfaces import (
     LickInterface,
     BrakeInterface,
@@ -75,7 +81,11 @@ __all__ = [
     "push_session_data",
     "register_system_configuration",
     "rename_session_videos",
+    "request_confirmation",
+    "request_selection",
+    "request_text",
     "set_zaber_device_setting",
     "snapshot_surgery_data",
     "validate_zaber_device_configuration",
+    "wait_for_enter",
 ]

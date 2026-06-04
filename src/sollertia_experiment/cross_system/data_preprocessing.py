@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-import questionary
 from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import SessionData
@@ -20,6 +19,7 @@ from ataraxis_data_structures import (
     calculate_directory_checksum,
 )
 
+from .terminal_prompts import request_confirmation
 from .google_sheet_tools import SurgeryLog
 
 if TYPE_CHECKING:
@@ -268,9 +268,9 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
-        if not questionary.confirm(
-            f"Permanently delete all data for session {session_name}?", default=False
-        ).unsafe_ask():
+        if not request_confirmation(
+            message=f"Permanently delete all data for session {session_name}?", default=False
+        ):
             console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
             return False
 

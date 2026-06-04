@@ -31,6 +31,7 @@ from ataraxis_data_structures import SharedMemoryArray
 
 from .system import RUN_TRAINING_THRESHOLD_LIMITS
 from .visualizer import VisualizerMode
+from ..cross_system import request_text, request_selection
 
 _SPEED_THRESHOLD_SCALE: int = 100
 """Converts between centimeters per second and the hundredths-of-a-centimeter-per-second integer units used to store
@@ -438,11 +439,14 @@ def collect_experimenter_notes(session_name: str) -> str:
     Returns:
         The experimenter notes entered through the terminal.
     """
-    notes: str = questionary.text(
-        f"Record the notes collected while supervising session {session_name} (press Esc then Enter to submit):",
+    prompt = (
+        f"Record the notes collected while supervising session {session_name} (press Esc then Enter to submit):"
+    )
+    notes: str = request_text(
+        message=prompt,
         multiline=True,
         validate=lambda text: bool(text.strip()) or "The session notes cannot be empty.",
-    ).unsafe_ask()
+    )
     return notes.strip()
 
 
@@ -459,15 +463,18 @@ def collect_surgery_quality(session_name: str) -> int:
     Returns:
         The cranial window quality rating on a scale from 0 (non-usable) to 3 (high-tier publication grade) inclusive.
     """
-    quality: int = questionary.select(
-        f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):",
+    prompt = (
+        f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):"
+    )
+    quality: int = request_selection(
+        message=prompt,
         choices=[
             questionary.Choice(title="0 - Non-usable", value=0),
             questionary.Choice(title="1 - Has signal, but not publication grade", value=1),
             questionary.Choice(title="2 - Publication grade", value=2),
             questionary.Choice(title="3 - High-tier publication grade", value=3),
         ],
-    ).unsafe_ask()
+    )
     return quality
 
 
