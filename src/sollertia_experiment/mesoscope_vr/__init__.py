@@ -6,7 +6,9 @@ from .system import (
     MesoscopeVRAssets,
     MesoscopePositions,
     MesoscopeFileSystem,
+    MesoscopeAcquisition,
     MesoscopeGoogleSheets,
+    MesoscopeAcquisitionOrder,
     MesoscopeMicroControllers,
     MesoscopeStorageDestination,
     MesoscopeSystemConfiguration,
@@ -29,6 +31,8 @@ from .data_preprocessing import (
 )
 
 __all__ = [
+    "MesoscopeAcquisition",
+    "MesoscopeAcquisitionOrder",
     "MesoscopeCameras",
     "MesoscopeDriver",
     "MesoscopeFileSystem",

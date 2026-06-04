@@ -51,6 +51,16 @@ class MesoscopeStorageDestination(StrEnum):
     """The remote compute server used as the primary long-term storage and analysis destination."""
 
 
+class MesoscopeAcquisitionOrder(StrEnum):
+    """Defines the supported plane-acquisition orders for the Mesoscope reference and high-definition z-stacks."""
+
+    INTERLEAVED = "interleaved"
+    """Iterates over the target planes once per acquired volume, acquiring one frame at each plane before repeating
+    (Z1, Z2, Z1, Z2)."""
+    SMOOTH = "smooth"
+    """Acquires all averaged frames at one target plane before advancing to the next plane (Z1, Z1, Z2, Z2)."""
+
+
 @dataclass(frozen=True, slots=True)
 class RunTrainingThresholdLimits:
     """Defines the absolute bounds applied to the run training running speed and epoch duration thresholds.
@@ -230,6 +240,82 @@ class MesoscopeMicroControllers:
 
 
 @dataclass(slots=True)
+class MesoscopeAcquisition:
+    """Stores the online motion-estimation and z-stack acquisition configuration of the Mesoscope-VR system.
+
+    These parameters configure the reference motion estimator and the high-definition reference z-stack that the
+    ScanImagePC generates at the start of each runtime. The VRPC delivers them to the runAcquisition MATLAB function
+    over MQTT with each command that consumes them, so this configuration is the single source of truth for the
+    Mesoscope acquisition geometry.
+    """
+
+    z_step_um: int = 20
+    """The spacing, in micrometers, between consecutive target imaging planes in the acquired z-stack."""
+    z_range_um: tuple[int, int] = (1050, 1050)
+    """The [minimum, maximum] z-plane range to image, in micrometers. Equal boundaries image a single plane at that
+    depth; distinct boundaries image the inclusive slice between them."""
+    z_exclusion_um: tuple[int, int] = (0, 0)
+    """The [minimum, maximum] boundaries, in micrometers, of the non-imaged exclusion zone used for two-plane imaging.
+    Equal boundaries disable two-plane imaging. When the boundaries differ, they must fall within z_range_um."""
+    acquisition_order: MesoscopeAcquisitionOrder = MesoscopeAcquisitionOrder.INTERLEAVED
+    """The order in which the target planes are acquired when building the reference and high-definition z-stacks."""
+    registration_channel: int = 1
+    """The acquisition channel used for online motion registration and the high-definition reference z-stack."""
+    field_curvature_correction: bool = False
+    """Determines whether ScanImage field curvature correction is enabled during acquisition. The appropriate setting
+    depends on the specific microscope."""
+    frames_per_reference_plane: int = 20
+    """The number of frames acquired and averaged at each reference plane. Larger values improve motion
+    characterization at the cost of longer processing and higher acquisition-machine load."""
+    zstack_scale_factor: float = 2.0
+    """The factor by which the X and Y resolution of each ROI is scaled when acquiring the high-definition reference
+    z-stack. The scaling preserves the original ROI aspect ratios."""
+
+    def __post_init__(self) -> None:
+        """Validates that the acquisition parameters are positive and the z-range and exclusion-zone boundaries are
+        correctly ordered and bounded.
+        """
+        # The positivity guards mirror the validation the runAcquisition MATLAB arguments block enforced before these
+        # parameters moved into this configuration.
+        positive_parameters: tuple[tuple[str, float], ...] = (
+            ("z_step_um", self.z_step_um),
+            ("registration_channel", self.registration_channel),
+            ("frames_per_reference_plane", self.frames_per_reference_plane),
+            ("zstack_scale_factor", self.zstack_scale_factor),
+        )
+        for name, value in positive_parameters:
+            if value <= 0:
+                message = (
+                    f"Unable to initialize MesoscopeAcquisition. The {name} field must be a positive value, but got "
+                    f"{value}."
+                )
+                console.error(message=message, error=ValueError)
+
+        if self.z_range_um[0] <= 0 or self.z_range_um[0] > self.z_range_um[1]:
+            message = (
+                f"Unable to initialize MesoscopeAcquisition. The z_range_um boundaries must be positive and ordered as "
+                f"(minimum, maximum), but got {self.z_range_um}."
+            )
+            console.error(message=message, error=ValueError)
+
+        # Equal exclusion boundaries disable two-plane imaging, so only a configured (unequal) zone is range-checked.
+        minimum, maximum = self.z_exclusion_um
+        if minimum > maximum:
+            message = (
+                f"Unable to initialize MesoscopeAcquisition. The z_exclusion_um boundaries must be ordered as "
+                f"(minimum, maximum), but got {self.z_exclusion_um}."
+            )
+            console.error(message=message, error=ValueError)
+
+        if minimum != maximum and not (self.z_range_um[0] <= minimum and maximum <= self.z_range_um[1]):
+            message = (
+                f"Unable to initialize MesoscopeAcquisition. The configured z_exclusion_um zone {self.z_exclusion_um} "
+                f"must fall within the z_range_um boundaries {self.z_range_um}."
+            )
+            console.error(message=message, error=ValueError)
+
+
+@dataclass(slots=True)
 class MesoscopeVRAssets:
     """Stores the Virtual Reality task asset configuration of the Mesoscope-VR data acquisition system.
 
@@ -263,6 +349,8 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
     """Stores the video cameras configuration."""
     microcontrollers: MesoscopeMicroControllers = field(default_factory=MesoscopeMicroControllers)
     """Stores the microcontrollers configuration."""
+    acquisition: MesoscopeAcquisition = field(default_factory=MesoscopeAcquisition)
+    """Stores the Mesoscope motion-estimation and z-stack acquisition configuration."""
     assets: MesoscopeVRAssets = field(default_factory=MesoscopeVRAssets)
     """Stores the Virtual Reality task asset configuration."""
 

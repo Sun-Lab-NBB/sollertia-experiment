@@ -305,7 +305,10 @@ class MesoscopeVRSystem:
 
         # Builds the mesoscope control driver. It reuses the shared Virtual Reality MQTT broker to command the
         # ScanImage software running on the ScanImagePC, and is connected only for mesoscope experiment sessions.
-        self._mesoscope: MesoscopeDriver = MesoscopeDriver(configuration=self._system_configuration.assets.vr_task)
+        self._mesoscope: MesoscopeDriver = MesoscopeDriver(
+            configuration=self._system_configuration.assets.vr_task,
+            acquisition=self._system_configuration.acquisition,
+        )
 
         self._mesoscope_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
 
@@ -512,10 +515,6 @@ class MesoscopeVRSystem:
         if self._vr_task is not None:
             self._vr_task.disconnect()
 
-        # Disconnects from the MQTT broker that facilitates communication with the ScanImagePC. The disconnect is a
-        # no-op when the driver was never connected, as is the case for non-mesoscope sessions.
-        self._mesoscope.disconnect()
-
         # Stops all cameras.
         self._cameras.stop()
 
@@ -539,9 +538,19 @@ class MesoscopeVRSystem:
         # through a GUI window, and saves the completed descriptor to disk.
         self._generate_session_descriptor()
 
-        # Generates the snapshot of the positions used by all mesoscope's imaging axes.
+        # Generates the snapshot of the positions used by all mesoscope's imaging axes by querying the ScanImagePC. This
+        # runs after frame acquisition is stopped (when it was started) but while the mesoscope control driver is still
+        # connected, so the mesoscope is sitting at the acquisition position with the laser still configured.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            generate_mesoscope_position_snapshot(session_data=self._session_data, mesoscope_data=self._mesoscope_data)
+            generate_mesoscope_position_snapshot(
+                session_data=self._session_data,
+                mesoscope_data=self._mesoscope_data,
+                mesoscope_driver=self._mesoscope,
+            )
+
+        # Disconnects from the MQTT broker that facilitates communication with the ScanImagePC. The disconnect is a
+        # no-op when the driver was never connected, as is the case for non-mesoscope sessions.
+        self._mesoscope.disconnect()
 
         # Optionally resets Zaber motors by moving them to the dedicated parking position before shutting down Zaber
         # connection. Regardless of whether the motors are moved, disconnects from the motors at the end of the method's

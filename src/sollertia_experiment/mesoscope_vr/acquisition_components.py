@@ -178,85 +178,44 @@ class TrialState:
         return self.reinforcing_failed_trials
 
 
-def generate_mesoscope_position_snapshot(session_data: SessionData, mesoscope_data: MesoscopeData) -> None:
-    """Forces the user to update the mesoscope_positions.yaml file to reflect the current mesoscope's imaging position
-    coordinates and copies the validated file into the animal's persistent directory.
+def generate_mesoscope_position_snapshot(
+    session_data: SessionData, mesoscope_data: MesoscopeData, mesoscope_driver: MesoscopeDriver
+) -> None:
+    """Queries the current Mesoscope imaging position from the ScanImagePC and writes it as a mesoscope_positions.yaml
+    file to the session and the animal's persistent directories.
+
+    Notes:
+        Most position fields are queried directly from the ScanImage software over MQTT, so the mesoscope control
+        driver must still be connected and idle when this function runs. The red-dot alignment position is the only
+        field that cannot be queried, so it is entered manually, defaulting to the previous runtime's value.
 
     Args:
         session_data: The SessionData instance that defines the session for which the snapshot is generated.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
+        mesoscope_driver: The MesoscopeDriver instance used to query the Mesoscope state over MQTT.
     """
     # If the session was not fully initialized (nk.bin marker exists), skips the snapshot generation.
     if session_data.raw_data.nk_path.exists():
         return
 
-    # Loads the previous position data into memory.
-    previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-        file_path=mesoscope_data.vrpc_data.mesoscope_positions_path,
-    )
+    # Loads the previous runtime's red-dot alignment position, if available, to offer as the default. This is the only
+    # position field that cannot be queried from the ScanImage software.
+    previous_red_dot_alignment_z = 0.0
+    if mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
+        previous_positions = MesoscopePositions.from_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
+        previous_red_dot_alignment_z = previous_positions.red_dot_alignment_z
 
-    # Forces the user to update the cached mesoscope position coordinates with the current data.
-    message = (
-        f"Update the data inside the mesoscope_positions.yaml file stored under the {session_data.session_name} "
-        f"session's 'raw_data' directory to reflect the current mesoscope objective position."
-    )
-    console.echo(message=message, level=LogLevel.INFO)
-    # Delays for 2 seconds to ensure the user reads the message before continuing.
-    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    input("Enter anything to continue: ")
+    # Queries the live mesoscope positions from the ScanImagePC, then fills in the red-dot alignment Z position from
+    # operator input, as it is the only field the ScanImage software cannot report.
+    mesoscope_positions = mesoscope_driver.query_state()
+    mesoscope_positions.red_dot_alignment_z = _prompt_red_dot_alignment(previous_value=previous_red_dot_alignment_z)
 
-    # Defines the error message for file formatting issues.
-    io_error_message = (
-        f"Unable to read the data from the {session_data.session_name} session's mesoscope_positions.yaml file. This "
-        f"indicates that the file was mis-formatted during editing. Make sure the file contents follow the .YAML "
-        f"format before retrying."
-    )
+    # Writes the snapshot to the session's raw_data directory and to the animal's persistent directory, overwriting any
+    # existing persistent file so it can seed the next runtime.
+    mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+    mesoscope_positions.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
-    # Defines the validation error message for unchanged positions.
-    validation_error_message = (
-        f"Failed to verify that the mesoscope_positions.yaml file stored inside the {session_data.session_name} "
-        f"session's raw_data directory has been updated to include the mesoscope imaging coordinates used during "
-        f"runtime. Edit the mesoscope_positions.yaml file to update the position fields with coordinates "
-        f"displayed in the ScanImage software or on the ThorLabs pad. Make sure to save the changes by pressing "
-        f"the 'CTRL+S' combination."
-    )
-
-    # Continuously attempts to read and validate the Mesoscope positions data until successful.
-    while True:
-        # Attempts to read the current mesoscope positions from the session file.
-        # noinspection PyBroadException
-        try:
-            mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-                file_path=session_data.system_raw_data.mesoscope_positions_path,
-            )
-        except Exception:
-            console.echo(message=io_error_message, level=LogLevel.ERROR)
-            input("Enter anything to continue: ")
-            continue
-
-        # Validates that the user has updated the position data.
-        if (
-            mesoscope_positions.mesoscope_x != previous_mesoscope_positions.mesoscope_x
-            or mesoscope_positions.mesoscope_y != previous_mesoscope_positions.mesoscope_y
-            or mesoscope_positions.mesoscope_z != previous_mesoscope_positions.mesoscope_z
-            or mesoscope_positions.mesoscope_roll != previous_mesoscope_positions.mesoscope_roll
-            or mesoscope_positions.mesoscope_fast_z != previous_mesoscope_positions.mesoscope_fast_z
-            or mesoscope_positions.mesoscope_tip != previous_mesoscope_positions.mesoscope_tip
-            or mesoscope_positions.mesoscope_tilt != previous_mesoscope_positions.mesoscope_tilt
-            or mesoscope_positions.laser_power_mw != previous_mesoscope_positions.laser_power_mw
-            or mesoscope_positions.red_dot_alignment_z != previous_mesoscope_positions.red_dot_alignment_z
-        ):
-            break
-
-        # If positions match, requests the user to update the file.
-        console.echo(message=validation_error_message, level=LogLevel.ERROR)
-        input("Enter anything to continue: ")
-
-    # Copies the updated mesoscope positions data into the animal's persistent directory.
-    shutil.copy2(
-        src=session_data.system_raw_data.mesoscope_positions_path,
-        dst=mesoscope_data.vrpc_data.mesoscope_positions_path,
-    )
+    console.echo(message="Mesoscope positions: Saved.", level=LogLevel.SUCCESS)
 
 
 def generate_zaber_snapshot(
@@ -550,6 +509,19 @@ def setup_mesoscope(
 
     # Step 3: Commands the ScanImagePC to generate the new session estimator and high-definition z-stack and arm the
     # mesoscope for acquisition. The alignment screenshot detected above gates this lengthy preparation step.
+
+    # Verifies the ScanImage imaging parameters before the lengthy reference generation. The runAcquisition function no
+    # longer blocks on this confirmation once launched, so it is surfaced here, immediately before the
+    # reference-generation command is dispatched.
+    message = (
+        "Ensure the following ScanImage imaging parameters are applied before generating the reference: the laser is "
+        "enabled and its power is set, the ROI frame rate is ~10 Hz, the scan phase is ~0.8888, and PMT AutoOn is "
+        "enabled."
+    )
+    console.echo(message=message, level=LogLevel.WARNING)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+    input("Enter anything to continue: ")
+
     mesoscope_driver.generate_reference()
 
     # Window checking sessions only need the generated reference files, so they release the mesoscope without acquiring
@@ -619,3 +591,37 @@ def finalize_session_descriptor(
         src=session_data.raw_data.session_descriptor_path,
         dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
+
+
+def _prompt_red_dot_alignment(previous_value: float) -> float:
+    """Prompts the operator for the red-dot alignment Z position, defaulting to the currently stored value.
+
+    Notes:
+        The red-dot alignment Z position is the only Mesoscope position field that cannot be queried from the
+        ScanImage software, so it is entered manually. Submitting an empty response keeps the stored value.
+
+    Args:
+        previous_value: The currently stored red-dot alignment Z position, offered as the default.
+
+    Returns:
+        The red-dot alignment Z position to record, in micrometers.
+    """
+    message = (
+        f"Enter the red-dot alignment Z position, in micrometers, used during this runtime. The currently stored "
+        f"value is {previous_value}. Leave the response empty to keep the stored value."
+    )
+    console.echo(message=message, level=LogLevel.INFO)
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+
+    while True:
+        response = input("Enter the red-dot alignment Z position: ").strip()
+        if not response:
+            return previous_value
+        try:
+            return float(response)
+        except ValueError:
+            error_message = (
+                f"Unable to interpret '{response}' as a number. Enter a numeric value or leave the response empty to "
+                f"keep the stored value."
+            )
+            console.echo(message=error_message, level=LogLevel.ERROR)

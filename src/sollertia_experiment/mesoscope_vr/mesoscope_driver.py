@@ -12,9 +12,12 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
+from .system import MesoscopePositions
+
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .system import MesoscopeAcquisition
     from ..vr_task import VRTaskConfiguration
 
 
@@ -44,7 +47,8 @@ class _MesoscopeMQTTTopics(StrEnum):
     'path' field. Automatic motion correction stays disabled so the operator enables it manually during alignment."""
     GENERATE_REFERENCE = "MesoscopeGenerateReference"
     """Request to run the lengthy reference sequence (fresh session estimator plus high-definition z-stack) and arm the
-    Mesoscope (empty payload). Dispatched once the acquisition runtime detects the alignment screenshot."""
+    Mesoscope. Carries the full acquisition parameter set as a JSON payload. Dispatched once the acquisition runtime
+    detects the alignment screenshot."""
     BEGIN_ACQUISITION = "MesoscopeBeginAcquisition"
     """Request to begin acquiring session frames (empty payload). The TTL frame stream, not this command, confirms
     that frame acquisition actually started."""
@@ -52,7 +56,8 @@ class _MesoscopeMQTTTopics(StrEnum):
     """Request to abort or end the ongoing frame acquisition (empty payload). The TTL frame stream confirms the stop."""
     RECOVER = "MesoscopeRecover"
     """Request to reload the session estimator from the shared data directory and re-arm the Mesoscope without
-    regenerating the z-stack (empty payload). Used to resume an acquisition interrupted by a transient failure."""
+    regenerating the z-stack. Carries only the plane-geometry acquisition parameters needed to re-derive the imaging
+    planes as a JSON payload. Used to resume an acquisition interrupted by a transient failure."""
     QUERY_STATE = "MesoscopeQueryState"
     """Request for a one-shot snapshot of the Mesoscope stage, fast-Z, and laser state (empty payload). The
     ScanImagePC replies on the State topic; used to populate a MesoscopePositions instance at runtime boundaries."""
@@ -99,23 +104,29 @@ class MesoscopeDriver:
 
     Args:
         configuration: The Virtual Reality task configuration that defines the shared MQTT broker discovery fields.
+        acquisition: The Mesoscope acquisition configuration that defines the motion-estimation and z-stack parameters
+            delivered to the ScanImagePC with each command that consumes them.
 
     Attributes:
         _configuration: The VRTaskConfiguration instance that defines the shared MQTT broker discovery fields.
+        _acquisition: The MesoscopeAcquisition instance that defines the parameters delivered to the ScanImagePC with
+            the reference-generation and recovery commands.
         _mqtt: The MQTTCommunication instance that bidirectionally transfers data between this driver and the
             ScanImagePC.
         _polling_timer: The PrecisionTimer used to delay between consecutive status-buffer polls during the command
             handshake.
     """
 
-    def __init__(self, configuration: VRTaskConfiguration) -> None:
+    def __init__(self, configuration: VRTaskConfiguration, acquisition: MesoscopeAcquisition) -> None:
         self._configuration: VRTaskConfiguration = configuration
+        self._acquisition: MesoscopeAcquisition = acquisition
 
-        # The ScanImagePC replies to every command, including the liveness probe, on the Status topic, so the driver
-        # only monitors the Status and Error reply topics.
+        # The ScanImagePC replies on the Status topic for commands (including the liveness probe), on the Error topic
+        # for failures, and on the State topic for a state query, so the driver monitors those three reply topics.
         monitored_topics: tuple[_MesoscopeMQTTTopics, ...] = (
             _MesoscopeMQTTTopics.STATUS,
             _MesoscopeMQTTTopics.ERROR,
+            _MesoscopeMQTTTopics.STATE,
         )
         self._mqtt: MQTTCommunication = MQTTCommunication(
             ip=configuration.ip,
@@ -180,10 +191,13 @@ class MesoscopeDriver:
 
         Notes:
             This runs the lengthy reference sequence, so the method blocks until the ScanImagePC reports that the
-            Mesoscope is armed, surfacing the intermediate progress states to the operator while it waits.
+            Mesoscope is armed, surfacing the intermediate progress states to the operator while it waits. The command
+            carries the full acquisition parameter set, which the ScanImagePC uses to resolve the imaging geometry and
+            acquisition settings.
         """
         self._dispatch_command(
             command=_MesoscopeMQTTTopics.GENERATE_REFERENCE,
+            payload=self._encode_acquisition(geometry_only=False),
             terminal_state=_MesoscopeStatusState.ARMED,
         )
         console.echo(message="Mesoscope reference: Generated. Mesoscope armed.", level=LogLevel.SUCCESS)
@@ -211,13 +225,82 @@ class MesoscopeDriver:
 
         Notes:
             The ScanImagePC reloads the session estimator from the shared data directory and skips the z-stack
-            regeneration, so the method blocks only until the Mesoscope is re-armed.
+            regeneration, so the method blocks only until the Mesoscope is re-armed. The command carries only the
+            plane-geometry parameters, which the ScanImagePC uses to re-derive the imaging planes when re-arming.
         """
         self._dispatch_command(
             command=_MesoscopeMQTTTopics.RECOVER,
+            payload=self._encode_acquisition(geometry_only=True),
             terminal_state=_MesoscopeStatusState.ARMED,
         )
         console.echo(message="Mesoscope acquisition: Recovered. Mesoscope re-armed.", level=LogLevel.SUCCESS)
+
+    def query_state(self) -> MesoscopePositions:
+        """Queries the current Mesoscope imaging positions from the ScanImagePC.
+
+        Notes:
+            The driver publishes a QueryState request and waits for the ScanImagePC to reply on the State topic,
+            resending the request on each timeout because MQTT messages are published without delivery guarantees. The
+            reply captures the live hardware state, so the mesoscope must be connected and idle in its command loop when
+            this method is called. The red-dot alignment Z position cannot be queried, so it is left at its default and
+            must be populated by the caller.
+
+        Returns:
+            A MesoscopePositions instance populated from the ScanImagePC reply, with red_dot_alignment_z left at its
+            default placeholder value.
+        """
+        while True:
+            self._clear_buffer()
+            self._mqtt.send_data(topic=_MesoscopeMQTTTopics.QUERY_STATE)
+            payload = self._await_state(timeout_ms=_ACK_TIMEOUT_MS)
+            if payload is not None:
+                state = json.loads(payload.decode("utf-8"))
+                return MesoscopePositions(
+                    mesoscope_x=float(state["x"]),
+                    mesoscope_y=float(state["y"]),
+                    mesoscope_roll=float(state["r"]),
+                    mesoscope_z=float(state["z"]),
+                    mesoscope_fast_z=float(state["fast_z"]),
+                    mesoscope_tip=float(state["tip"]),
+                    mesoscope_tilt=float(state["tilt"]),
+                    laser_power_mw=float(state["power_mW"]),
+                )
+            message = (
+                f"The mesoscope control driver requested a state snapshot from the ScanImagePC but received no reply "
+                f"within {_ACK_TIMEOUT_MS // 1000} seconds. Ensure the runAcquisition function is running and idle on "
+                f"the ScanImagePC."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            input("Enter anything to retry: ")
+
+    def _encode_acquisition(self, *, geometry_only: bool) -> bytes:
+        """Serializes the acquisition parameters a command consumes into a JSON MQTT payload.
+
+        Notes:
+            Each command ships only the parameters its ScanImagePC handler consumes. The plane-geometry parameters
+            resolve the target and reference imaging planes and are required by both reference generation and recovery,
+            while the remaining parameters are only required when generating a fresh reference.
+
+        Args:
+            geometry_only: Determines whether to include only the plane-geometry parameters (True) or the full
+                acquisition parameter set (False).
+
+        Returns:
+            The UTF-8 encoded JSON payload carrying the requested acquisition parameters.
+        """
+        configuration = self._acquisition
+        payload: dict[str, object] = {
+            "z_step_um": configuration.z_step_um,
+            "z_range_um": list(configuration.z_range_um),
+            "z_exclusion_um": list(configuration.z_exclusion_um),
+            "acquisition_order": configuration.acquisition_order.value,
+        }
+        if not geometry_only:
+            payload["registration_channel"] = configuration.registration_channel
+            payload["field_curvature_correction"] = configuration.field_curvature_correction
+            payload["frames_per_reference_plane"] = configuration.frames_per_reference_plane
+            payload["zstack_scale_factor"] = configuration.zstack_scale_factor
+        return json.dumps(obj=payload).encode("utf-8")
 
     def _dispatch_command(
         self,
@@ -294,6 +377,32 @@ class MesoscopeDriver:
             # to the operator while waiting for the terminal state.
             self._echo_progress(state=status.get("state", ""), detail=status.get("detail"))
         return False
+
+    def _await_state(self, timeout_ms: int) -> bytes | bytearray | None:
+        """Polls the ScanImagePC reply buffer for a state snapshot, bounded by a timeout.
+
+        Notes:
+            A MesoscopeError reply raises a RuntimeError through the console.
+
+        Args:
+            timeout_ms: The maximum time, in milliseconds, to wait for the state reply.
+
+        Returns:
+            The State topic payload if it arrived in time, or None if the timeout elapsed first.
+        """
+        self._polling_timer.reset()
+        while self._polling_timer.elapsed < timeout_ms:
+            self._polling_timer.delay(delay=_BROKER_POLL_DELAY_MS, block=False)
+            data = self._mqtt.get_data()
+            if data is None:
+                continue
+
+            topic, payload = data
+            if topic == _MesoscopeMQTTTopics.ERROR:
+                self._raise_error(payload=payload)
+            if topic == _MesoscopeMQTTTopics.STATE:
+                return payload
+        return None
 
     @staticmethod
     def _raise_error(payload: bytes | bytearray) -> None:

@@ -19,74 +19,47 @@
 function runAcquisition(hSI, hSICtl, arguments)
     % RUNACQUISITION Prepares and runs a Mesoscope data-acquisition runtime within the Mesoscope-VR system.
     %
-    %   This is a heavily refactored 'setupZstackALL' function used in the original manuscript. The function was
-    %   refactored to work with the Mesoscope-VR system implementation of the Sollertia platform's data acquisition
-    %   infrastructure. The function should be used to prepare the system for each data acquisition runtime.
+    % This is a heavily refactored 'setupZstackALL' function used in the original manuscript. The function was
+    % refactored to work with the Mesoscope-VR system implementation of the Sollertia platform's data acquisition
+    % infrastructure. The function should be used to prepare the system for each data acquisition runtime.
     %
-    %   Example function call (using default parameters): runAcquisition(hSI, hSICtl)
+    % Example function call (using default parameters): runAcquisition(hSI, hSICtl)
     %
-    % After the configuration arguments are applied, the function connects to the MQTT broker and services the
-    % acquisition commands published by the VRPC: it preloads the persisted reference estimator as an alignment aid,
-    % generates the fresh session estimator and high-definition z-stack on request, and begins, aborts, or recovers
-    % frame acquisition. The function reports command reception and progress on the 'MesoscopeStatus' topic. Unlike
-    % the previous marker-file interface, the acquisition parameters are passed as function arguments and are not
-    % exchanged over MQTT.
+    % After the broker connection is established, the function enters an MQTT command loop and acts as a state machine
+    % that dispatches commands to the ScanImage software: it preloads the persisted reference estimator as an alignment
+    % aid, generates the fresh session estimator and high-definition z-stack on request, and begins, aborts, or recovers
+    % frame acquisition. The function reports command reception and progress on the 'MesoscopeStatus' topic. The
+    % acquisition parameters are owned by the MesoscopeAcquisition section of the VRPC system configuration and are
+    % delivered over MQTT with each command that consumes them; only the ScanImagePC-local output root and the broker
+    % address remain function arguments.
     %
     % Arguments:
     % - hSI: The ScanImage handle object.
     % - hSICtl: The ScanImage Controller.
-    % - zum: The z-spacing step, in micrometers, to use for z-stack generation.
-    % - zrange: The range of z-planes to image. When imaging a single plane, set to plane number, e.g. 1050. When
-    % imaging a slice, set to a numeric array that stores the slice boundaries in the order [min, max], e.g. [20, 400].
-    % - zmirror: Only for two-plane imaging. When imaging two planes separated by a non-imaged volume, e.g. when imaging
-    % only at the very top and bottom of the fastZ range, provide a numeric array of exclusion zone boundaries in the
-    % order [min, max]. Note, both boundaries must be within the overall slice dimensions defined by the zrange, e.g.
-    % [40, 300]. With overall boundaries [20, 400], the function will image data in the regions 30-40 and 300-400.
-    % - order: The order to use for z-stack acquisition. Supported options are '' (default) and 'smooth'. Default
-    % acquisition order iterates over the slices at each volume acquisition, e.g.: Z1, Z2, Z1, Z2. The 'smooth' order
-    % instead acquires all frames at the given z-plane before moving to the next one, e.g. Z1, Z1, Z2, Z2.
-    % - channel: The channel to use for motion registration. Since high-definition zstack is primarily intended to
-    % support advanced post-hoc motion analysis, it also uses the same channel.
-    % - curvcorrection: Determines whether to enable or disable Field Curvature Correction support. Whether to enable
-    % this feature depends on the acquisition system (microscope).
-    % - naverage: The number of frames to acquire and average for each frame. Larger number of frames results in better
-    % motion characterization at the expense of longer processing times and higher draw on acquisition machine
-    % resources.
     % - root: The path at which to output the generated MotionEstimator.me and zstack.tiff files. On the Sollertia
-    % platform, this is always set to the 'shared' mesoscope data folder.
-    % - scalefactor: The factor by which to scale the X and Y resolution of all ROIs during the acquisition of the
-    % high-definition zstack.tiff file. The scaling maintains the initial ROI aspect ratios.
+    % platform, this is always set to the 'shared' mesoscope data folder. This path is local to the ScanImagePC
+    % filesystem, so it remains a function argument rather than part of the MQTT-delivered configuration.
     % - broker: The address of the MQTT broker shared with the Unity Virtual Reality task, in the 'tcp://host:port'
     % format. The broker runs on the VRPC, not on this ScanImagePC. The default targets the current VRPC at
     % 'tcp://192.168.0.13:1883', which matches the broker listener configured on the VRPC's local network interface.
     % Override this only if the broker host address or listener port changes.
+    %
+    % The remaining acquisition parameters - the z-step, z-range, exclusion zone, acquisition order, registration
+    % channel, field curvature correction, reference frame averaging, and z-stack scale factor - are owned by the
+    % MesoscopeAcquisition section of the VRPC system configuration. The VRPC delivers each command's required subset in
+    % the command's MQTT payload: the reference-generation command carries the full set, while the recovery command
+    % carries only the plane-geometry parameters needed to re-derive the imaging planes.
 
     % Limited argument validation and default value assignment support. May not
     % work on older MatLab versions, but good for R2022b+.
     arguments
         hSI  % Cannot be validated due to how MBF implemented the class.
         hSICtl  % Cannot be validated due to how MBF implemented the class.
-        arguments.zum (1,1) double {mustBePositive, mustBeFinite, mustBeInteger} = 20
-        arguments.zrange double {mustBePositive, mustBeInteger} = 1050
-        arguments.zmirror double {mustBePositive, mustBeInteger} = []
-        arguments.order {mustBeMember(arguments.order, {'', 'smooth'})} = ''
-        arguments.channel (1,1) double {mustBePositive, mustBeInteger} = 1
-        arguments.curvcorrection (1,1) logical = false
-        arguments.naverage (1,1) double {mustBePositive, mustBeInteger} = 20
         arguments.root (1,:) char {mustBeNonempty} = 'F:\mesodata\mesoscope_data'
-        arguments.scalefactor (1,:) double {mustBePositive} = 2.0
         arguments.broker (1,:) char {mustBeNonempty} = 'tcp://192.168.0.13:1883'
     end
 
-    zum = arguments.zum;
-    zrange = arguments.zrange;
-    zmirror = arguments.zmirror;
-    order = arguments.order;
-    channel = arguments.channel;
-    curvcorrection = arguments.curvcorrection;
-    naverage = arguments.naverage;
     root = arguments.root;
-    scalefactor = arguments.scalefactor;
     broker = arguments.broker;
 
     % Clears the CLI
@@ -106,76 +79,6 @@ function runAcquisition(hSI, hSICtl, arguments)
         'status',   "MesoscopeStatus", ...
         'error',    "MesoscopeError", ...
         'state',    "MesoscopeState");
-
-    % Converts single zrange values to [min, max] format expected by the rest of the function.
-    if isscalar(zrange)
-        fprintf('Configuring single plane imaging at z = %d µm.\n', zrange);
-        zrange = [zrange, zrange];
-    else
-        fprintf('Configuring Z-stack imaging from %d to %d µm.\n', zrange(1), zrange(2));
-    end
-
-    % Validates zmirror has correct format if provided
-    if ~isempty(zmirror)
-        if numel(zmirror) ~= 2
-            error('zmirror must be empty or contain exactly 2 values.');
-        end
-        zmirror = zmirror(:)';  % Ensures row vector
-    end
-
-    % Instructs the user to verify important imaging parameters before generating the reference stack.
-    fprintf('Ensure that the following configuration parameters are applied:\n')
-    fprintf('a) Laser is enabled and power is set.\n')
-    fprintf('b) ROI frame rate is ~10 Hz.\n')
-    fprintf('c) Scan phase is ~0.8888.\n')
-    fprintf('d) PMTs AutoOn is enabled.\n')
-    input('Enter anything to continue: ');
-
-    %% Parameter Definition
-
-    % Calculates reference half-width, maxing out at 12 reference planes on either end of the
-    % imaged plane range. This determines how many sub-planes are acquired zum microns above and below
-    % each of the target imaging plane(s) to support Z-drift correction.
-    nzhalf = min(floor((zum-1)/2),12);
-
-    % Generates z-plane imaging positions.
-    if isempty(zmirror)
-        % If zmirror is not provided, creates a uniform set of 'zum'-spaced planes from minimum to maximum.
-        centerZs = zrange(1):zum:zrange(2);
-    else
-        % If zmirror is provided, creates two plane sequences expanding outward from each of the imaging
-        % focal points, given by zmirror. Assumes that both zmirror coordinates are within the range of planes
-        % specified by zrange. This excludes the middle region (slices within zmirror) from processing. This mode of
-        % stack definition is used exclusively with two-plane imaging modes.
-        centerZs = [zmirror(1)-nzhalf:-zum:zrange(1) zmirror(2)+nzhalf:zum:zrange(2)];
-    end
-
-    % Sorts the center-points of each target plane resolved above and generates a set of
-    % planes above and below each imaging plane (reference Z-planes).
-    centerZs = sort(centerZs);
-    refZs = centerZs(:) + (-nzhalf:nzhalf);
-
-    % 'Smooth' acquisition order acquires all frames for the target plane before moving to the
-    % next one (Z1-Z1-Z1-Z2-Z2-Z2). Default acquisition order loops over planes (Z1-Z2-Z1-Z2-Z1-Z2)
-    if strcmp(order, 'smooth')
-        refZs = refZs';
-    end
-
-    % Depending on the configuration, ensures that FieldCurvatureCorrection is either enabled or disabled.
-    % For Mesoscope, it should be enabled in most cases.
-    if hSI.hFastZ.enableFieldCurveCorr ~= curvcorrection
-        if curvcorrection
-            fprintf('Field curvature correction: Enabled.\n');
-        else
-            fprintf('Field curvature correction: Disabled.\n');
-        end
-        hSI.hFastZ.enableFieldCurveCorr = curvcorrection;
-    end
-
-    % Bundles the reference-plane configuration shared by the command handlers.
-    config = struct( ...
-        'zum', zum, 'naverage', naverage, 'channel', channel, 'scalefactor', scalefactor, ...
-        'root', root, 'nzhalf', nzhalf, 'centerZs', centerZs, 'refZs', refZs);
 
     %% MQTT command loop
 
@@ -211,17 +114,20 @@ function runAcquisition(hSI, hSICtl, arguments)
                 elseif topic == topics.preload
                     publishStatus(mqttClient, topics.status, topic, "received");
                     publishStatus(mqttClient, topics.status, topic, "preloading");
-                    preloadEstimator(hSI, hSICtl, payload, config);
+                    preloadEstimator(hSI, hSICtl, payload);
                     publishStatus(mqttClient, topics.status, topic, "preload_complete");
 
                 elseif topic == topics.generate
                     publishStatus(mqttClient, topics.status, topic, "received");
+                    config = buildAcquisitionConfig(payload, root, true);
+                    applyFieldCurvature(hSI, config.curvcorrection);
                     generateReference(hSI, config, mqttClient, topics);
                     armMesoscope(hSI, hSICtl, config, true);
                     publishStatus(mqttClient, topics.status, topic, "armed");
 
                 elseif topic == topics.recover
                     publishStatus(mqttClient, topics.status, topic, "received");
+                    config = buildAcquisitionConfig(payload, root, false);
                     recoverAcquisition(hSI, hSICtl, config);
                     publishStatus(mqttClient, topics.status, topic, "armed");
 
@@ -259,7 +165,85 @@ function runAcquisition(hSI, hSICtl, arguments)
 end
 
 
-function preloadEstimator(hSI, hSICtl, payload, ~)
+function config = buildAcquisitionConfig(payload, root, full)
+    % BUILDACQUISITIONCONFIG Parses the acquisition parameters delivered with a command and resolves the
+    % reference-plane geometry.
+    %
+    %   The geometry fields (root, nzhalf, centerZs, refZs) are always resolved, as both reference generation and
+    %   recovery require them. The remaining acquisition fields (channel, naverage, scalefactor, curvcorrection) are
+    %   resolved only for the full reference-generation payload.
+
+    params = jsondecode(payload);
+    [nzhalf, centerZs, refZs] = computeReferencePlanes( ...
+        params.z_step_um, params.z_range_um, params.z_exclusion_um, params.acquisition_order);
+
+    config = struct('root', root, 'nzhalf', nzhalf, 'centerZs', centerZs, 'refZs', refZs);
+
+    if full
+        config.channel = params.registration_channel;
+        config.naverage = params.frames_per_reference_plane;
+        config.scalefactor = params.zstack_scale_factor;
+        config.curvcorrection = params.field_curvature_correction;
+    end
+end
+
+
+function [nzhalf, centerZs, refZs] = computeReferencePlanes(zStep, zRange, zExclusion, order)
+    % COMPUTEREFERENCEPLANES Resolves the target and reference imaging planes from the acquisition geometry.
+    %
+    %   Converts the imaging z-range and the optional two-plane exclusion zone into the sorted set of target imaging
+    %   planes (centerZs) and the surrounding reference sub-planes (refZs) used to build the motion estimator. The
+    %   z-range arrives as [minimum, maximum], where equal boundaries image a single plane. The exclusion zone arrives
+    %   as [minimum, maximum], where equal boundaries disable two-plane imaging.
+
+    zRange = double(zRange(:)');
+    zExclusion = double(zExclusion(:)');
+
+    if zRange(1) == zRange(2)
+        fprintf('Configuring single plane imaging at z = %d µm.\n', zRange(1));
+    else
+        fprintf('Configuring Z-stack imaging from %d to %d µm.\n', zRange(1), zRange(2));
+    end
+
+    % Reference half-width, capped at 12 planes on either side of each target plane. Determines how many sub-planes are
+    % acquired zStep micrometers above and below each target plane to support Z-drift correction.
+    nzhalf = min(floor((zStep-1)/2), 12);
+
+    % Resolves the target imaging planes. Equal exclusion boundaries disable two-plane imaging.
+    if zExclusion(1) == zExclusion(2)
+        % Uniform set of zStep-spaced planes spanning the imaged range (a single plane when the range collapses).
+        centerZs = zRange(1):zStep:zRange(2);
+    else
+        % Two plane sequences expanding outward from each focal point, excluding the middle (two-plane imaging).
+        centerZs = [zExclusion(1)-nzhalf:-zStep:zRange(1) zExclusion(2)+nzhalf:zStep:zRange(2)];
+    end
+    centerZs = sort(centerZs);
+
+    % Reference sub-planes above and below each target plane.
+    refZs = centerZs(:) + (-nzhalf:nzhalf);
+
+    % 'smooth' order acquires all frames at a plane before advancing (Z1-Z1-Z2-Z2); the default interleaves planes.
+    if strcmp(order, 'smooth')
+        refZs = refZs';
+    end
+end
+
+
+function applyFieldCurvature(hSI, enable)
+    % APPLYFIELDCURVATURE Enables or disables ScanImage field curvature correction when the current setting differs.
+
+    if hSI.hFastZ.enableFieldCurveCorr ~= enable
+        if enable
+            fprintf('Field curvature correction: Enabled.\n');
+        else
+            fprintf('Field curvature correction: Disabled.\n');
+        end
+        hSI.hFastZ.enableFieldCurveCorr = enable;
+    end
+end
+
+
+function preloadEstimator(hSI, hSICtl, payload)
     % PRELOADESTIMATOR Loads the persisted reference estimator as an alignment aid with correction disabled.
     %
     %   The estimator restores the imaging field to approximately the same location across days. Automatic correction

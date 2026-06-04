@@ -140,7 +140,10 @@ def window_checking_logic(
 
     # Builds the mesoscope control driver used to command the ScanImage software over the shared Virtual Reality MQTT
     # broker. The driver is connected just before the mesoscope preparation sequence and disconnected during cleanup.
-    mesoscope_driver = MesoscopeDriver(configuration=system_configuration.assets.vr_task)
+    mesoscope_driver = MesoscopeDriver(
+        configuration=system_configuration.assets.vr_task,
+        acquisition=system_configuration.acquisition,
+    )
     try:
         # If the animal has a snapshot of Zaber motor positions used during a previous runtime, loads and uses these
         # positions. Otherwise, uses the default positions hardcoded in the Zaber controller's non-volatile memory.
@@ -203,8 +206,11 @@ def window_checking_logic(
         # Collects the experimenter notes through a GUI window and writes the completed session descriptor.
         finalize_session_descriptor(descriptor=descriptor, session_data=session_data, mesoscope_data=mesoscope_data)
 
-        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking.
-        generate_mesoscope_position_snapshot(session_data=session_data, mesoscope_data=mesoscope_data)
+        # Generates the snapshot of the Mesoscope imaging position used to generate the data during window checking by
+        # querying the still-connected ScanImagePC.
+        generate_mesoscope_position_snapshot(
+            session_data=session_data, mesoscope_data=mesoscope_data, mesoscope_driver=mesoscope_driver
+        )
 
         # Resets Zaber motors to their original positions.
         reset_zaber_motors(zaber_motors=zaber_motors)
