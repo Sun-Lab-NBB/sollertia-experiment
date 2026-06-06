@@ -841,8 +841,15 @@ class WaterValveInterface(ModuleInterface):
         self._cycle_timer = PrecisionTimer(precision=TimerPrecisions.MICROSECOND)
 
     def terminate_remote_assets(self) -> None:
-        """Disconnects from the instance's shared memory buffer."""
+        """Disconnects from the instance's shared memory buffer and releases the cycle PrecisionTimer.
+
+        Notes:
+            Dropping the PrecisionTimer reference frees its nanobind-bound C++ object before the communication
+            subprocess interpreter is finalized. Otherwise, nanobind reports a spurious 'leaked instance' warning
+            when the subprocess shuts down.
+        """
         self._valve_tracker.disconnect()
+        self._cycle_timer = None
 
     def process_received_data(self, message: ModuleData | ModuleState) -> None:
         """Updates the reward data stored in the instance's shared memory buffer based on the messages received from

@@ -1303,6 +1303,13 @@ def maintenance_logic() -> None:
 
     # All calibration procedures are executed in a temporary directory deleted after runtime.
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:
+        # Binds the runtime assets to None ahead of initialization so the finally block can safely
+        # tear down only the assets that were successfully created if initialization fails partway.
+        logger: DataLogger | None = None
+        controller: MicroControllerInterface | None = None
+        zaber_motors: ZaberMotors | None = None
+        ui: MaintenanceControlUI | None = None
+
         try:
             console.echo(message="Initializing the maintenance assets...", level=LogLevel.INFO)
 
@@ -1328,7 +1335,7 @@ def maintenance_logic() -> None:
                 minimum_brake_strength=system_configuration.microcontrollers.minimum_brake_strength_g_cm,
                 maximum_brake_strength=system_configuration.microcontrollers.maximum_brake_strength_g_cm,
             )
-            controller: MicroControllerInterface = MicroControllerInterface(
+            controller = MicroControllerInterface(
                 controller_id=np.uint8(101),
                 buffer_size=8192,
                 port=system_configuration.microcontrollers.actor_port,
@@ -1348,7 +1355,7 @@ def maintenance_logic() -> None:
             if move_zaber_motors:
                 message = "Initializing Zaber motors..."
                 console.echo(message=message, level=LogLevel.INFO)
-                zaber_motors: ZaberMotors = ZaberMotors(
+                zaber_motors = ZaberMotors(
                     zaber_positions=None, zaber_configuration=system_configuration.assets
                 )
                 message = (
@@ -1429,7 +1436,7 @@ def maintenance_logic() -> None:
             console.echo(message=message, level=LogLevel.INFO)
 
             # If Zaber motors were used and are still connected, moves them to the park position.
-            if move_zaber_motors and zaber_motors.is_connected:
+            if move_zaber_motors and zaber_motors is not None and zaber_motors.is_connected:
                 message = (
                     "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, "
                     "such as water collection flasks, from the Mesoscope-VR cage."
@@ -1444,16 +1451,18 @@ def maintenance_logic() -> None:
                 zaber_motors.disconnect()
 
             # Shuts down the actor microcontroller interface.
-            controller.stop()
-
-            message = "Actor MicroController interface: Terminated."
-            console.echo(message=message, level=LogLevel.SUCCESS)
+            if controller is not None:
+                controller.stop()
+                message = "Actor MicroController interface: Terminated."
+                console.echo(message=message, level=LogLevel.SUCCESS)
 
             # Stops the data logger.
-            logger.stop()
+            if logger is not None:
+                logger.stop()
 
             # Shuts down the UI.
-            ui.shutdown()
+            if ui is not None:
+                ui.shutdown()
 
             message = "Mesoscope-VR system maintenance runtime: Terminated."
             console.echo(message=message, level=LogLevel.SUCCESS)

@@ -28,6 +28,9 @@ _SUPPORTED_DATE_FORMATS: set[str] = {"%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", "%m/%d/
 _DIGIT_PATTERN: re.Pattern[str] = re.compile(r"\d+")
 """A compiled regular expression that matches one or more consecutive digits."""
 
+_GOOGLE_API_MAX_RETRIES: int = 5
+"""The number of automatic retries for Google API requests that fail with transient (5xx or 429) errors."""
+
 _REQUIRED_SURGERY_HEADERS: set[str] = {
     # Subject Data headers
     "id",
@@ -269,7 +272,7 @@ class SurgeryLog:
             self._service.spreadsheets()
             .values()
             .get(spreadsheetId=sheet_id, range=f"'{self._project_name}'!1:1")
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
 
         header_values = headers.get("values", [[]])[0]
@@ -313,7 +316,7 @@ class SurgeryLog:
                 range=f"{self._project_name}!{id_column}2:{id_column}",
                 majorDimension="COLUMNS",
             )
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
         id_list = animal_ids.get("values", [[]])[0]
         self._animals: tuple[str, ...] = tuple(str(animal_id).zfill(5) for animal_id in id_list)
@@ -364,7 +367,7 @@ class SurgeryLog:
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
             .get(spreadsheetId=self._sheet_id, range=f"'{self._project_name}'!{row_number}:{row_number}")
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
 
         # Converts the data from dictionary format into a list of strings.
@@ -530,7 +533,7 @@ class SurgeryLog:
             range=f"'{self._project_name}'!{cell_range}",
             valueInputOption="USER_ENTERED",
             body=body,
-        ).execute()
+        ).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
@@ -545,7 +548,7 @@ class SurgeryLog:
         sheet_metadata = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .get(spreadsheetId=self._sheet_id)
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
         sheet_id = None
         for sheet in sheet_metadata.get("sheets", []):
@@ -574,7 +577,7 @@ class SurgeryLog:
             self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
                 spreadsheetId=self._sheet_id,
                 body={"requests": requests},
-            ).execute()
+            ).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
 
     def _get_column_id(self, column_name: str) -> str | None:
         """Returns the surgery log column ID (letter) for the given column name.
@@ -652,7 +655,11 @@ class WaterLog:
 
         # Gets all tab names from the sheet metadata
         # noinspection PyUnresolvedReferences
-        sheet_metadata = self._service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+        sheet_metadata = (
+            self._service.spreadsheets()
+            .get(spreadsheetId=sheet_id)
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
+        )
         tabs = sheet_metadata.get("sheets", [])
 
         # Filters for tabs with digit-only names and extract them as animal IDs. This relies on all water restriction
@@ -703,7 +710,7 @@ class WaterLog:
             self._service.spreadsheets()
             .values()
             .get(spreadsheetId=sheet_id, range=f"'{self._animal_id}'!2:2")
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
 
         header_values = headers.get("values", [[]])[0]
@@ -806,7 +813,7 @@ class WaterLog:
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
             .get(spreadsheetId=self._sheet_id, range=f"'{self._animal_id}'!{date_column}3:{date_column}")
-            .execute()
+            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
         date_values = date_data.get("values", [])
 
@@ -847,7 +854,7 @@ class WaterLog:
             range=f"'{self._animal_id}'!{cell_range}",
             valueInputOption="USER_ENTERED",
             body=body,
-        ).execute()
+        ).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
 
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
@@ -877,4 +884,4 @@ class WaterLog:
         self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             body={"requests": requests},
-        ).execute()
+        ).execute(num_retries=_GOOGLE_API_MAX_RETRIES)

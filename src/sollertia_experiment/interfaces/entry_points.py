@@ -4,9 +4,16 @@ The warning filter is applied at module level before any other imports to ensure
 dependencies are suppressed during the import phase.
 """
 
+import os
 import warnings
 
 warnings.warn_explicit = warnings.warn = lambda *_, **__: None
+
+# Silences the benign Qt teardown warnings (e.g., "QObject::killTimer: Timers cannot be stopped from another thread")
+# that OpenCV's Qt backend writes to stderr when the camera-preview windows are destroyed in the video acquisition
+# subprocesses. The variable is set before any subprocess is spawned, so every child inherits it; setdefault preserves
+# any value the operator has already exported.
+os.environ.setdefault("QT_LOGGING_RULES", "default.warning=false")
 
 import click  # noqa: E402
 
