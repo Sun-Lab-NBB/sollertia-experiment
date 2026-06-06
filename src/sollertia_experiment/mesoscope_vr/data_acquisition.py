@@ -134,10 +134,19 @@ def window_checking_logic(
     )
     descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
 
-    # Generates and caches the MesoscopePositions precursor file to the persistent and raw_data directories.
-    precursor = MesoscopePositions()
-    precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
-    precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
+    # Generates a precursor MesoscopePositions file and dumps it to the session's raw_data directory. If the animal was
+    # imaged during a previous runtime, preserves the persisted snapshot so that setup_mesoscope can reveal the prior
+    # coordinates as an alignment aid, mirroring the experiment runtime. Only seeds the persistent snapshot with default
+    # values when no previous data exists, so a re-check of a previously imaged animal does not clobber its positions.
+    if mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
+        # Loading and re-dumping the data updates the file contents to integrate any upstream changes in the
+        # sollertia-shared-assets MesoscopePositions structure.
+        previous_positions = MesoscopePositions.from_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
+        previous_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+    else:
+        precursor = MesoscopePositions()
+        precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+        precursor.to_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
 
     zaber_motors: ZaberMotors | None = None
     logger: DataLogger | None = None

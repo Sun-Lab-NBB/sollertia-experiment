@@ -479,9 +479,11 @@ def setup_mesoscope(
     mesoscope_driver.preload(project=session_data.project_name, animal=session_data.animal_id)
 
     # Step 1: Resolves the imaging plane.
-    # If the previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
-    # user.
-    if not window_checking and mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
+    # If a previous session's mesoscope positions were saved, loads the imaging coordinates and displays them to the
+    # user. This applies to every session type, including window checking: whenever a persisted reference estimator
+    # exists to preload above, the matching position snapshot also exists, so re-checking a previously imaged animal
+    # reveals the prior coordinates the same way experiment sessions do.
+    if mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
         previous_positions: MesoscopePositions = MesoscopePositions.from_yaml(
             file_path=mesoscope_data.vrpc_data.mesoscope_positions_path,
         )
@@ -494,16 +496,11 @@ def setup_mesoscope(
             f"laser_power={previous_positions.laser_power_mw}, "
             f"red_dot_alignment_z={previous_positions.red_dot_alignment_z}."
         )
-    elif not window_checking:
+    else:
         message = (
             f"No previous mesoscope imaging position data found for the animal {session_data.animal_id}. Follow the "
             f"steps of the window checking protocol available from the sl-protocols repository to establish the "
             f"imaging plane for the animal."
-        )
-    else:
-        message = (
-            "Follow the steps of the window checking protocol available from the sl-protocols repository to establish "
-            "the imaging plane for the animal."
         )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
