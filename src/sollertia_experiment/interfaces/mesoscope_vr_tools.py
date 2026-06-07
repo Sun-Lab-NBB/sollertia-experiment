@@ -16,6 +16,7 @@ from ..mesoscope_vr import (
     MesoscopePositions,
     MesoscopeSystemConfiguration,
     purge_session,
+    check_mesoscope_bridge,
     preprocess_session_data,
     get_system_configuration,
     get_system_configuration_path,
@@ -161,6 +162,24 @@ def check_system_mounts_tool() -> dict[str, Any]:
         "failed": sum(1 for report in paths.values() if not report.get("ok", False)),
     }
     return {"system_name": configuration.name, "paths": paths, "summary": summary}
+
+
+@mcp.tool()
+def check_mesoscope_bridge_tool() -> dict[str, Any]:
+    """Checks whether the ScanImagePC's runAcquisition control loop is reachable for Mesoscope imaging sessions.
+
+    Probes the MQTT command loop that the acquisition runtime uses to arm and command the ScanImage software over the
+    shared broker. Use this tool during pre-flight health checks to confirm the runAcquisition function is running on
+    the ScanImagePC before starting a Mesoscope imaging session (window-checking or experiment).
+
+    Returns:
+        A dictionary with ``reachable`` and ``status`` (a human-readable summary), or ``{"error": ...}`` on failure.
+    """
+    try:
+        reachable, status = check_mesoscope_bridge()
+    except Exception as exception:
+        return {"error": str(exception)}
+    return {"reachable": reachable, "status": status}
 
 
 @mcp.tool()

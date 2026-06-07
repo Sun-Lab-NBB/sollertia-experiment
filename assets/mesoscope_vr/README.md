@@ -83,6 +83,13 @@ the broader Mesoscope preparation sequence, where `hSI` is the ScanImage handle 
 is the ScanImage controller. Use `help runAcquisition` in the MATLAB Command Window for the full
 list of supported arguments.
 
+***Critical!*** `runAcquisition` is a **lock-in** function. It is launched **once** and then runs a
+persistent command loop that services VRPC commands continuously and **holds the MATLAB command line for
+the entire acquisition runtime**. It does not return between commands; the command line stays busy until
+the runtime ends. To stop the control loop and free the command line, press **Ctrl-C** in the MATLAB
+Command Window (the broker connection dropping also ends the loop). The function prints this reminder when
+it starts.
+
 ***Critical!*** The MQTT broker runs on the **VRPC**, not on the ScanImagePC, so the cross-machine
 connection must be configured explicitly. Pass the VRPC's network address through the `broker` argument,
 for example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`, replacing `VRPC-IP` with the

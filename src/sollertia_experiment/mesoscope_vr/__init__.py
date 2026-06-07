@@ -23,7 +23,7 @@ from .data_acquisition import (
     lick_training_logic,
     window_checking_logic,
 )
-from .mesoscope_driver import MesoscopeDriver
+from .mesoscope_driver import MesoscopeDriver, check_mesoscope_bridge
 from .data_preprocessing import (
     purge_session,
     preprocess_session_data,
@@ -43,6 +43,7 @@ __all__ = [
     "MesoscopeSystemConfiguration",
     "MesoscopeVRAssets",
     "ZaberPositions",
+    "check_mesoscope_bridge",
     "create_system_configuration_file",
     "experiment_logic",
     "get_system_configuration",

@@ -12,7 +12,7 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
-from .system import MesoscopePositions
+from .system import MesoscopePositions, get_system_configuration
 from ..cross_system import wait_for_enter
 
 if TYPE_CHECKING:
@@ -165,6 +165,26 @@ class MesoscopeDriver:
         console.echo(message=message, level=LogLevel.INFO)
         self._dispatch_command(command=_MesoscopeMQTTTopics.ALIVE)
         console.echo(message="Mesoscope control interface: Connected.", level=LogLevel.SUCCESS)
+
+    def is_alive(self, timeout_ms: int = _ACK_TIMEOUT_MS) -> bool:
+        """Issues a single bounded liveness probe and reports whether the ScanImagePC command loop replied.
+
+        Notes:
+            Unlike await_alive, which blocks and re-prompts the operator until the ScanImagePC replies, this issues
+            one probe and returns, making it suitable for a non-interactive pre-flight health check. The driver must
+            be connected before this method is called.
+
+        Args:
+            timeout_ms: The maximum time, in milliseconds, to wait for the liveness acknowledgement.
+
+        Returns:
+            True if the ScanImagePC acknowledged the probe within the timeout, False otherwise.
+        """
+        self._clear_buffer()
+        self._mqtt.send_data(topic=_MesoscopeMQTTTopics.ALIVE)
+        return self._await_status(
+            command=_MesoscopeMQTTTopics.ALIVE, state=_MesoscopeStatusState.RECEIVED, timeout_ms=timeout_ms
+        )
 
     def preload(self, project: str, animal: str) -> None:
         """Instructs the ScanImagePC to preload the persisted reference estimator as an alignment aid.
@@ -427,3 +447,34 @@ class MesoscopeDriver:
         """Drains all pending messages from the MQTT buffer used to communicate with the ScanImagePC."""
         while self._mqtt.has_data:
             _ = self._mqtt.get_data()
+
+
+def check_mesoscope_bridge() -> tuple[bool, str]:
+    """Probes whether the ScanImagePC's runAcquisition control loop is reachable over the shared MQTT broker.
+
+    Notes:
+        Loads the active Mesoscope-VR system configuration to resolve the shared broker address, connects to the
+        broker, issues a single bounded liveness probe, and disconnects. This is the pre-flight counterpart to the
+        Unity bridge reachability check; an unreachable interface means the operator has not launched the
+        runAcquisition function on the ScanImagePC.
+
+    Returns:
+        A two-element tuple whose first element is True when the ScanImagePC acknowledged the probe within the
+        timeout and whose second element is a one-line human-readable status summary.
+    """
+    configuration = get_system_configuration()
+    broker = configuration.assets.vr_task
+    driver = MesoscopeDriver(configuration=broker, acquisition=configuration.acquisition)
+    driver.connect()
+    try:
+        reachable = driver.is_alive()
+    finally:
+        driver.disconnect()
+
+    if reachable:
+        return True, f"Mesoscope control interface: reachable | broker={broker.ip}:{broker.port}"
+    message = (
+        f"Mesoscope control interface: unreachable at {broker.ip}:{broker.port}. Launch the "
+        f"runAcquisition function in the MATLAB command line on the ScanImagePC to arm it."
+    )
+    return False, message

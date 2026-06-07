@@ -25,6 +25,10 @@ function runAcquisition(hSI, hSICtl, arguments)
     %
     % Example function call (using default parameters): runAcquisition(hSI, hSICtl)
     %
+    % This is a lock-in function: it is launched ONCE and then runs a persistent command loop that holds the MATLAB
+    % command line for the entire acquisition runtime. It does not return until it is interrupted with Ctrl-C or the
+    % broker connection drops, so do not expect control to return to the command line between acquisition commands.
+    %
     % After the broker connection is established, the function enters an MQTT command loop and acts as a state machine
     % that dispatches commands to the ScanImage software: it preloads the persisted reference estimator as an alignment
     % aid, generates the fresh session estimator and high-definition z-stack on request, and begins, aborts, or recovers
@@ -100,6 +104,17 @@ function runAcquisition(hSI, hSICtl, arguments)
     subscribe(mqttClient, topics.query);
 
     fprintf('Mesoscope control interface: Connected to %s.\n', broker);
+
+    % Makes the lock-in behavior explicit to the operator. runAcquisition is a single, persistent command loop: it
+    % is launched once and runs continuously, holding the MATLAB command line for the entire acquisition runtime, and
+    % does not return until it is interrupted with Ctrl-C or the broker connection drops.
+    fprintf('\n');
+    fprintf('IMPORTANT: This is a persistent (lock-in) command loop.\n');
+    fprintf('  - Launch it ONCE; it then services VRPC commands continuously for the whole acquisition runtime.\n');
+    fprintf('  - It does NOT return and the MATLAB command line stays busy until the runtime ends.\n');
+    fprintf('  - Press Ctrl-C in this window to stop the control loop and free the command line.\n');
+    fprintf('\n');
+
     fprintf('Waiting for the VRPC to issue acquisition commands...\n');
 
     % Services commands until the client loses its broker connection. Each iteration yields to the event queue so the

@@ -10,7 +10,7 @@ This module combines all Mesoscope-VR-specific interfaces into a single command 
 from pathlib import Path
 
 import click
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import SessionData, get_data_root
 
 from ..mesoscope_vr import (
@@ -20,6 +20,7 @@ from ..mesoscope_vr import (
     run_training_logic,
     lick_training_logic,
     window_checking_logic,
+    check_mesoscope_bridge,
     preprocess_session_data,
     get_system_configuration,
     migrate_animal_between_projects,
@@ -55,6 +56,22 @@ def maintain() -> None:
     designed to perform minor (day-to-day) maintenance tasks that do not require disassembling the system's components.
     """
     maintenance_logic()
+
+
+@mesoscope.command("check-bridge")
+def check_bridge() -> None:
+    """Checks whether the ScanImagePC's runAcquisition control loop is reachable for Mesoscope imaging sessions.
+
+    The runAcquisition function is a lock-in command loop the operator launches once on the ScanImagePC; it arms and
+    commands the Mesoscope over MQTT for the entire runtime. An unreachable bridge means it is not running.
+    """
+    try:
+        reachable, status = check_mesoscope_bridge()
+    except Exception as exception:
+        message = f"Unable to check the mesoscope control interface. {exception}"
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
+    console.echo(message=status, level=LogLevel.SUCCESS if reachable else LogLevel.WARNING)
 
 
 @mesoscope.group("run")
