@@ -123,7 +123,7 @@ def get_system_configuration_path() -> Path:
         message = (
             f"Unable to resolve the local data acquisition system configuration file. Expected exactly one "
             f"'*_system_configuration.yaml' file inside {directory}, but found {len(configuration_files)} ({found}). "
-            f"Use the system's 'configure' CLI command (e.g. 'sle mesoscope configure') to reconfigure the "
+            f"Use the system's 'configure' CLI command (e.g. 'sle mesoscope configure system') to reconfigure the "
             f"host-machine to belong to exactly one acquisition system."
         )
         console.error(message=message, error=FileNotFoundError)

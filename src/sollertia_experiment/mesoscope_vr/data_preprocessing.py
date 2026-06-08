@@ -28,7 +28,7 @@ from sollertia_shared_assets import (
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
     get_data_root,
-    discover_sessions,
+    iter_animal_sessions,
     get_google_credentials_path,
 )
 from ataraxis_data_structures import delete_directory, transfer_directory
@@ -243,7 +243,6 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     source_animal = AnimalData(root=data_root, project_name=source_project, animal_id=animal)
     destination_animal = AnimalData(root=data_root, project_name=target_project, animal_id=animal)
     destination_local_root = destination_animal.path
-    source_local_root = source_animal.path
 
     # If the target project does not exist, aborts with an error.
     if not destination_local_root.parent.exists():
@@ -266,17 +265,17 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     # preferred (first configured) destination.
     if not configured_destinations:
         _migrate_sessions_on_premises(
-            source_local_root=source_local_root,
-            destination_local_root=destination_local_root,
+            source_animal=source_animal,
+            destination_animal=destination_animal,
             target_project=target_project,
         )
     else:
         preferred_name, preferred_root = configured_destinations[0]
         _migrate_sessions_via_destination(
             destination_name=preferred_name,
-            destination_root=preferred_root.joinpath(source_project, animal),
-            source_local_root=source_local_root,
-            destination_local_root=destination_local_root,
+            storage_animal=source_animal.for_root(root=preferred_root),
+            source_animal=source_animal,
+            destination_animal=destination_animal,
             target_project=target_project,
         )
 
@@ -881,9 +880,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
 
 def _migrate_sessions_via_destination(
     destination_name: str,
-    destination_root: Path,
-    source_local_root: Path,
-    destination_local_root: Path,
+    storage_animal: AnimalData,
+    source_animal: AnimalData,
+    destination_animal: AnimalData,
     target_project: str,
 ) -> None:
     """Migrates the animal's sessions from the source to the target project using a long-term storage destination as
@@ -904,9 +903,9 @@ def _migrate_sessions_via_destination(
     Args:
         destination_name: The name of the long-term storage destination used as the source of truth, used in status
             messages.
-        destination_root: The path to the animal's source-project directory on the long-term storage destination.
-        source_local_root: The path to the animal's source-project directory on the acquisition host machine.
-        destination_local_root: The path to the animal's target-project directory on the acquisition host machine.
+        storage_animal: The animal view resolving the source-project directory on the long-term storage destination.
+        source_animal: The animal view resolving the source-project directory on the acquisition host machine.
+        destination_animal: The animal view resolving the target-project directory on the acquisition host machine.
         target_project: The name of the project to which the data should be migrated.
     """
     console.echo(
@@ -917,21 +916,23 @@ def _migrate_sessions_via_destination(
     # long-term storage destinations. This guarantees the destination holds the authoritative copy of every session
     # before the migration relocates it. Preprocessing is idempotent and removes each local copy only after a
     # successful transfer, so an interrupted preprocessing run can be safely re-run.
-    for session in discover_sessions(root_path=source_local_root):
+    for session in iter_animal_sessions(animal=source_animal):
         console.echo(message=f"Preprocessing non-migrated local session {session.name}...")
         preprocess_session_data(session_data=SessionData.load(session_path=session))
 
     # Loops over all sessions stored on the long-term storage destination and migrates them sequentially.
-    for session in discover_sessions(root_path=destination_root):
+    for session in iter_animal_sessions(animal=storage_animal):
         console.echo(message=f"Migrating session {session.name}...")
-        local_session_path = destination_local_root.joinpath(session.name)
-        old_session_data_path = source_local_root.joinpath(session.name, "raw_data", "session_data.yaml")
+        local_session_path = destination_animal.session_path(session_name=session.name)
+        old_session_data_path = source_animal.session_path(session_name=session.name).joinpath(
+            "raw_data", "session_data.yaml"
+        )
 
         migrated = False
         try:
             # Pulls the session to the local machine and reassigns it to the target project.
             session_data = migrate_session_directory(
-                remote_session_path=destination_root.joinpath(session.name),
+                remote_session_path=storage_animal.session_path(session_name=session.name),
                 local_session_path=local_session_path,
                 old_session_data_path=old_session_data_path,
                 target_project=target_project,
@@ -949,16 +950,17 @@ def _migrate_sessions_via_destination(
             purge_session(old_session_data)
             migrated = True
         finally:
-            # On a failed or interrupted migration, removes the in-flight source-project marker recreated while pulling
-            # the session. Otherwise, the bare marker would surface as a non-migrated local session on the next run and
-            # corrupt the resumed migration. The local target copy is left as-is, since pulling overwrites it on retry.
+            # On a failed or interrupted migration, removes the in-flight source-project session directory recreated
+            # while pulling the session. Otherwise, that leftover directory would surface as a non-migrated local
+            # session on the next run and corrupt the resumed migration. The local target copy is left as-is, since
+            # pulling overwrites it on retry.
             if not migrated:
                 delete_directory(directory_path=old_session_data_path.parents[1])
 
 
 def _migrate_sessions_on_premises(
-    source_local_root: Path,
-    destination_local_root: Path,
+    source_animal: AnimalData,
+    destination_animal: AnimalData,
     target_project: str,
 ) -> None:
     """Migrates the animal's sessions from the source to the target project entirely on the acquisition host machine.
@@ -969,16 +971,16 @@ def _migrate_sessions_on_premises(
         target project and reassigns the session to the target project, without any remote data transfer.
 
     Args:
-        source_local_root: The path to the animal's source-project directory on the acquisition host machine.
-        destination_local_root: The path to the animal's target-project directory on the acquisition host machine.
+        source_animal: The animal view resolving the source-project directory on the acquisition host machine.
+        destination_animal: The animal view resolving the target-project directory on the acquisition host machine.
         target_project: The name of the project to which the data should be migrated.
     """
     # Relocates each locally stored session directory to the target project and reassigns it. Reassigning the project
     # name and saving the SessionData instance applies the filesystem changes resulting from the project change.
-    for session in discover_sessions(root_path=source_local_root):
+    for session in iter_animal_sessions(animal=source_animal):
         console.echo(message=f"Migrating session {session.name}...")
-        target_session_path = destination_local_root.joinpath(session.name)
-        shutil.move(src=source_local_root.joinpath(session.name), dst=target_session_path)
+        target_session_path = destination_animal.session_path(session_name=session.name)
+        shutil.move(src=session, dst=target_session_path)
 
         session_data = SessionData.load(session_path=target_session_path)
         session_data.project_name = target_project

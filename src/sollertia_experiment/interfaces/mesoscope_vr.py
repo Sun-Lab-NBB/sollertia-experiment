@@ -25,6 +25,7 @@ from ..mesoscope_vr import (
     get_system_configuration,
     migrate_animal_between_projects,
     create_system_configuration_file,
+    create_experiment_configuration_file,
 )
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
@@ -40,10 +41,101 @@ def mesoscope() -> None:  # pragma: no cover
     """
 
 
-@mesoscope.command("configure")
+@mesoscope.group("configure")
 def configure() -> None:  # pragma: no cover
+    """Generates Mesoscope-VR configuration files.
+
+    Exposes two configuration targets: 'system' creates the data acquisition system configuration file that binds the
+    host-machine to the Mesoscope-VR system, and 'experiment' creates per-experiment configuration files from Unity
+    task templates.
+    """
+
+
+@configure.command("system")
+def configure_system() -> None:  # pragma: no cover
     """Creates the Mesoscope-VR data acquisition system configuration file under the working directory."""
     create_system_configuration_file()
+
+
+@configure.command("experiment")
+@click.option(
+    "-p",
+    "--project",
+    type=str,
+    required=True,
+    help="The name of the project for which to generate the new experiment configuration file.",
+)
+@click.option(
+    "-e",
+    "--experiment",
+    type=str,
+    required=True,
+    help="The name of the experiment for which to create the configuration file.",
+)
+@click.option(
+    "-t",
+    "--template",
+    type=str,
+    required=True,
+    help="The name of the task template to use (filename without .yaml extension).",
+)
+@click.option(
+    "-sc",
+    "--state-count",
+    type=int,
+    default=1,
+    show_default=True,
+    help="The number of runtime states supported by the experiment.",
+)
+@click.option(
+    "--reward-size",
+    type=float,
+    default=5.0,
+    show_default=True,
+    help="Default water reward volume in microliters for lick-type trials.",
+)
+@click.option(
+    "--reward-tone-duration",
+    type=int,
+    default=300,
+    show_default=True,
+    help="Default reward tone duration in milliseconds for lick-type trials.",
+)
+@click.option(
+    "--puff-duration",
+    type=int,
+    default=100,
+    show_default=True,
+    help="Default gas puff duration in milliseconds for occupancy-type trials.",
+)
+@click.option(
+    "--occupancy-duration",
+    type=int,
+    default=1000,
+    show_default=True,
+    help="Default occupancy threshold duration in milliseconds for occupancy-type trials.",
+)
+def configure_experiment(
+    project: str,
+    experiment: str,
+    template: str,
+    state_count: int,
+    reward_size: float,
+    reward_tone_duration: int,
+    puff_duration: int,
+    occupancy_duration: int,
+) -> None:  # pragma: no cover
+    """Creates a Mesoscope-VR experiment configuration from a task template under the configured data root."""
+    create_experiment_configuration_file(
+        project=project,
+        experiment=experiment,
+        template=template,
+        state_count=state_count,
+        reward_size=reward_size,
+        reward_tone_duration=reward_tone_duration,
+        puff_duration=puff_duration,
+        occupancy_duration=occupancy_duration,
+    )
 
 
 @mesoscope.command("maintain")
@@ -347,7 +439,7 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 
     Experiment runtimes are carried out after the lick and run training sessions. This command runs any experiment
     configuration supported by the data acquisition system managed by the host-machine. To create a new experiment
-    configuration for the local data-acquisition system, use the 'slsa configure experiment' subcommand.
+    configuration for the local data-acquisition system, use the 'sle mesoscope configure experiment' subcommand.
     """
     experiment_logic(
         experimenter=ctx.obj["user"],

@@ -14,6 +14,7 @@ from .system import (
     MesoscopeSystemConfiguration,
     get_system_configuration,
     create_system_configuration_file,
+    create_experiment_configuration_file,
 )
 from ..cross_system import get_system_configuration_path
 from .data_acquisition import (
@@ -44,6 +45,7 @@ __all__ = [
     "MesoscopeVRAssets",
     "ZaberPositions",
     "check_mesoscope_bridge",
+    "create_experiment_configuration_file",
     "create_system_configuration_file",
     "experiment_logic",
     "get_system_configuration",

@@ -7,13 +7,18 @@ from pathlib import Path
 from dataclasses import field, dataclass
 
 from ataraxis_video_system import EncoderSpeedPresets
-from ataraxis_base_utilities import console, ensure_directory_exists
+from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
+    CONFIGURATION_DIRECTORY,
     AnimalData,
     SessionData,
     SessionTypes,
+    TaskTemplate,
     AcquisitionSystems,
     get_data_root,
+    get_task_templates_directory,
+    create_experiment_configuration,
+    populate_default_experiment_states,
 )
 from ataraxis_data_structures import YamlConfig
 
@@ -571,6 +576,84 @@ def create_system_configuration_file() -> None:
     _create_system_configuration_file(system=AcquisitionSystems.MESOSCOPE_VR)
 
 
+def create_experiment_configuration_file(
+    project: str,
+    experiment: str,
+    template: str,
+    state_count: int,
+    reward_size: float,
+    reward_tone_duration: int,
+    puff_duration: int,
+    occupancy_duration: int,
+) -> None:
+    """Creates a Mesoscope-VR experiment configuration file from a task template under the configured data root.
+
+    Resolves the target project directory under the local data root, instantiates the named task template from the
+    configured task templates directory, builds a Mesoscope-VR experiment configuration with the provided trial
+    defaults, populates the requested number of default-valued runtime states, and writes the result to the project's
+    configuration directory.
+
+    Args:
+        project: The name of the project under which to create the experiment configuration file.
+        experiment: The name of the experiment, used as the stem of the created configuration file.
+        template: The name of the task template to instantiate, given as the template filename without the .yaml
+            extension.
+        state_count: The number of default-valued runtime states to generate.
+        reward_size: The default water reward volume, in microliters, for lick-type trials.
+        reward_tone_duration: The default reward tone duration, in milliseconds, for lick-type trials.
+        puff_duration: The default gas puff duration, in milliseconds, for occupancy-type trials.
+        occupancy_duration: The default occupancy threshold duration, in milliseconds, for occupancy-type trials.
+
+    Raises:
+        ValueError: If the target project does not exist under the data root.
+        FileNotFoundError: If the named task template does not exist in the configured task templates directory.
+    """
+    root_directory = get_data_root()
+    project_path = root_directory.joinpath(project)
+    if not project_path.exists():
+        message = (
+            f"Unable to generate the {experiment} experiment's configuration file: the project '{project}' does not "
+            f"exist under the data root {root_directory}. Use 'slsa configure project' first."
+        )
+        console.error(message=message, error=ValueError)
+
+    file_path = project_path.joinpath(CONFIGURATION_DIRECTORY, f"{experiment}.yaml")
+
+    templates_directory = get_task_templates_directory()
+    template_path = templates_directory.joinpath(f"{template}.yaml")
+    if not template_path.exists():
+        available_templates = sorted([template_file.stem for template_file in templates_directory.glob("*.yaml")])
+        message = (
+            f"Unable to generate the '{experiment}' experiment configuration. The template '{template}' was "
+            f"not found in {templates_directory}. Available templates: "
+            f"{', '.join(available_templates) if available_templates else 'none'}."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    task_template = TaskTemplate.from_yaml(file_path=template_path)
+
+    experiment_configuration = create_experiment_configuration(
+        template=task_template,
+        system=AcquisitionSystems.MESOSCOPE_VR,
+        unity_scene_name=template,
+        default_reward_size_ul=reward_size,
+        default_reward_tone_duration_ms=reward_tone_duration,
+        default_puff_duration_ms=puff_duration,
+        default_occupancy_duration_ms=occupancy_duration,
+    )
+
+    populate_default_experiment_states(
+        experiment_configuration=experiment_configuration,
+        state_count=state_count,
+    )
+
+    experiment_configuration.to_yaml(file_path=file_path)
+    console.echo(
+        message=f"{experiment} experiment's configuration file: created from template '{template}'.",
+        level=LogLevel.SUCCESS,
+    )
+
+
 def get_system_configuration() -> MesoscopeSystemConfiguration:
     """Loads the local system configuration file and verifies that the host-machine belongs to the Mesoscope-VR data
     acquisition system.
@@ -587,8 +670,8 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
         belongs_to = getattr(system_configuration, "name", "an unknown")
         message = (
             f"Unable to resolve the configuration for the Mesoscope-VR data acquisition system, as the host-machine "
-            f"belongs to the {belongs_to} data acquisition system. Use the 'sle mesoscope configure' CLI command to "
-            f"reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
+            f"belongs to the {belongs_to} data acquisition system. Use the 'sle mesoscope configure system' CLI "
+            f"command to reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
         )
         console.error(message=message, error=TypeError)
         # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.

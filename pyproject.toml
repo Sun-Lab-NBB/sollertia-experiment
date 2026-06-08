@@ -64,7 +64,7 @@ dependencies = [
     # Imaging
     "tifffile==2026.6.1",
     # Required by tifffile to (de)compress LERC-encoded TIFFs.
-    "imagecodecs==2026.5.10",
+    "imagecodecs==2026.6.6",
 
     # GUI
     "pyside6==6.11.1",
@@ -78,7 +78,7 @@ dependencies = [
     "questionary==2.1.1",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "tqdm==4.67.3",
+    "tqdm==4.68.1",
     "natsort-rs==0.1.22",
     "pyyaml==6.0.3",
 

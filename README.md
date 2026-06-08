@@ -617,15 +617,16 @@ Failure to do so may damage the equipment or harm the animal!
 The sollertia-experiment library exposes two top-level CLI command groups: the general `sle get` group and the
 Mesoscope-VR `sle mesoscope` group.
 
-| Command                    | Description                                                          |
-|----------------------------|----------------------------------------------------------------------|
-| `sle get`                  | Discover and evaluate data acquisition system components (general)   |
-| `sle mesoscope configure`  | Generate the Mesoscope-VR data acquisition system configuration file |
-| `sle mesoscope maintain`   | Run the Mesoscope-VR system maintenance session                      |
-| `sle mesoscope run`        | Execute Mesoscope-VR data acquisition and training sessions          |
-| `sle mesoscope preprocess` | Preprocess a session's data and push it to long-term storage         |
-| `sle mesoscope delete`     | Remove a session's data from all storage destinations                |
-| `sle mesoscope migrate`    | Transfer an animal's sessions between projects                       |
+| Command                              | Description                                                          |
+|--------------------------------------|----------------------------------------------------------------------|
+| `sle get`                            | Discover and evaluate data acquisition system components (general)   |
+| `sle mesoscope configure system`     | Generate the Mesoscope-VR data acquisition system configuration file |
+| `sle mesoscope configure experiment` | Create a Mesoscope-VR experiment configuration from a task template  |
+| `sle mesoscope maintain`             | Run the Mesoscope-VR system maintenance session                      |
+| `sle mesoscope run`                  | Execute Mesoscope-VR data acquisition and training sessions          |
+| `sle mesoscope preprocess`           | Preprocess a session's data and push it to long-term storage         |
+| `sle mesoscope delete`               | Remove a session's data from all storage destinations                |
+| `sle mesoscope migrate`              | Transfer an animal's sessions between projects                       |
 
 ### Step 0: Configuring the Data Acquisition System
 
@@ -633,7 +634,7 @@ Before acquiring data, each acquisition system has to be configured. This step i
 the system and installing the required hardware components. Typically, this only needs to be done when the acquisition
 system configuration or hardware changes, so most lab members can safely skip this step.
 
-Use the `sle mesoscope configure` command to generate the system configuration file.
+Use the `sle mesoscope configure system` command to generate the system configuration file.
 As part of its runtime, the command configures the host machine to remember the path to the generated configuration
 file, so all future sollertia-experiment runtimes on that machine automatically load and use the appropriate
 acquisition-system configuration parameters.
@@ -667,10 +668,9 @@ this command generates the root project directory on all machines that make up t
 
 All projects that involve scientific experiments also need to define at least one **experiment configuration**.
 Experiment configurations are unique for each data acquisition system and are stored inside .yaml files named after the
-experiment. To generate a new experiment configuration file, use the `slsa configure experiment` command (from the
-[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This command generates a **precursor**
-experiment configuration file inside the **configuration** subdirectory, stored under the root project directory on the
-main PC of the data acquisition system.
+experiment. To generate a new experiment configuration file, use the `sle mesoscope configure experiment` command. This
+command generates a **precursor** experiment configuration file inside the **configuration** subdirectory, stored under
+the root project directory on the main PC of the data acquisition system.
 
 For information about the available experiment configuration parameters in the precursor file, read the
 *API documentation* of the appropriate data-acquisition system available from the
