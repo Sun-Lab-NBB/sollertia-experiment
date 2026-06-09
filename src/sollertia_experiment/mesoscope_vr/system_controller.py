@@ -373,6 +373,10 @@ class MesoscopeVRSystem:
         # files during processing.
         self._generate_hardware_state_snapshot()
 
+        # Freezes the acquisition-system-level configuration into the session's raw_data so downstream processing can
+        # interpret the acquired data without consulting the host's mutable working-directory configuration.
+        self._cache_system_configuration_snapshot()
+
         # If the session uses Virtual Reality, applies the Unity scale to the encoder using the value loaded with
         # the task template, opens the MQTT connection, and runs the interactive Unity setup sequence.
         if self._vr_task is not None and self._task_template is not None and self._experiment_configuration is not None:
@@ -1011,6 +1015,20 @@ class MesoscopeVRSystem:
         # Caches the resolved hardware state to disk.
         hardware_state.to_yaml(file_path=self._session_data.raw_data.hardware_state_path)
         message = "Mesoscope-VR hardware configuration snapshot: Generated."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+
+    def _cache_system_configuration_snapshot(self) -> None:
+        """Caches the active system configuration to the acquired session's raw_data directory as a
+        system_configuration.yaml file.
+
+        Notes:
+            Every session is required to carry this snapshot, which freezes the acquisition-system-level configuration
+            in effect when the session was acquired. Downstream processing reads it to interpret the raw data without
+            consulting the host's mutable working-directory configuration. ``MesoscopeSystemConfiguration.save`` applies
+            the valve-calibration tuple-to-dict translation required for the on-disk YAML representation.
+        """
+        self._system_configuration.save(path=self._session_data.raw_data.system_configuration_path)
+        message = "Mesoscope-VR system configuration snapshot: Generated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     def _checkpoint(self) -> None:
