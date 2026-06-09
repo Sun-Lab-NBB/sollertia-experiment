@@ -17,8 +17,7 @@ from sollertia_shared_assets import (
     AcquisitionSystems,
     get_data_root,
     get_task_templates_directory,
-    create_experiment_configuration,
-    populate_default_experiment_states,
+    MesoscopeExperimentConfiguration,
 )
 from ataraxis_data_structures import YamlConfig
 
@@ -632,19 +631,14 @@ def create_experiment_configuration_file(
 
     task_template = TaskTemplate.from_yaml(file_path=template_path)
 
-    experiment_configuration = create_experiment_configuration(
+    experiment_configuration = MesoscopeExperimentConfiguration.from_task_template(
         template=task_template,
-        system=AcquisitionSystems.MESOSCOPE_VR,
         unity_scene_name=template,
+        state_count=state_count,
         default_reward_size_ul=reward_size,
         default_reward_tone_duration_ms=reward_tone_duration,
         default_puff_duration_ms=puff_duration,
         default_occupancy_duration_ms=occupancy_duration,
-    )
-
-    populate_default_experiment_states(
-        experiment_configuration=experiment_configuration,
-        state_count=state_count,
     )
 
     experiment_configuration.to_yaml(file_path=file_path)
