@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from numba import njit  # type: ignore[import-untyped]
 import numpy as np
 from ataraxis_base_utilities import console
-from sollertia_shared_assets import TriggerType
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -24,8 +23,9 @@ class DecomposedTrials:
     """Stores the per-trial sequences derived from a decomposed Virtual Reality wall cue sequence.
 
     Notes:
-        All sequences are aligned: index `i` describes the i-th trial in the decomposed sequence. The trial_names field
-        is the join key the acquisition system uses to look up per-trial parameters from its experiment configuration.
+        Both sequences are aligned: index `i` describes the i-th trial in the decomposed sequence. The trial_names
+        field is the join key the acquisition system uses to look up per-trial parameters from its experiment
+        configuration.
     """
 
     cumulative_distances: NDArray[np.float64]
@@ -33,9 +33,6 @@ class DecomposedTrials:
     trial_names: tuple[str, ...]
     """Name of each decomposed trial. Acquisition systems use these names to join the decomposed sequence with their
     own per-trial hardware parameters."""
-    trigger_types: tuple[TriggerType, ...]
-    """Stimulus trigger type for each decomposed trial. LICK indicates a positive (reward-zone) trial; OCCUPANCY
-    indicates an aversive (occupancy-zone) trial."""
 
 
 class CachedMotifDecomposer:
@@ -122,23 +119,20 @@ def decompose_cue_sequence(
     task_template: TaskTemplate,
     motif_decomposer: CachedMotifDecomposer,
 ) -> DecomposedTrials:
-    """Decomposes a Virtual Reality cue sequence into per-trial distances, names, and trigger types.
+    """Decomposes a Virtual Reality cue sequence into per-trial distances and names.
 
     Notes:
         Uses a greedy longest-match approach to identify trial motifs in the cue sequence. The spatial trial layout
-        (cue sequence, segment length) and the trigger type of each trial are sourced from the VR TaskTemplate.
-        Acquisition-system-specific parameters (reward size, puff duration, etc.) are joined back by trial name on
-        the acquisition system side.
+        (cue sequence, segment length) of each trial is sourced from the VR TaskTemplate. Acquisition-system-specific
+        parameters (reward size, puff duration, etc.) are joined back by trial name on the acquisition system side.
 
     Args:
         cue_sequence: The Virtual Reality wall cue sequence to decompose, as a flat uint8 array.
-        task_template: The VR TaskTemplate that provides the cue catalog, per-trial spatial cue sequences, and
-            per-trial trigger types.
+        task_template: The VR TaskTemplate that provides the cue catalog and per-trial spatial cue sequences.
         motif_decomposer: The CachedMotifDecomposer instance used to flatten and cache the trial motif data.
 
     Returns:
-        The DecomposedTrials instance with three aligned per-trial sequences: cumulative distances, trial names, and
-        trigger types.
+        The DecomposedTrials instance with two aligned per-trial sequences: cumulative distances and trial names.
 
     Raises:
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
@@ -149,17 +143,11 @@ def decompose_cue_sequence(
     trial_motifs: list[NDArray[np.uint8]] = []
     trial_distances: list[float] = []
     trial_names_by_type: list[str] = []
-    trigger_types_by_type: list[TriggerType] = []
 
     for trial_name, spatial_trial in task_template.trial_structures.items():
         trial_motifs.append(np.array([cue_name_to_code[name] for name in spatial_trial.cue_sequence], dtype=np.uint8))
         trial_distances.append(sum(cue_name_to_length[name] for name in spatial_trial.cue_sequence))
         trial_names_by_type.append(trial_name)
-        trigger_types_by_type.append(
-            spatial_trial.trigger_type
-            if isinstance(spatial_trial.trigger_type, TriggerType)
-            else TriggerType(spatial_trial.trigger_type)
-        )
 
     motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
         trial_motifs=trial_motifs, trial_distances=trial_distances
@@ -187,12 +175,10 @@ def decompose_cue_sequence(
     sequence_indices = trial_indices_array[:trial_count]
     cumulative_distances = np.cumsum(distances_array[sequence_indices].astype(np.float64))
     trial_names = tuple(trial_names_by_type[int(index)] for index in sequence_indices)
-    trigger_types = tuple(trigger_types_by_type[int(index)] for index in sequence_indices)
 
     return DecomposedTrials(
         cumulative_distances=cumulative_distances,
         trial_names=trial_names,
-        trigger_types=trigger_types,
     )
 
 
