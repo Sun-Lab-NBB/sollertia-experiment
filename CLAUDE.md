@@ -115,10 +115,10 @@ Example triggers: "Set up the mesoscope system", "Change the lick threshold".
 
 ## Project context
 
-This is **sollertia-experiment**, the data acquisition and preprocessing runtime of the Sollertia platform. The
-library is designed to manage any combination of Sollertia platform data acquisition systems and can be extended to
-support new systems or modified to remove existing ones. Currently, sollertia-experiment manages the **Mesoscope-VR**
-two-photon imaging system, which combines brain imaging with virtual reality behavioral tasks.
+This is **sollertia-experiment**, the data acquisition and preprocessing runtime of the Sollertia platform. Every
+Sollertia acquisition system runs in Virtual Reality, presenting a Unity task in the linear infinite corridor; the
+library manages these systems and is designed to be extended with new ones. Currently, sollertia-experiment manages
+the **Mesoscope-VR** two-photon imaging system, which combines brain imaging with virtual reality behavioral tasks.
 
 ### Key areas
 

@@ -207,7 +207,6 @@ class VRTaskDriver:
         self._decomposed_trials: DecomposedTrials = DecomposedTrials(
             cumulative_distances=np.zeros(0, dtype=np.float64),
             trial_names=(),
-            trigger_types=(),
         )
         self._polling_timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
         self._bridge: UnityBridgeClient = UnityBridgeClient()
