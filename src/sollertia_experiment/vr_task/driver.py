@@ -67,7 +67,7 @@ class VRTaskEventKind(IntEnum):
     """No dispatchable Unity event was produced this cycle: either the MQTT buffer was empty, or the consumed message
     was on a topic that cycle() does not surface (a handshake topic)."""
     STIMULUS_TRIGGERED = 1
-    """The animal triggered the current trial's stimulus delivery."""
+    """The animal triggered a trial's stimulus delivery. The firing trial is identified by the event's trial_name."""
     TRIGGER_DELAY_REQUESTED = 2
     """Unity requested the acquisition system to apply a brake pulse for the specified duration."""
     UNITY_TERMINATED = 3
@@ -82,6 +82,8 @@ class VRTaskEvent:
     """The kind of Virtual Reality task event that occurred during the cycle."""
     delay_ms: int = 0
     """The brake pulse duration in milliseconds. Populated only for the TRIGGER_DELAY_REQUESTED event."""
+    trial_name: str = ""
+    """The name of the trial whose stimulus zone fired. Populated only for the STIMULUS_TRIGGERED event."""
 
 
 @dataclass(slots=True)
@@ -125,11 +127,12 @@ class _VRTaskMQTTTopics(StrEnum):
     MOTION = "Motion"
     """Treadmill movement payload sent from the acquisition runtime to Unity (TreadmillMessage with float
     movement)."""
-    LICK = "Lick"
-    """Lick-port event published by the acquisition runtime when the animal licks the spout (empty trigger
-    payload)."""
+    INTERACTION = "Interaction"
+    """Sensor-interaction event published by the acquisition runtime when the animal engages an interaction sensor
+    (empty trigger payload). The Mesoscope-VR system resolves this generic event to the lick sensor."""
     STIMULUS = "Stimulus"
-    """Stimulus delivery event published by Unity when a stimulus trigger zone fires (empty trigger payload)."""
+    """Stimulus delivery event published by Unity when a stimulus trigger zone fires (StimulusMessage with string
+    trialName identifying the trial whose zone fired)."""
     DELAY = "Delay"
     """Brake activation request published by Unity carrying the remaining occupancy duration in milliseconds
     (TriggerDelayMessage with uint delayMilliseconds)."""
@@ -142,8 +145,8 @@ class _VRTaskMQTTTopics(StrEnum):
     """Request for the active Unity scene name (empty trigger payload)."""
     SCENE_NAME = "SceneName"
     """Active Unity scene name reply sent in response to SceneNameTrigger (SceneNameMessage with string name)."""
-    REQUIRE_LICK = "RequireLick"
-    """Lick-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
+    REQUIRE_INTERACTION = "RequireInteraction"
+    """Interaction-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
     REQUIRE_WAIT = "RequireWait"
     """Wait-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
 
@@ -282,8 +285,13 @@ class VRTaskDriver:
             self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
 
     def push_lick_event(self) -> None:
-        """Notifies Unity that the animal performed a lick."""
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.LICK, payload=None)
+        """Notifies Unity that the animal engaged the interaction sensor.
+
+        Notes:
+            The Mesoscope-VR system's interaction sensor is the lick port, so this method retains the lick name the
+            system layer uses. It publishes on Unity's generic Interaction topic.
+        """
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.INTERACTION, payload=None)
 
     def set_reinforcing_guidance(self, *, enabled: bool) -> None:
         """Sets the reinforcing trial guidance mode.
@@ -291,10 +299,10 @@ class VRTaskDriver:
         Args:
             enabled: Determines whether to enable or disable reinforcing guidance.
         """
-        # Unity's RequireLick flag is the inverse of guidance: a True value forces the animal to lick to trigger the
-        # reward, which is the unguided behavior. Enabling guidance therefore clears the lick requirement.
+        # Unity's RequireInteraction flag is the inverse of guidance: a True value forces the animal to interact to
+        # trigger the reward, which is the unguided behavior. Enabling guidance therefore clears the requirement.
         payload = json.dumps(obj={"value": not enabled}).encode("utf-8")
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_LICK, payload=payload)
+        self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_INTERACTION, payload=payload)
         self._state.reinforcing_guidance_enabled = enabled
 
     def set_aversive_guidance(self, *, enabled: bool) -> None:
@@ -329,7 +337,11 @@ class VRTaskDriver:
         topic, payload = data
 
         if topic == _VRTaskMQTTTopics.STIMULUS:
-            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED)
+            trial_name = ""
+            if payload is not None:
+                stimulus_payload = json.loads(payload.decode("utf-8"))
+                trial_name = str(stimulus_payload.get("trialName", ""))
+            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED, trial_name=trial_name)
 
         if topic == _VRTaskMQTTTopics.DELAY:
             delay_payload = json.loads(payload.decode("utf-8"))
