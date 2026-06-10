@@ -59,6 +59,15 @@ _REQUIRED_SURGERY_HEADERS: set[str] = {
 }
 """Defines all headers (columns) that must exist in a validly formatted surgery log Google Sheet."""
 
+_SURGERY_LOG_DRUGS: dict[str, str] = {
+    "Lactated Ringer's Solution": "lrs",
+    "Ketoprofen": "ketoprofen",
+    "Buprenorphine": "buprenorphine",
+    "Dexamethasone": "dexamethasone",
+}
+"""Maps each drug tracked by the surgery log to the column stem that stores its data. Each drug's administered volume
+is stored in the '<stem> (ml)' column and its reference code in the '<stem> code' column."""
+
 _REQUIRED_WATER_RESTRICTION_HEADERS: set[str] = {
     "date",
     "weight (g)",
@@ -410,18 +419,21 @@ class SurgeryLog:
             surgery_quality=animal_data["surgery quality"],
         )
 
-        # Drug Data. Since early surgery log versions did not use drug / injection / implant codes, code parsing has
-        # fall-back default values (0). A code value of 0 should be interpreted as not having a code.
-        drug_data = DrugData(
-            lactated_ringers_solution_volume_ml=animal_data["lrs (ml)"],
-            lactated_ringers_solution_code=str(animal_data.get("lrs code", 0)),
-            ketoprofen_volume_ml=animal_data["ketoprofen (ml)"],
-            ketoprofen_code=str(animal_data.get("ketoprofen code", 0)),
-            buprenorphine_volume_ml=animal_data["buprenorphine (ml)"],
-            buprenorphine_code=str(animal_data.get("buprenorphine code", 0)),
-            dexamethasone_volume_ml=animal_data["dexamethasone (ml)"],
-            dexamethasone_code=str(animal_data.get("dexamethasone code", 0)),
-        )
+        # Drug Data. The surgery log tracks each drug in a dedicated pair of volume and code columns. Drugs without a
+        # recorded volume were not administered during the processed surgery and are excluded from the assembled list.
+        # Since early surgery log versions did not use drug / injection / implant codes, code parsing has fall-back
+        # default values (0). A code value of 0 should be interpreted as not having a code.
+        drugs = []
+        for drug_name, column_stem in _SURGERY_LOG_DRUGS.items():
+            drug_volume = animal_data.get(f"{column_stem} (ml)")
+            if drug_volume is not None:
+                drugs.append(
+                    DrugData(
+                        drug=drug_name,
+                        drug_volume_ml=drug_volume,
+                        drug_code=str(animal_data.get(f"{column_stem} code", 0)),
+                    )
+                )
 
         # Determines the number of implants and injections performed during the processed surgery. This is based on the
         # assumption that all implants and injections are named like 'Implant1', 'Injection2_location', etc.
@@ -505,7 +517,7 @@ class SurgeryLog:
 
         # Aggregates all data into a SurgeryData instance and returns it to caller
         return SurgeryData(
-            subject=subject_data, procedure=procedure_data, drugs=drug_data, implants=implants, injections=injections
+            subject=subject_data, procedure=procedure_data, drugs=drugs, implants=implants, injections=injections
         )
 
     def update_surgery_quality(self, quality: int) -> None:
@@ -656,9 +668,7 @@ class WaterLog:
         # Gets all tab names from the sheet metadata
         # noinspection PyUnresolvedReferences
         sheet_metadata = (
-            self._service.spreadsheets()
-            .get(spreadsheetId=sheet_id)
-            .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
+            self._service.spreadsheets().get(spreadsheetId=sheet_id).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
         tabs = sheet_metadata.get("sheets", [])
 
