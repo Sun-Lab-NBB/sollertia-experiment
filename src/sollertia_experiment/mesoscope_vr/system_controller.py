@@ -499,7 +499,7 @@ class MesoscopeVRSystem:
     def stop(self) -> None:
         """Stops all Mesoscope-VR system components, external assets, and ends the session's data acquisition."""
         # If start() was interrupted before completing initialization, the full graceful shutdown sequence below is
-        # unsafe because it queries and commands assets that may never have been brought up. Instead, performs a
+        # unsafe because it queries and commands assets that may have never been brought up. Instead, performs a
         # best-effort teardown of whatever assets start() did manage to initialize and aborts the runtime. The caller's
         # cleanup branch then purges the partially initialized session.
         if not self._started:
@@ -621,7 +621,7 @@ class MesoscopeVRSystem:
             This runs when stop() is invoked after start() failed or was interrupted before completing initialization.
             It stops the subprocess-backed assets while their shared-memory managers are still alive, which prevents the
             multiprocessing teardown cascade that occurs if the partially initialized assets are instead collected by
-            the garbage collector. Every teardown target is idempotent and self-guards against never having been
+            the garbage collector. Every teardown target is idempotent and self-guards against having never been
             started, so each step is safe to run regardless of how far initialization progressed. Each step is also
             isolated so that a failure or repeated interrupt in one asset does not prevent the rest from shutting down.
         """
@@ -1683,16 +1683,8 @@ class MesoscopeVRSystem:
         # If the runtime reaches this point, the session is likely complete.
         self.descriptor.incomplete = False
 
-        # Precalculates the volume of water that the experimenter needs to deliver to the animal if the combined
-        # volume delivered during runtime and paused state is less than 1 ml. This is used to pre-fill the
-        # experimenter-delivered volume field as a convenience feature for experimenters.
-        total_delivered_volume = (
-            self.descriptor.dispensed_water_volume_ml + self.descriptor.pause_dispensed_water_volume_ml
-        )
-        if total_delivered_volume < 1:
-            self.descriptor.experimenter_given_water_volume_ml = float(round(1 - total_delivered_volume, ndigits=3))
-
-        # Collects the experimenter notes and writes the completed descriptor. The descriptor union accepted by the
+        # Collects the experimenter notes and the post-session water, then writes the completed descriptor. The
+        # descriptor union accepted by the
         # runtime is a strict subset of the union accepted by finalize_session_descriptor, so the assignment is
         # type-safe.
         # noinspection PyTypeChecker

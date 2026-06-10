@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDoubleSpinBox,
 )
-from ataraxis_base_utilities import console
+from ataraxis_base_utilities import LogLevel, console
 from ataraxis_data_structures import SharedMemoryArray
 
 from .system import RUN_TRAINING_THRESHOLD_LIMITS
@@ -439,9 +439,7 @@ def collect_experimenter_notes(session_name: str) -> str:
     Returns:
         The experimenter notes entered through the terminal.
     """
-    prompt = (
-        f"Record the notes collected while supervising session {session_name} (press Esc then Enter to submit):"
-    )
+    prompt = f"Record the notes collected while supervising session {session_name} (press Esc then Enter to submit):"
     notes: str = request_text(
         message=prompt,
         multiline=True,
@@ -463,9 +461,7 @@ def collect_surgery_quality(session_name: str) -> int:
     Returns:
         The cranial window quality rating on a scale from 0 (non-usable) to 3 (high-tier publication grade) inclusive.
     """
-    prompt = (
-        f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):"
-    )
+    prompt = f"Rate the cranial window quality for session {session_name} from 0 (non-usable) to 3 (publication grade):"
     quality: int = request_selection(
         message=prompt,
         choices=[
@@ -476,6 +472,69 @@ def collect_surgery_quality(session_name: str) -> int:
         ],
     )
     return quality
+
+
+def collect_experimenter_given_water_volume(
+    current_weight_g: float,
+    previous_weight_g: float | None,
+    session_water_volume_ml: float,
+    default_total_water_volume_ml: float,
+) -> float:
+    """Reports the session water summary and prompts for the total water, returning the volume to hand-deliver.
+
+    The prompt runs during a non-window-checking session's teardown. It first reports the animal's current and previous
+    weights together with the water delivered during the session, then asks for the total water the animal should
+    receive. Only session water counts toward that total; water dispensed while the system was paused is excluded.
+
+    Args:
+        current_weight_g: The animal's weight at the start of the session, in grams.
+        previous_weight_g: The animal's weight recorded by the most recent prior session, in grams, or None when no
+            prior session recorded one.
+        session_water_volume_ml: The water volume delivered during the session runtime, in milliliters, excluding water
+            dispensed while paused.
+        default_total_water_volume_ml: The total session water volume offered as the default, in milliliters.
+
+    Returns:
+        The additional water volume the experimenter should hand-deliver, in milliliters, clamped to zero at minimum.
+    """
+    previous_weight_message = f"{previous_weight_g} g" if previous_weight_g is not None else "not available"
+    summary = (
+        f"Session water summary. Current weight: {current_weight_g} g. Previous weight: {previous_weight_message}. "
+        f"Water received this session: {session_water_volume_ml} ml."
+    )
+    console.echo(message=summary, level=LogLevel.INFO)
+
+    response: str = request_text(
+        message="Enter the total water volume the animal should receive this session, in milliliters:",
+        default=str(default_total_water_volume_ml),
+        validate=_validate_water_volume_response,
+    )
+    total_water_volume_ml = float(response)
+    water_to_give_ml = max(0.0, round(total_water_volume_ml - session_water_volume_ml, ndigits=3))
+
+    console.echo(
+        message=f"Hand-deliver {water_to_give_ml} ml to reach the {total_water_volume_ml} ml session total.",
+        level=LogLevel.INFO,
+    )
+    return water_to_give_ml
+
+
+def _validate_water_volume_response(response: str) -> bool | str:
+    """Validates a total water volume response, accepting a non-negative number.
+
+    Args:
+        response: The raw text entered by the experimenter.
+
+    Returns:
+        True when the response parses as a non-negative number, or an error message describing the constraint.
+    """
+    try:
+        water_volume = float(response)
+    except ValueError:
+        return "Enter the total water volume as a number, in milliliters."
+    if water_volume < 0:
+        return "The total water volume cannot be negative."
+    return True
 
 
 class _ControlUIWindow(QMainWindow):

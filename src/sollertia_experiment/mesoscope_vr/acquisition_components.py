@@ -26,10 +26,11 @@ from sollertia_shared_assets import (
 )
 
 from .system import MesoscopeData, MesoscopePositions
-from .runtime_ui import collect_surgery_quality, collect_experimenter_notes
+from .runtime_ui import collect_surgery_quality, collect_experimenter_notes, collect_experimenter_given_water_volume
 from ..cross_system import request_text, wait_for_enter, request_confirmation
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from collections.abc import Callable
 
     from numpy.typing import NDArray
@@ -41,6 +42,9 @@ if TYPE_CHECKING:
 RESPONSE_DELAY: int = 2000
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
+_DEFAULT_TOTAL_WATER_VOLUME_ML: float = 1.0
+"""The total session water volume, in milliliters, offered as the default when the experimenter is prompted for the
+amount of water the animal should receive at session teardown."""
 
 
 class _ResponseDelayTimer:
@@ -364,7 +368,7 @@ def run_shutdown_step(description: str, step: Callable[[], None]) -> None:
     """Executes a single shutdown callable, isolating it so that an error or interrupt does not propagate.
 
     The Mesoscope-VR shutdown sequences tear down several subprocess-backed assets in turn. Allowing an exception or a
-    repeated KeyboardInterrupt from one asset to propagate would skip the remaining teardown steps and leave the
+    repeated KeyboardInterrupt from one asset to propagate would skip the remaining teardown steps. This would leave the
     orphaned subprocesses to be collected by the garbage collector, which tears down their shared-memory managers out
     of order and cascades into multiprocessing errors. This helper contains each failure so the remaining steps still
     run, while the originally propagating exception (if any) resumes once the shutdown sequence completes.
@@ -621,7 +625,9 @@ def finalize_session_descriptor(
     The notes are entered through a blocking terminal prompt instead of by manually editing the session_descriptor.yaml
     file, removing the filesystem round-trip previously required to annotate each session. For window checking
     sessions, the experimenter is additionally prompted for the cranial window quality rating, which is otherwise left
-    at its default value.
+    at its default value. For the other session types, the experimenter is instead shown the session water summary and
+    prompted for the total water the animal should receive, and the additional volume to hand-deliver is recorded as
+    the experimenter-given water volume.
 
     Args:
         descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
@@ -634,6 +640,18 @@ def finalize_session_descriptor(
     # track a window quality rating.
     if isinstance(descriptor, WindowCheckingDescriptor):
         descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
+    else:
+        # Non-window-checking sessions report the water delivered during the session alongside the animal's current
+        # and previous weights, then prompt for the total water the animal should receive. The returned value is the
+        # additional volume the experimenter must hand-deliver to reach that total, counting only session water.
+        descriptor.experimenter_given_water_volume_ml = collect_experimenter_given_water_volume(
+            current_weight_g=descriptor.animal_weight_g,
+            previous_weight_g=_resolve_previous_animal_weight(
+                persistent_data_path=mesoscope_data.vrpc_data.persistent_data_path
+            ),
+            session_water_volume_ml=descriptor.dispensed_water_volume_ml,
+            default_total_water_volume_ml=_DEFAULT_TOTAL_WATER_VOLUME_ML,
+        )
 
     # Collects the experimenter notes through a blocking terminal prompt and stores them inside the descriptor. The
     # runtime control UI is already shut down at this point, so the prompt runs on the main thread without competing
@@ -650,6 +668,41 @@ def finalize_session_descriptor(
         src=session_data.raw_data.session_descriptor_path,
         dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
+
+
+def _resolve_previous_animal_weight(persistent_data_path: Path) -> float | None:
+    """Returns the animal weight recorded by the most recent non-window-checking session, or None when unavailable.
+
+    Notes:
+        The weight is read from the newest per-session-type descriptor that a prior session cached in the animal's
+        persistent directory. Window checking descriptors are skipped because they do not record the animal's weight.
+        The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData class.
+
+    Args:
+        persistent_data_path: The path to the animal's persistent directory that stores the cached descriptors.
+
+    Returns:
+        The animal weight from the most recent prior session, in grams, or None when no prior session recorded one.
+    """
+    descriptor_file_names = (
+        "lick_training_descriptor.yaml",
+        "run_training_descriptor.yaml",
+        "mesoscope_experiment_descriptor.yaml",
+    )
+    existing_paths = [
+        candidate_path
+        for file_name in descriptor_file_names
+        if (candidate_path := persistent_data_path / file_name).exists()
+    ]
+    if not existing_paths:
+        return None
+
+    newest_path = max(existing_paths, key=lambda path: path.stat().st_mtime)
+    if newest_path.name == descriptor_file_names[0]:
+        return float(LickTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
+    if newest_path.name == descriptor_file_names[1]:
+        return float(RunTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
+    return float(MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
 
 
 def _prompt_red_dot_alignment(previous_value: float) -> float:
