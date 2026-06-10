@@ -23,13 +23,14 @@ from sollertia_shared_assets import (
     AnimalData,
     SessionData,
     SessionTypes,
+    CredentialsTypes,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeExperimentDescriptor,
     get_data_root,
+    get_credentials,
     iter_animal_sessions,
-    get_google_credentials_path,
 )
 from ataraxis_data_structures import delete_directory, transfer_directory
 
@@ -781,7 +782,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     # At least one Google Sheet is configured, so the host-machine is expected to provide valid Google service account
     # credentials. Resolving the path raises a FileNotFoundError if the credentials are missing or invalid, aborting
     # preprocessing.
-    credentials_path = get_google_credentials_path()
+    credentials_path = get_credentials(credentials=CredentialsTypes.GOOGLE)
 
     # Resolves the animal's unique identifier code and loads the session's descriptor file based on the session's type.
     animal_id = int(session_data.animal_id)
