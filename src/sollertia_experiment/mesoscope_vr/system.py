@@ -583,7 +583,6 @@ def create_experiment_configuration_file(
     reward_size: float,
     reward_tone_duration: int,
     puff_duration: int,
-    occupancy_duration: int,
 ) -> None:
     """Creates a Mesoscope-VR experiment configuration file from a task template under the configured data root.
 
@@ -601,7 +600,6 @@ def create_experiment_configuration_file(
         reward_size: The default water reward volume, in microliters, for lick-type trials.
         reward_tone_duration: The default reward tone duration, in milliseconds, for lick-type trials.
         puff_duration: The default gas puff duration, in milliseconds, for occupancy-type trials.
-        occupancy_duration: The default occupancy threshold duration, in milliseconds, for occupancy-type trials.
 
     Raises:
         ValueError: If the target project does not exist under the data root.
@@ -638,7 +636,6 @@ def create_experiment_configuration_file(
         default_reward_size_ul=reward_size,
         default_reward_tone_duration_ms=reward_tone_duration,
         default_puff_duration_ms=puff_duration,
-        default_occupancy_duration_ms=occupancy_duration,
     )
 
     experiment_configuration.to_yaml(file_path=file_path)

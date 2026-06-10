@@ -108,13 +108,6 @@ def configure_system() -> None:  # pragma: no cover
     show_default=True,
     help="Default gas puff duration in milliseconds for occupancy-type trials.",
 )
-@click.option(
-    "--occupancy-duration",
-    type=int,
-    default=1000,
-    show_default=True,
-    help="Default occupancy threshold duration in milliseconds for occupancy-type trials.",
-)
 def configure_experiment(
     project: str,
     experiment: str,
@@ -123,7 +116,6 @@ def configure_experiment(
     reward_size: float,
     reward_tone_duration: int,
     puff_duration: int,
-    occupancy_duration: int,
 ) -> None:  # pragma: no cover
     """Creates a Mesoscope-VR experiment configuration from a task template under the configured data root."""
     create_experiment_configuration_file(
@@ -134,7 +126,6 @@ def configure_experiment(
         reward_size=reward_size,
         reward_tone_duration=reward_tone_duration,
         puff_duration=puff_duration,
-        occupancy_duration=occupancy_duration,
     )
 
 
