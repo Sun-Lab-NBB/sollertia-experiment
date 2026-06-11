@@ -10,13 +10,13 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, con
 from ataraxis_base_utilities import LogLevel, console, convert_scalar_to_bytes
 from sollertia_shared_assets import (
     SessionData,
-    GasPuffTrial,
     SessionTypes,
     TaskTemplate,
-    WaterRewardTrial,
+    MesoscopeGasPuffTrial,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     MesoscopeHardwareState,
+    MesoscopeWaterRewardTrial,
     MesoscopeExperimentDescriptor,
     MesoscopeExperimentConfiguration,
 )
@@ -436,8 +436,8 @@ class MesoscopeVRSystem:
         has_aversive_trials = True
         if visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration is not None:
             trial_structures = self._experiment_configuration.trial_structures.values()
-            has_reinforcing_trials = any(isinstance(trial, WaterRewardTrial) for trial in trial_structures)
-            has_aversive_trials = any(isinstance(trial, GasPuffTrial) for trial in trial_structures)
+            has_reinforcing_trials = any(isinstance(trial, MesoscopeWaterRewardTrial) for trial in trial_structures)
+            has_aversive_trials = any(isinstance(trial, MesoscopeGasPuffTrial) for trial in trial_structures)
 
         # Initializes the runtime control GUI with the appropriate mode and trial type configuration.
         self._ui.start(
@@ -979,7 +979,7 @@ class MesoscopeVRSystem:
                 screens_initially_on=self._microcontrollers.screens.state,
                 recorded_mesoscope_ttl=True,
                 delivered_gas_puffs=any(
-                    isinstance(trial, GasPuffTrial)
+                    isinstance(trial, MesoscopeGasPuffTrial)
                     for trial in self._experiment_configuration.trial_structures.values()
                 ),
                 system_state_codes=MesoscopeVRStates.to_dict(),
@@ -1312,7 +1312,7 @@ class MesoscopeVRSystem:
                 console.error(message=message, error=ValueError)
 
             trial = trial_structures[trial_name]
-            if isinstance(trial, WaterRewardTrial):
+            if isinstance(trial, MesoscopeWaterRewardTrial):
                 reinforcing_rewards.append((float(trial.reward_size_ul), int(trial.reward_tone_duration_ms)))
                 aversive_puff_durations.append(0)
             else:

@@ -16,12 +16,12 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
     SessionData,
-    GasPuffTrial,
     SessionTypes,
-    WaterRewardTrial,
+    MesoscopeGasPuffTrial,
     RunTrainingDescriptor,
     LickTrainingDescriptor,
     WindowCheckingDescriptor,
+    MesoscopeWaterRewardTrial,
     MesoscopeExperimentDescriptor,
 )
 
@@ -153,7 +153,7 @@ class TrialState:
     """Stores the gas puff duration (ms) for each trial, with 0 for trials of the other type."""
 
     # Trial structure configuration.
-    trial_structures: dict[str, WaterRewardTrial | GasPuffTrial] = field(default_factory=dict)
+    trial_structures: dict[str, MesoscopeWaterRewardTrial | MesoscopeGasPuffTrial] = field(default_factory=dict)
     """Maps trial structure names to their configuration objects."""
 
     def trial_completed(self, traveled_distance: float) -> bool:
