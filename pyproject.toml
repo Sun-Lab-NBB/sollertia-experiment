@@ -50,7 +50,7 @@ dependencies = [
     "ataraxis-video-system==3.0.0",
 
     # Sollertia Libraries
-    "sollertia-shared-assets==8.1.0",
+    "sollertia-shared-assets==9.0.0rc1",
 
     # Hardware Control
     "zaber-motion==9.3.1",

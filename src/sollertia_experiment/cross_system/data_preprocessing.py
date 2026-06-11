@@ -268,9 +268,7 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         )
         console.echo(message=message, level=LogLevel.WARNING)
 
-        if not request_confirmation(
-            message=f"Permanently delete all data for session {session_name}?", default=False
-        ):
+        if not request_confirmation(message=f"Permanently delete all data for session {session_name}?", default=False):
             console.echo(message=f"Session {session_name} data purging: Aborted", level=LogLevel.SUCCESS)
             return False
 

@@ -15,9 +15,9 @@ from sollertia_shared_assets import (
     SessionTypes,
     TaskTemplate,
     AcquisitionSystems,
+    MesoscopeExperimentConfiguration,
     get_data_root,
     get_task_templates_directory,
-    MesoscopeExperimentConfiguration,
 )
 from ataraxis_data_structures import YamlConfig
 
