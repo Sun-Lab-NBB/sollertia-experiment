@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from typing import Literal
+from pathlib import Path
+import importlib
 
-# noinspection PyUnusedImports
-from . import (
-    get_tools,  # noqa: F401 - imported to trigger MCP tool registration.
-    mesoscope_vr_tools,  # noqa: F401 - imported to trigger MCP tool registration.
-)
 from .mcp_instance import mcp
 
 __all__ = ["run_server"]
@@ -23,3 +20,18 @@ def run_server(transport: Literal["stdio", "sse", "streamable-http"] = "stdio") 
             and 'streamable-http' for HTTP-based communication.
     """
     mcp.run(transport=transport)
+
+
+def _register_tool_modules() -> None:
+    """Imports every ``*_tools`` module in this package so its ``@mcp.tool()`` decorators register on import.
+
+    Tool modules register their MCP tools purely as an import side effect. Discovering them by the ``_tools`` filename
+    suffix means each acquisition system's ``<system>_tools.py`` module, alongside the hardware-agnostic ``get_tools``
+    module, registers automatically, so adding a new system requires no edit to this module.
+    """
+    package_name = __name__.rpartition(".")[0]
+    for module_path in sorted(Path(__file__).parent.glob("*_tools.py")):
+        importlib.import_module(f"{package_name}.{module_path.stem}")
+
+
+_register_tool_modules()
