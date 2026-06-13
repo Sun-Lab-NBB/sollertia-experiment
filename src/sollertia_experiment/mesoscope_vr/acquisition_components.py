@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from .mesoscope_driver import MesoscopeDriver
 
 
-RESPONSE_DELAY: int = 2000
+RESPONSE_DELAY: int = 500
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 _DEFAULT_TOTAL_WATER_VOLUME_ML: float = 1.0
@@ -447,6 +447,9 @@ def setup_mesoscope(
         connected, this function preloads the persisted reference estimator as an alignment aid, guides the user
         through mounting and alignment, and commands the reference generation once the alignment screenshot appears.
 
+        When a persisted reference already exists for the animal, the function additionally offers to replace it with
+        the snapshot generated during this session, applying the choice once the new reference files are confirmed.
+
     Args:
         session_data: The SessionData instance that defines the session for which the Mesoscope is being prepared.
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
@@ -454,6 +457,10 @@ def setup_mesoscope(
     """
     # Determines whether the acquired session is a Window Checking session.
     window_checking: bool = session_data.session_type == SessionTypes.WINDOW_CHECKING
+
+    # Captures whether the operator chooses to replace the animal's persisted reference (MotionEstimator.me and
+    # fov.roi) with the snapshot generated this session. Defaults to keeping the existing reference.
+    replace_reference: bool = False
 
     # Step 0: Clears out the mesoscope_data directory.
     # Ensures that the mesoscope_data directory is reset before running the mesoscope's preparation sequence. To
@@ -576,6 +583,22 @@ def setup_mesoscope(
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     wait_for_enter(message="Press Enter to continue.")
 
+    # Once the operator confirms the mesoscope is configured, offers to replace the animal's persisted reference with
+    # the snapshot about to be generated. The prompt only appears when a reference already exists; the first reference
+    # for an animal is persisted automatically during preprocessing. The decision is captured here, before the lengthy
+    # generation, because the runtime proceeds directly into the session once the mesoscope is armed.
+    if (
+        mesoscope_data.scanimagepc_data.motion_estimator_path.exists()
+        or mesoscope_data.scanimagepc_data.roi_path.exists()
+    ):
+        replace_reference = request_confirmation(
+            message=(
+                f"Replace the persisted reference (MotionEstimator.me and fov.roi) for animal "
+                f"{session_data.animal_id} with the snapshot generated this session?"
+            ),
+            default=False,
+        )
+
     mesoscope_driver.generate_reference()
 
     # Window checking sessions only need the generated reference files, so they release the mesoscope without acquiring
@@ -607,6 +630,15 @@ def setup_mesoscope(
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         wait_for_enter(message="Press Enter to continue.")
+
+    # Applies the reference-replacement decision captured before generation, copying the freshly generated files over
+    # the animal's persisted reference. Both files are copied together so a previously half-written reference pair is
+    # fully refreshed. The matching mesoscope_positions snapshot is updated during session finalization, so an aborted
+    # session may pair this reference with the previous positions until the next completed session.
+    if replace_reference:
+        shutil.copy2(src=target_files[0], dst=mesoscope_data.scanimagepc_data.motion_estimator_path)
+        shutil.copy2(src=target_files[1], dst=mesoscope_data.scanimagepc_data.roi_path)
+        console.echo(message="Mesoscope reference: Replaced.", level=LogLevel.SUCCESS)
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
 
