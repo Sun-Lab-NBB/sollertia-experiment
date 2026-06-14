@@ -204,25 +204,29 @@ class MesoscopeVRSystem:
             session_data=session_data, system_configuration=self._system_configuration
         )
 
-        # Generates a precursor MesoscopePositions file and dumps it to the session's raw_data directory.
-        # If a previous set of mesoscope position coordinates is available, overwrites the 'default' mesoscope
-        # coordinates with the positions loaded from the snapshot stored inside the persistent_data directory of the
-        # animal.
-        if self._mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
-            # Loading and re-dumping the data updates the contents of the position's file to dynamically integrate any
-            # upstream changes in the sollertia-shared-assets into the file structure.
-            previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
-                file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
-            )
-            previous_mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+        # Generates a precursor MesoscopePositions file and dumps it to the session's raw_data directory. Only
+        # mesoscope experiment sessions image the brain, so the precursor is created exclusively for them. Training
+        # sessions do not use the mesoscope and must not emit mesoscope position snapshots, and window checking
+        # sessions manage their own snapshot through a separate runtime.
+        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+            # If a previous set of mesoscope position coordinates is available, overwrites the 'default' mesoscope
+            # coordinates with the positions loaded from the snapshot stored inside the persistent_data directory of
+            # the animal.
+            if self._mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
+                # Loading and re-dumping the data updates the contents of the position's file to dynamically integrate
+                # any upstream changes in the sollertia-shared-assets into the file structure.
+                previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
+                    file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
+                )
+                previous_mesoscope_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
 
-        # If previous position data is not available, creates a new MesoscopePositions instance with default position
-        # values.
-        else:
-            # Caches the precursor file to the raw_data session directory and to the persistent data directory.
-            precursor = MesoscopePositions()
-            precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
-            precursor.to_yaml(file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path)
+            # If previous position data is not available, creates a new MesoscopePositions instance with default
+            # position values.
+            else:
+                # Caches the precursor file to the raw_data session directory and to the persistent data directory.
+                precursor = MesoscopePositions()
+                precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
+                precursor.to_yaml(file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path)
 
         # Defines the asset used to set and maintain combinations of system and runtime (task) states.
         self._system_state: int = 0
