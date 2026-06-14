@@ -46,11 +46,11 @@ dependencies = [
     "ataraxis-base-utilities==6.0.0",
     "ataraxis-data-structures==6.0.0",
     "ataraxis-transport-layer-pc==4.0.0",
-    "ataraxis-communication-interface==6.0.0rc1",
-    "ataraxis-video-system==4.0.0rc1",
+    "ataraxis-communication-interface==6.0.0",
+    "ataraxis-video-system==4.0.0",
 
     # Sollertia Libraries
-    "sollertia-shared-assets==9.0.0rc2",
+    "sollertia-shared-assets==9.0.0",
 
     # Hardware Control
     "zaber-motion==9.3.1",
