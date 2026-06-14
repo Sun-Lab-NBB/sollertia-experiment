@@ -56,7 +56,6 @@ def describe_dataclass(cls: type, *, seen: frozenset[type] | None = None) -> dic
         hints = {}
 
     schema: dict[str, Any] = {"class": cls.__name__, "fields": {}}
-    # noinspection PyDataclass
     for field_definition in fields(cls):
         type_hint = hints.get(field_definition.name, field_definition.type)
         type_name = type_hint.__name__ if isinstance(type_hint, type) else str(type_hint).replace("typing.", "")

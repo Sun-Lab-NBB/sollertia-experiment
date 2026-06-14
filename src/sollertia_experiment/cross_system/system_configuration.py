@@ -128,7 +128,6 @@ def get_system_configuration_path() -> Path:
         )
         console.error(message=message, error=FileNotFoundError)
         # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
-        # noinspection PyUnreachableCode
         raise FileNotFoundError(message)  # pragma: no cover
 
     return configuration_files[0]
@@ -165,5 +164,4 @@ def get_system_configuration_data() -> SystemConfiguration:
     )
     console.error(message=message, error=ValueError)
     # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
-    # noinspection PyUnreachableCode
     raise ValueError(message)  # pragma: no cover

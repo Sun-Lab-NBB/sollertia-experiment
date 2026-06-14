@@ -666,7 +666,6 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
         )
         console.error(message=message, error=TypeError)
         # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
-        # noinspection PyUnreachableCode
         raise TypeError(message)  # pragma: no cover
     return system_configuration
 

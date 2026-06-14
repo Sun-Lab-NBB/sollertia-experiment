@@ -316,7 +316,6 @@ class LickInterface(ModuleInterface):
         """
         # Currently, only code 51 ModuleData messages are passed to this method. From each, extracts the detected
         # voltage level.
-        # noinspection PyTypeChecker
         detected_voltage: np.uint16 = message.data_object  # type: ignore[assignment]
 
         # Since the sensor is pulled to 0 to indicate the lack of tongue contact, a zero-readout necessarily means no
@@ -791,7 +790,6 @@ class WaterValveInterface(ModuleInterface):
         )
 
         # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes
-        # noinspection PyTupleAssignmentBalance
         parameters, _ = curve_fit(
             f=_power_law_model,  # type: ignore[arg-type]
             xdata=pulse_durations,

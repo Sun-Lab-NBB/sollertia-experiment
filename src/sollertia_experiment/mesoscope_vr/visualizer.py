@@ -140,7 +140,6 @@ class BehaviorVisualizer:
     _event_tick_true = np.uint8(1)
     _event_tick_false = np.uint8(0)
 
-    # noinspection PyTypeChecker
     def __init__(
         self,
     ) -> None:
@@ -206,7 +205,6 @@ class BehaviorVisualizer:
         self._has_reinforcing_trials: bool = True
         self._has_aversive_trials: bool = True
 
-    # noinspection PyTypeChecker,PyUnresolvedReferences
     def open(
         self,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,

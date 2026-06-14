@@ -385,13 +385,11 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._valve_open_button = QPushButton("🔓 Open")
         self._valve_open_button.setToolTip("Open the valve")
-        # noinspection PyUnresolvedReferences
         self._valve_open_button.clicked.connect(self._valve_open)
         self._valve_open_button.setObjectName("valveOpenButton")
 
         self._valve_close_button = QPushButton("🔒 Close")
         self._valve_close_button.setToolTip("Close the valve")
-        # noinspection PyUnresolvedReferences
         self._valve_close_button.clicked.connect(self._valve_close)
         self._valve_close_button.setObjectName("valveCloseButton")
 
@@ -418,7 +416,6 @@ class _MaintenanceUIWindow(QMainWindow):
         self._volume_spinbox.setSuffix(" μL")
         self._volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
         self._volume_spinbox.setMinimumHeight(35)
-        # noinspection PyUnresolvedReferences
         self._volume_spinbox.valueChanged.connect(self._update_reward_volume)
 
         volume_sub_layout.addWidget(volume_label)
@@ -427,7 +424,6 @@ class _MaintenanceUIWindow(QMainWindow):
         # Places the reward button on the right, matching the width of the Close button.
         self._valve_reward_button = QPushButton("💧 Reward")
         self._valve_reward_button.setToolTip("Deliver water reward with specified volume")
-        # noinspection PyUnresolvedReferences
         self._valve_reward_button.clicked.connect(self._valve_reward)
         self._valve_reward_button.setObjectName("rewardButton")
         self._valve_reward_button.setMinimumHeight(35)
@@ -454,7 +450,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._valve_reference_button = QPushButton("🔄 Reference (200 x 5 μL)")
         self._valve_reference_button.setToolTip("Run reference valve calibration (200 pulses x 5 μL)")
-        # noinspection PyUnresolvedReferences
         self._valve_reference_button.clicked.connect(self._valve_reference)
         self._valve_reference_button.setObjectName("referenceButton")
         self._valve_reference_button.setMinimumHeight(35)
@@ -474,7 +469,6 @@ class _MaintenanceUIWindow(QMainWindow):
         self._pulse_duration_spinbox.setSuffix(" ms")
         self._pulse_duration_spinbox.setToolTip("Sets calibration pulse duration. Accepts values between 1 and 200 ms.")
         self._pulse_duration_spinbox.setMinimumHeight(30)
-        # noinspection PyUnresolvedReferences
         self._pulse_duration_spinbox.valueChanged.connect(self._update_pulse_duration)
 
         pulse_duration_layout.addWidget(pulse_label)
@@ -482,7 +476,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._calibrate_button = QPushButton("📊 Calibrate")
         self._calibrate_button.setToolTip("Run valve calibration with specified pulse duration")
-        # noinspection PyUnresolvedReferences
         self._calibrate_button.clicked.connect(self._calibrate)
         self._calibrate_button.setObjectName("calibrateButton")
         self._calibrate_button.setMinimumHeight(35)
@@ -508,13 +501,11 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._brake_lock_button = QPushButton("🔒 Lock Brake")
         self._brake_lock_button.setToolTip("Lock the wheel brake")
-        # noinspection PyUnresolvedReferences
         self._brake_lock_button.clicked.connect(self._brake_lock)
         self._brake_lock_button.setObjectName("brakeLockButton")
 
         self._brake_unlock_button = QPushButton("🔓 Unlock Brake")
         self._brake_unlock_button.setToolTip("Unlock the wheel brake")
-        # noinspection PyUnresolvedReferences
         self._brake_unlock_button.clicked.connect(self._brake_unlock)
         self._brake_unlock_button.setObjectName("brakeUnlockButton")
 
@@ -542,13 +533,11 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._gas_valve_open_button = QPushButton("🔓 Open")
         self._gas_valve_open_button.setToolTip("Open the gas puff valve")
-        # noinspection PyUnresolvedReferences
         self._gas_valve_open_button.clicked.connect(self._gas_valve_open)
         self._gas_valve_open_button.setObjectName("valveOpenButton")
 
         self._gas_valve_close_button = QPushButton("🔒 Close")
         self._gas_valve_close_button.setToolTip("Close the gas puff valve")
-        # noinspection PyUnresolvedReferences
         self._gas_valve_close_button.clicked.connect(self._gas_valve_close)
         self._gas_valve_close_button.setObjectName("valveCloseButton")
 
@@ -575,7 +564,6 @@ class _MaintenanceUIWindow(QMainWindow):
         self._gas_puff_duration_spinbox.setSuffix(" ms")
         self._gas_puff_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
         self._gas_puff_duration_spinbox.setMinimumHeight(35)
-        # noinspection PyUnresolvedReferences
         self._gas_puff_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
         puff_sub_layout.addWidget(gas_puff_label)
@@ -584,7 +572,6 @@ class _MaintenanceUIWindow(QMainWindow):
         # Places the puff button on the right, matching the width of the Close button.
         self._gas_valve_puff_button = QPushButton("💨 Puff")
         self._gas_valve_puff_button.setToolTip("Deliver a gas puff with specified duration")
-        # noinspection PyUnresolvedReferences
         self._gas_valve_puff_button.clicked.connect(self._gas_valve_puff)
         self._gas_valve_puff_button.setObjectName("rewardButton")
         self._gas_valve_puff_button.setMinimumHeight(35)
@@ -604,7 +591,6 @@ class _MaintenanceUIWindow(QMainWindow):
 
         self._terminate_button = QPushButton("✖ Terminate Maintenance")
         self._terminate_button.setToolTip("Gracefully end the maintenance runtime")
-        # noinspection PyUnresolvedReferences
         self._terminate_button.clicked.connect(self._terminate_runtime)
         self._terminate_button.setObjectName("exitButton")
         self._terminate_button.setMinimumHeight(40)
@@ -857,13 +843,11 @@ class _MaintenanceUIWindow(QMainWindow):
         valve states.
         """
         self._monitor_timer = QTimer(self)
-        # noinspection PyUnresolvedReferences
         self._monitor_timer.timeout.connect(self._check_external_state)
         self._monitor_timer.start(_STATE_MONITOR_INTERVAL)
 
     def _check_external_state(self) -> None:
         """Checks for external termination signal and updates valve, calibration, and gas puff status."""
-        # noinspection PyBroadException
         try:
             # Checks for termination.
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):

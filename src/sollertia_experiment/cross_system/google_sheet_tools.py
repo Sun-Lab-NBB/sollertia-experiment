@@ -163,7 +163,6 @@ def _extract_coordinate_value(substring: str) -> float:
     message = f"Unable to extract the anatomical coordinate value from the input substring {substring}."
     console.error(message=message, error=ValueError)
     # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
-    # noinspection PyUnreachableCode
     raise ValueError(message)  # pragma: no cover
 
 
@@ -275,7 +274,6 @@ class SurgeryLog:
 
         # Retrieves all values stored in the first row of the target sheet tab. Each tab represents a particular
         # project. The first row contains the headers for all data columns stored in the sheet.
-        # noinspection PyUnresolvedReferences
         # Extracts the entire first row.
         headers = (
             self._service.spreadsheets()
@@ -315,7 +313,6 @@ class SurgeryLog:
         # Retrieves all animal names (IDs) from the 'ID' column. Each ID is z-filled to a five-digit string for
         # sorting to behave predictably. This data is stored as a tuple of IDs.
         id_column = self._get_column_id("id")
-        # noinspection PyUnresolvedReferences
         animal_ids = (
             self._service.spreadsheets()
             .values()
@@ -371,7 +368,6 @@ class SurgeryLog:
         row_number = animal_index + 2
 
         # Retrieves the entire row of data for the target animal
-        # noinspection PyUnresolvedReferences
         row_data = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
@@ -539,7 +535,6 @@ class SurgeryLog:
 
         cell_range = f"{quality_column}{row_number}"
         body = {"values": [[quality]]}
-        # noinspection PyUnresolvedReferences
         self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._project_name}'!{cell_range}",
@@ -556,7 +551,6 @@ class SurgeryLog:
         row_index_zero_based = row_number - 1
 
         # Gets the sheet ID for the project tab
-        # noinspection PyUnresolvedReferences
         sheet_metadata = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .get(spreadsheetId=self._sheet_id)
@@ -585,7 +579,6 @@ class SurgeryLog:
                     }
                 }
             ]
-            # noinspection PyUnresolvedReferences
             self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
                 spreadsheetId=self._sheet_id,
                 body={"requests": requests},
@@ -666,7 +659,6 @@ class WaterLog:
         )
 
         # Gets all tab names from the sheet metadata
-        # noinspection PyUnresolvedReferences
         sheet_metadata = (
             self._service.spreadsheets().get(spreadsheetId=sheet_id).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
@@ -714,7 +706,6 @@ class WaterLog:
         # Retrieves all values stored in the second row of the Google Sheet tab with the name that matches the target
         # animal ID. Note: this is in contrast to the Surgery data log, where the headers are stored in the first sheet
         # row.
-        # noinspection PyUnresolvedReferences
         # Extracts the entire second row.
         headers = (
             self._service.spreadsheets()
@@ -818,7 +809,6 @@ class WaterLog:
         date_column = self._headers["date"]
 
         # Retrieves all dates from the date column (row 3 and below)
-        # noinspection PyUnresolvedReferences
         date_data = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
@@ -838,7 +828,6 @@ class WaterLog:
         )
         console.error(message=message, error=ValueError)  # Aborts with an error
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
-        # noinspection PyUnreachableCode
         raise ValueError(message)  # pragma: no cover
 
     def _write_value(self, column_name: str, row_index: int, value: float | str) -> None:
@@ -858,7 +847,6 @@ class WaterLog:
             formatted_value = round(float(value), ndigits=1)
 
         body = {"values": [[formatted_value]]}
-        # noinspection PyUnresolvedReferences
         self._service.spreadsheets().values().update(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             range=f"'{self._animal_id}'!{cell_range}",
@@ -890,7 +878,6 @@ class WaterLog:
                 }
             }
         ]
-        # noinspection PyUnresolvedReferences
         self._service.spreadsheets().batchUpdate(  # type: ignore[attr-defined]
             spreadsheetId=self._sheet_id,
             body={"requests": requests},

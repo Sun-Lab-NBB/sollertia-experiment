@@ -197,7 +197,6 @@ def run(ctx: click.Context, user: str, project: str, animal: str, animal_weight:
     ctx.obj["animal_weight"] = animal_weight
 
 
-# noinspection PyUnresolvedReferences
 @run.command("window-checking")
 @click.pass_context
 def window_checking(ctx: click.Context) -> None:
@@ -215,7 +214,6 @@ def window_checking(ctx: click.Context) -> None:
     )
 
 
-# noinspection PyUnresolvedReferences
 @run.command("lick-training")
 @click.option(
     "-t",
@@ -286,7 +284,6 @@ def lick_training(
     )
 
 
-# noinspection PyUnresolvedReferences
 @run.command("run-training")
 @click.option(
     "-t",
@@ -405,7 +402,6 @@ def run_training(
     )
 
 
-# noinspection PyUnresolvedReferences
 @run.command("experiment")
 @click.option(
     "-e",

@@ -79,7 +79,6 @@ _MICROLITERS_PER_MILLILITER: float = 1000.0
 
 # PyCharm does not narrow the Optional `zaber_motors` after assignment (the Optional is required for the finally
 # guard) and resolves the descriptor union to its first member; both are false positives that mypy does not report.
-# noinspection PyTypeChecker
 def window_checking_logic(
     experimenter: str,
     project_name: str,
@@ -284,7 +283,6 @@ def window_checking_logic(
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
 # mis-infers some descriptor fields and numpy scalars; these are false positives that mypy does not report.
-# noinspection PyTypeChecker,PyUnresolvedReferences
 def lick_training_logic(
     experimenter: str,
     project_name: str,
@@ -585,7 +583,6 @@ def lick_training_logic(
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
 # mis-infers some descriptor fields; these are false positives that mypy does not report.
-# noinspection PyTypeChecker,PyUnresolvedReferences
 def run_training_logic(
     experimenter: str,
     project_name: str,
@@ -1024,7 +1021,6 @@ def run_training_logic(
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
 # mis-infers a descriptor field; these are false positives that mypy does not report.
-# noinspection PyTypeChecker,PyUnresolvedReferences
 def experiment_logic(
     experimenter: str,
     project_name: str,
@@ -1324,7 +1320,6 @@ def maintenance_logic() -> None:
 
             # Initializes the interface for the Actor MicroController. The calibration data union is narrower than the
             # interface's declared parameter type; the mismatch is already acknowledged with the type: ignore below.
-            # noinspection PyTypeChecker
             valve: WaterValveInterface = WaterValveInterface(
                 valve_calibration_data=(
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
@@ -1374,7 +1369,6 @@ def maintenance_logic() -> None:
                 console.echo(message=message, level=LogLevel.SUCCESS)
 
             # Initializes the maintenance GUI.
-            # noinspection PyProtectedMember
             ui = MaintenanceControlUI(
                 valve_tracker=valve._valve_tracker,  # noqa: SLF001
                 gas_puff_tracker=gas_puff_valve._puff_tracker,  # noqa: SLF001

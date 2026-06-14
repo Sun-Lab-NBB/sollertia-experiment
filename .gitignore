@@ -200,7 +200,7 @@ cython_debug/
 # OSx
 .DS_Store
 
-# Project files that are part of the general Sun Lab C-Python project architecture that should not be uploaded to and
+# Project files that are part of the general Sollertia platform C-Python project architecture that should not be uploaded to and
 # from Github
 /cmake-build-debug/
 /reports/

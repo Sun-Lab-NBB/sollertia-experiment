@@ -56,9 +56,7 @@ def _register_subcommands() -> None:
     from .get import get  # noqa: PLC0415
     from .mesoscope_vr import mesoscope  # noqa: PLC0415
 
-    # noinspection PyTypeChecker
     sle_cli.add_command(cmd=get)
-    # noinspection PyTypeChecker
     sle_cli.add_command(cmd=mesoscope)
 
 
