@@ -6,7 +6,7 @@ import click
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
-from ataraxis_communication_interface.cli import identify as _identify_microcontrollers
+from ataraxis_communication_interface.interfaces.cli import identify as _identify_microcontrollers
 
 from ..vr_task import UnityBridgeClient
 from ..cross_system import CRCCalculator, discover_zaber_devices

@@ -8,7 +8,7 @@ from contextlib import contextmanager
 
 from ataraxis_video_system import GenicamConfiguration
 from sollertia_shared_assets import SessionData, get_data_root
-from ataraxis_video_system.camera import HarvestersCamera
+from ataraxis_video_system.video import HarvestersCamera
 
 from .mcp_instance import mcp, read_yaml, serialize, probe_writable, describe_dataclass, write_yaml_validated
 from ..mesoscope_vr import (
