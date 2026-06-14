@@ -46,8 +46,8 @@ dependencies = [
     "ataraxis-base-utilities==6.0.0",
     "ataraxis-data-structures==6.0.0",
     "ataraxis-transport-layer-pc==4.0.0",
-    "ataraxis-communication-interface==5.0.0",
-    "ataraxis-video-system==3.0.0",
+    "ataraxis-communication-interface==6.0.0rc1",
+    "ataraxis-video-system==4.0.0rc1",
 
     # Sollertia Libraries
     "sollertia-shared-assets==9.0.0rc2",
@@ -59,7 +59,7 @@ dependencies = [
     "numpy==2.4.6",
     "numba==0.65.1",
     "scipy==1.17.1",
-    "matplotlib==3.10.9",
+    "matplotlib==3.11.0",
 
     # Imaging
     "tifffile==2026.6.1",
@@ -71,14 +71,14 @@ dependencies = [
 
     # Google Sheets API
     "google-api-python-client==2.197.0",
-    "google-auth==2.53.0",
+    "google-auth==2.54.0",
 
     # CLI and Utilities
     "click==8.4.1",
     "questionary==2.1.1",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "tqdm==4.68.1",
+    "tqdm==4.68.2",
     "natsort-rs==0.1.22",
     "pyyaml==6.0.3",
 
