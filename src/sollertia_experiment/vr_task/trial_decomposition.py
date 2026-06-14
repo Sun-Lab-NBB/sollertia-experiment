@@ -74,7 +74,6 @@ class CachedMotifDecomposer:
                 for cached, current in zip(self._cached_motifs, trial_motifs, strict=True)
             )
             if all_equal and self._cached_flat_data is not None and self._cached_distances is not None:
-                # noinspection PyRedundantParentheses, PyTypeChecker
                 return (*self._cached_flat_data, self._cached_distances)
 
         # Sorts motifs by length (longest first) so the greedy decomposer matches longer motifs before shorter ones.
@@ -86,13 +85,9 @@ class CachedMotifDecomposer:
         total_size: int = sum(len(motif) for motif in trial_motifs)
         motif_count: int = len(trial_motifs)
 
-        # noinspection PyTypeChecker
         motifs_flat: NDArray[np.uint8] = np.zeros(total_size, dtype=np.uint8)
-        # noinspection PyTypeChecker
         motif_starts: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
-        # noinspection PyTypeChecker
         motif_lengths: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
-        # noinspection PyTypeChecker
         motif_indices: NDArray[np.int32] = np.zeros(motif_count, dtype=np.int32)
 
         current_position: int = 0
@@ -110,7 +105,6 @@ class CachedMotifDecomposer:
         self._cached_flat_data = (motifs_flat, motif_starts, motif_lengths, motif_indices)
         self._cached_distances = distances_array
 
-        # noinspection PyTypeChecker, PyRedundantParentheses
         return (*self._cached_flat_data, distances_array)
 
 
@@ -212,7 +206,6 @@ def _decompose_sequence_numba_flat(
         matched at some position. The third element is the cue sequence position at which decomposition stopped, which
         is the failure position when the second element is -1.
     """
-    # noinspection PyTypeChecker
     trial_indices: NDArray[np.int32] = np.zeros(max_trials, dtype=np.int32)
     trial_count = 0
     sequence_position = 0

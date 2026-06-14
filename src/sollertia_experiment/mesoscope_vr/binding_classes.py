@@ -585,7 +585,6 @@ class VideoSystems:
             body.
     """
 
-    # noinspection PyTypeChecker
     def __init__(
         self,
         data_logger: DataLogger,

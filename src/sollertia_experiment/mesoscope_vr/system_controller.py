@@ -316,7 +316,6 @@ class MesoscopeVRSystem:
 
         # Initializes but does not start the assets used by all runtimes. These assets need to be started in a
         # specific order, which is handled by the start() method.
-        # noinspection PyProtectedMember
         self._ui: RuntimeControlUI = RuntimeControlUI(
             valve_tracker=self._microcontrollers.valve._valve_tracker,  # noqa: SLF001
             gas_puff_tracker=self._microcontrollers.gas_puff_valve._puff_tracker,  # noqa: SLF001
@@ -1687,7 +1686,6 @@ class MesoscopeVRSystem:
         # descriptor union accepted by the
         # runtime is a strict subset of the union accepted by finalize_session_descriptor, so the assignment is
         # type-safe.
-        # noinspection PyTypeChecker
         finalize_session_descriptor(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
         )

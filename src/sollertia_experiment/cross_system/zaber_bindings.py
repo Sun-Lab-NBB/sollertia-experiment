@@ -904,7 +904,6 @@ class ZaberConnection:
     def is_connected(self) -> bool:
         """Returns True if the class has established connection with the managed serial port."""
         if self._connection is not None and self._is_connected:
-            # noinspection PyBroadException
             try:
                 # Tries to detect available devices using the connection. If the connection is broken, this will
                 # necessarily fail with an error.

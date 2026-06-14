@@ -649,7 +649,6 @@ class _ControlUIWindow(QMainWindow):
             event: The Qt-generated window shutdown event instance.
         """
         # Sends a runtime termination signal via the SharedMemoryArray before accepting the close event.
-        # noinspection PyBroadException
         with contextlib.suppress(Exception):
             self._data_array[_DataArrayIndex.TERMINATION] = 1
         if event is not None:
@@ -672,13 +671,11 @@ class _ControlUIWindow(QMainWindow):
 
         self._exit_button = QPushButton("✖ Terminate Runtime")
         self._exit_button.setToolTip("Gracefully ends the runtime and initiates the shutdown procedure.")
-        # noinspection PyUnresolvedReferences
         self._exit_button.clicked.connect(self._exit_runtime)
         self._exit_button.setObjectName("exitButton")
 
         self._pause_button = QPushButton("▶️ Resume Runtime")
         self._pause_button.setToolTip("Pauses or resumes the runtime.")
-        # noinspection PyUnresolvedReferences
         self._pause_button.clicked.connect(self._toggle_pause)
         self._pause_button.setObjectName("resumeButton")
 
@@ -693,7 +690,6 @@ class _ControlUIWindow(QMainWindow):
         if self._mode == VisualizerMode.EXPERIMENT and self._has_reinforcing_trials:
             reinforcing_guidance_button = QPushButton("🎯 Enable Reinforcing Guidance")
             reinforcing_guidance_button.setToolTip("Toggles reinforcing trial guidance mode on or off.")
-            # noinspection PyUnresolvedReferences
             reinforcing_guidance_button.clicked.connect(self._toggle_reinforcing_guidance)
             reinforcing_guidance_button.setObjectName("reinforcingGuidanceButton")
             reinforcing_guidance_button.setMinimumHeight(35)
@@ -706,7 +702,6 @@ class _ControlUIWindow(QMainWindow):
         if self._mode == VisualizerMode.EXPERIMENT and self._has_aversive_trials:
             aversive_guidance_button = QPushButton("🎯 Enable Aversive Guidance")
             aversive_guidance_button.setToolTip("Toggles aversive trial guidance mode on or off.")
-            # noinspection PyUnresolvedReferences
             aversive_guidance_button.clicked.connect(self._toggle_aversive_guidance)
             aversive_guidance_button.setObjectName("aversiveGuidanceButton")
             aversive_guidance_button.setMinimumHeight(35)
@@ -737,19 +732,16 @@ class _ControlUIWindow(QMainWindow):
 
         self._valve_open_button = QPushButton("🔓 Open")
         self._valve_open_button.setToolTip("Opens the solenoid valve.")
-        # noinspection PyUnresolvedReferences
         self._valve_open_button.clicked.connect(self._open_valve)
         self._valve_open_button.setObjectName("valveOpenButton")
 
         self._valve_close_button = QPushButton("🔒 Close")
         self._valve_close_button.setToolTip("Closes the solenoid valve.")
-        # noinspection PyUnresolvedReferences
         self._valve_close_button.clicked.connect(self._close_valve)
         self._valve_close_button.setObjectName("valveCloseButton")
 
         self._reward_button = QPushButton("● Reward")
         self._reward_button.setToolTip("Delivers 5 uL of water through the solenoid valve.")
-        # noinspection PyUnresolvedReferences
         self._reward_button.clicked.connect(self._deliver_reward)
         self._reward_button.setObjectName("rewardButton")
 
@@ -776,7 +768,6 @@ class _ControlUIWindow(QMainWindow):
         self._volume_spinbox.setSuffix(" μL")
         self._volume_spinbox.setToolTip("Sets water reward volume. Accepts values between 1 and 20 μL.")
         self._volume_spinbox.setMinimumHeight(30)
-        # noinspection PyUnresolvedReferences
         self._volume_spinbox.valueChanged.connect(self._update_reward_volume)
 
         # Adds volume controls to the left side.
@@ -816,19 +807,16 @@ class _ControlUIWindow(QMainWindow):
 
             gas_valve_open_button = QPushButton("🔓 Open")
             gas_valve_open_button.setToolTip("Opens the gas puff valve.")
-            # noinspection PyUnresolvedReferences
             gas_valve_open_button.clicked.connect(self._gas_valve_open)
             gas_valve_open_button.setObjectName("gasValveOpenButton")
 
             gas_valve_close_button = QPushButton("🔒 Close")
             gas_valve_close_button.setToolTip("Closes the gas puff valve.")
-            # noinspection PyUnresolvedReferences
             gas_valve_close_button.clicked.connect(self._gas_valve_close)
             gas_valve_close_button.setObjectName("gasValveCloseButton")
 
             gas_puff_button = QPushButton("💨 Puff")
             gas_puff_button.setToolTip("Delivers a gas puff with the specified duration.")
-            # noinspection PyUnresolvedReferences
             gas_puff_button.clicked.connect(self._gas_valve_puff)
             gas_puff_button.setObjectName("gasPuffButton")
 
@@ -855,7 +843,6 @@ class _ControlUIWindow(QMainWindow):
             gas_duration_spinbox.setSuffix(" ms")
             gas_duration_spinbox.setToolTip("Sets gas puff duration. Accepts values between 10 and 350 ms.")
             gas_duration_spinbox.setMinimumHeight(30)
-            # noinspection PyUnresolvedReferences
             gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
             # Adds duration controls to the left side.
@@ -912,7 +899,6 @@ class _ControlUIWindow(QMainWindow):
             speed_spinbox.setSuffix(" cm/s")
             speed_spinbox.setToolTip("Sets the target running speed threshold, in centimeters per second.")
             speed_spinbox.setMinimumHeight(30)
-            # noinspection PyUnresolvedReferences
             speed_spinbox.valueChanged.connect(self._update_speed_modifier)
             speed_layout.addWidget(speed_spinbox)
 
@@ -929,7 +915,6 @@ class _ControlUIWindow(QMainWindow):
             duration_spinbox.setValue(limits.minimum_duration_s)
             duration_spinbox.setSuffix(" s")
             duration_spinbox.setToolTip("Sets the target running epoch duration threshold, in seconds.")
-            # noinspection PyUnresolvedReferences
             duration_spinbox.valueChanged.connect(self._update_duration_modifier)
             duration_layout.addWidget(duration_spinbox)
 
@@ -1338,7 +1323,6 @@ class _ControlUIWindow(QMainWindow):
     def _setup_monitoring(self) -> None:
         """Sets up a QTimer to monitor the runtime termination status."""
         self._monitor_timer = QTimer(self)
-        # noinspection PyUnresolvedReferences
         self._monitor_timer.timeout.connect(self._check_external_state)
         self._monitor_timer.start(_UI_REFRESH_INTERVAL_MS)
 
@@ -1346,7 +1330,6 @@ class _ControlUIWindow(QMainWindow):
         """Checks the state of externally addressable UI elements and updates the managed GUI to reflect the
         externally driven changes.
         """
-        # noinspection PyBroadException
         try:
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
                 self.close()

@@ -482,7 +482,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
 
     # Writes the metadata as a JSON file.
     with metadata_path.open(mode="w") as json_file:
-        # noinspection PyTypeChecker
         json.dump(obj=metadata, fp=json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
     # Extracts the mesoscope frame_rate from metadata.
@@ -522,7 +521,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
 
     # Creates an array that stores the start and end row indices for each ROI.
     roi_rows = np.zeros(shape=(2, roi_number), dtype=np.int32)
-    # noinspection PyTypeChecker
     cumulative_row_indices = np.concatenate([[0], np.cumsum(roi_heights + flyback_pixels)])
     # Stores the first line index for each ROI.
     roi_rows[0] = cumulative_row_indices[:-1]
@@ -545,7 +543,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
 
     # Saves the generated config as a JSON file (cindra_parameters).
     with cindra_parameters_path.open(mode="w") as parameters_file:
-        # noinspection PyTypeChecker
         json.dump(obj=data, fp=parameters_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
@@ -725,7 +722,6 @@ def _preprocess_mesoscope_directory(
     # Processes each tiff stack in parallel.
     with ProcessPoolExecutor(max_workers=processes) as executor:
         # Submits all tasks and tracks futures.
-        # noinspection PyTypeChecker
         futures = {executor.submit(process_func, tiff_file, frame_number) for tiff_file, frame_number in valid_stacks}
 
         # Displays a progress bar that tracks the frame processing.
