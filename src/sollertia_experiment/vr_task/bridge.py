@@ -6,9 +6,14 @@ from __future__ import annotations
 
 import json
 from typing import Literal
+import logging
 from pathlib import Path
 
 import httpx
+
+# Silences httpx's per-request INFO logging so the bridge's frequent localhost HTTP calls do not flood the runtime
+# console with redundant request records.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _BRIDGE_HOST: str = "127.0.0.1"
 """The loopback host the sollertia-unity-tasks editor MCP Bridge binds its HTTP listener to. The bridge only accepts
