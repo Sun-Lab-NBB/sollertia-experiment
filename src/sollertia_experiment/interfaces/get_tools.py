@@ -159,7 +159,7 @@ def check_mount_accessibility_tool(path: str) -> str:
         A formatted string reporting existence, mount status, and writability, or an error description.
     """
     target = Path(path)
-    if str(target) in ("", "."):
+    if not target.is_absolute():
         return f"Error: Path '{path}' is empty or relative; provide an absolute path."
     if not target.exists():
         return f"Path: {target} | Exists: False | OK: False"

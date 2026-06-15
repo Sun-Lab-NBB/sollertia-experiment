@@ -122,6 +122,9 @@ class TrialState:
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
     """Stores the total cumulative distance, in centimeters, the animal will have traveled at the end of each trial."""
+    current_trial_guided: bool = False
+    """Tracks whether the trial currently in progress is running under guidance, captured when the trial's stimulus
+    fires so the trial outcome can be labeled correctly even after the guided-trial counter is decremented."""
 
     # Reinforcing (water reward) trial tracking.
     reinforcing_guided_trials: int = 0
@@ -209,6 +212,9 @@ class TrialState:
         # Captures trial type BEFORE incrementing to update the correct failure counters.
         is_aversive = self.is_current_trial_aversive()
         self.completed += 1
+
+        # Clears the per-trial guidance capture so the next trial starts unguided until its stimulus sets it.
+        self.current_trial_guided = False
 
         if is_aversive:
             # Aversive trial: success = met occupancy requirement (no puff delivered).

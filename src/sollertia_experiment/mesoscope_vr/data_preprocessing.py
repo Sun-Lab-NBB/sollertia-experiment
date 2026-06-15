@@ -285,19 +285,25 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
 
     console.echo(message="Migrating persistent data directories...")
     # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
-    # data, if any was resolved for any processed session.
+    # data, if any was resolved for any processed session. Skips the move when the mesoscope directory is unconfigured
+    # (an unset root resolves to an unsafe relative path, matching the deletion guard below) or when the source
+    # directory was never created, which is the case for animals that never ran a mesoscope-imaging session or for an
+    # accidental re-run after a prior migration already moved the data.
     old_path = filesystem.mesoscope_directory.joinpath(source_project, animal)
     new_path = filesystem.mesoscope_directory.joinpath(target_project, animal)
-    if new_path.exists():
-        shutil.rmtree(new_path)
-    shutil.move(src=old_path, dst=new_path)
+    if filesystem.mesoscope_directory != Path() and old_path.exists():
+        if new_path.exists():
+            shutil.rmtree(new_path)
+        shutil.move(src=old_path, dst=new_path)
 
-    # Also moves the VRPC persistent data for the animal between projects.
+    # Also moves the VRPC persistent data for the animal between projects. Skips the move when the source persistent
+    # directory was never created for this animal.
     old_path = source_animal.persistent_data_path
     new_path = destination_animal.persistent_data_path
-    if new_path.exists():
-        shutil.rmtree(new_path)
-    shutil.move(src=old_path, dst=new_path)
+    if old_path.exists():
+        if new_path.exists():
+            shutil.rmtree(new_path)
+        shutil.move(src=old_path, dst=new_path)
 
     # Removes the old animal directory from the acquisition host machine and all configured long-term storage
     # destinations. This also removes any lingering data not moved during the migration process, ensuring that each

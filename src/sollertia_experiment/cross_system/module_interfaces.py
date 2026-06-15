@@ -805,6 +805,9 @@ class WaterValveInterface(ModuleInterface):
         self._previous_module_state: bool = False
         # Reflects what this interface last commanded the module to do.
         self._configured_valve_state: bool = False
+        # The 0.0 initial value is a deliberate sentinel: it is below the valve's dispensable minimum, so it can never
+        # match a real commanded volume. This forces the first deliver_reward() to re-send the valve parameters and
+        # actually configure the firmware. Do not initialize this to a valid volume (see simulate_reward()).
         self._previous_volume: float = 0.0
         self._previous_tone_duration: int = 0
         self._cycle_timer: PrecisionTimer | None = None
@@ -923,8 +926,13 @@ class WaterValveInterface(ModuleInterface):
             # Parameters are cached here to use the tone_duration before it is converted to microseconds.
             self._previous_tone_duration = tone_duration
 
-            # Maintains the same pulse duration.
-            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=self._previous_volume)
+            # Reuses the last commanded reward volume to keep the valve pulse duration consistent with real rewards.
+            # Before the first deliver_reward(), _previous_volume is still the 0.0 sentinel, which is below the
+            # dispensable minimum; falls back to the default reward volume so get_duration_from_volume does not reject
+            # it. The valve never opens during a simulated reward, so the exact pulse duration is immaterial, and the
+            # sentinel is left unchanged so the next deliver_reward() still re-sends the valve parameters.
+            reference_volume = self._previous_volume if self._previous_volume > 0.0 else 5.0
+            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=reference_volume)
             tone_duration_us: np.uint32 = np.uint32(
                 round(
                     convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)

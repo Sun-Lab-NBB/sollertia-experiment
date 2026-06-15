@@ -348,7 +348,11 @@ class SurgeryLog:
 
     def __del__(self) -> None:
         """Terminates the HTTP connection to the processed surgery log when the instance is garbage-collected."""
-        self._service.close()
+        # Guards the close because __init__ may fail before _service is assigned (e.g. an invalid credentials path),
+        # which would otherwise raise a confusing secondary AttributeError that masks the original error.
+        service = getattr(self, "_service", None)
+        if service is not None:
+            service.close()
 
     def extract_animal_data(self) -> SurgeryData:
         """Extracts and returns the processed animal's surgical intervention data as a SurgeryData object.
@@ -426,8 +430,8 @@ class SurgeryLog:
                 drugs.append(
                     DrugData(
                         drug=drug_name,
-                        drug_volume_ml=drug_volume,
-                        drug_code=str(animal_data.get(f"{column_stem} code", 0)),
+                        drug_volume_ml=float(drug_volume),
+                        drug_code=str(animal_data.get(f"{column_stem} code") or 0),
                     )
                 )
 
@@ -478,7 +482,7 @@ class SurgeryLog:
                     ImplantData(
                         implant=implant_name,
                         implant_target=animal_data[f"{base_key} location"],
-                        implant_code=str(animal_data.get(f"{base_key} code", 0)),
+                        implant_code=str(animal_data.get(f"{base_key} code") or 0),
                         implant_ap_coordinate_mm=ap,
                         implant_ml_coordinate_mm=ml,
                         implant_dv_coordinate_mm=dv,
@@ -503,8 +507,8 @@ class SurgeryLog:
                     InjectionData(
                         injection=injection_name,
                         injection_target=animal_data[f"{base_key} location"],
-                        injection_volume_nl=animal_data[f"{base_key} volume (nl)"],
-                        injection_code=str(animal_data.get(f"{base_key} code", 0)),
+                        injection_volume_nl=float(animal_data[f"{base_key} volume (nl)"]),
+                        injection_code=str(animal_data.get(f"{base_key} code") or 0),
                         injection_ap_coordinate_mm=ap,
                         injection_ml_coordinate_mm=ml,
                         injection_dv_coordinate_mm=dv,
@@ -768,7 +772,11 @@ class WaterLog:
         """Terminates the HTTP connection to the processed water restriction and animal interaction log when the
         instance is garbage-collected.
         """
-        self._service.close()
+        # Guards the close because __init__ may fail before _service is assigned (e.g. an invalid credentials path),
+        # which would otherwise raise a confusing secondary AttributeError that masks the original error.
+        service = getattr(self, "_service", None)
+        if service is not None:
+            service.close()
 
     def update_water_log(self, weight: float, water_ml: float, experimenter_id: str, session_type: str) -> None:
         """Updates the processed data acquisition session's row in the processed log file with the input animal's data.

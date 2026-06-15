@@ -915,9 +915,10 @@ class MesoscopeVRSystem:
         self._trial_state.reinforcing_recovery_threshold = recovery_mode_threshold
         self._trial_state.reinforcing_recovery_trials = recovery_guided_trials
 
-        # Enables reinforcing guidance via direct GUI manipulation.
-        if initial_guided_trials > 0:
-            self._ui.set_reinforcing_guidance_state(enabled=True)
+        # Synchronizes the reinforcing guidance GUI state to the configured value. Setting it unconditionally (rather
+        # than only when enabling) ensures a state configured for zero guided trials explicitly disables any guidance
+        # carried over from a previous experiment state.
+        self._ui.set_reinforcing_guidance_state(enabled=initial_guided_trials > 0)
 
     def setup_aversive_guidance(
         self, initial_guided_trials: int = 0, recovery_mode_threshold: int = 9, recovery_guided_trials: int = 3
@@ -939,9 +940,10 @@ class MesoscopeVRSystem:
         self._trial_state.aversive_recovery_threshold = recovery_mode_threshold
         self._trial_state.aversive_recovery_trials = recovery_guided_trials
 
-        # Enables aversive guidance via direct GUI manipulation.
-        if initial_guided_trials > 0:
-            self._ui.set_aversive_guidance_state(enabled=True)
+        # Synchronizes the aversive guidance GUI state to the configured value. Setting it unconditionally (rather
+        # than only when enabling) ensures a state configured for zero guided trials explicitly disables any guidance
+        # carried over from a previous experiment state.
+        self._ui.set_aversive_guidance_state(enabled=initial_guided_trials > 0)
 
     @property
     def terminated(self) -> bool:
@@ -1383,10 +1385,13 @@ class MesoscopeVRSystem:
                 is_aversive = self._trial_state.is_current_trial_aversive()
                 if is_aversive:
                     succeeded = self._trial_state.aversive_succeeded
-                    was_guided = self._trial_state.aversive_guided_trials > 0
                 else:
                     succeeded = self._trial_state.reinforcing_rewarded
-                    was_guided = self._trial_state.reinforcing_guided_trials > 0
+
+                # Reads the guidance flag captured when the trial's stimulus fired (in _unity_cycle) rather than
+                # re-deriving it from the guided-trial counter, which the stimulus has already decremented. This keeps
+                # the last guided trial of each block from being mislabeled as non-guided.
+                was_guided = self._trial_state.current_trial_guided
 
                 failed_count = self._trial_state.advance_trial()
 
@@ -1447,6 +1452,14 @@ class MesoscopeVRSystem:
                 puff_duration = self._trial_state.get_current_puff_duration()
                 self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
 
+                # Configures the visualizer to display the gas puff valve activation event during the next update cycle.
+                self._visualizer.add_puff_event()
+
+                # Captures whether this trial is guided before decrementing the counter, so _data_cycle can label the
+                # outcome correctly even for the last guided trial of a block (where the decrement would otherwise zero
+                # the counter before the completion handler reads it).
+                self._trial_state.current_trial_guided = self._trial_state.aversive_guided_trials > 0
+
                 # Decrements the guided trial counter for aversive trials.
                 if self._trial_state.aversive_guided_trials > 0:
                     self._trial_state.aversive_guided_trials -= 1
@@ -1459,6 +1472,11 @@ class MesoscopeVRSystem:
                 # Reinforcing trial: delivers the water reward.
                 reward_size, tone_duration = self._trial_state.get_current_reward()
                 self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
+
+                # Captures whether this trial is guided before decrementing the counter, so _data_cycle can label the
+                # outcome correctly even for the last guided trial of a block (where the decrement would otherwise zero
+                # the counter before the completion handler reads it).
+                self._trial_state.current_trial_guided = self._trial_state.reinforcing_guided_trials > 0
 
                 # Decrements the guided trial counter for reinforcing trials.
                 if self._trial_state.reinforcing_guided_trials > 0:

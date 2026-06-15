@@ -487,6 +487,11 @@ class MicroControllerInterfaces:
         message = "Initializing Ataraxis Micro Controller (AMC) Interfaces..."
         console.echo(message=message, level=LogLevel.INFO)
 
+        # Marks the interfaces as started before bringing up the individual controllers so that a failure partway
+        # through the bring-up still routes through stop(), which tears down whichever controllers already started.
+        # Each controller's stop() self-guards, so stopping a controller that never started is a no-op.
+        self._started = True
+
         self._actor.start()
         self._sensor.start()
         self._encoder.start()
@@ -532,8 +537,6 @@ class MicroControllerInterfaces:
         self.mesoscope_frame.set_parameters(
             averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size),
         )
-
-        self._started = True
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Initialized."
         console.echo(message=message, level=LogLevel.SUCCESS)
