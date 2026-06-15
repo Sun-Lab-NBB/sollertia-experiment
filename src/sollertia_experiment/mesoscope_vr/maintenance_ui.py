@@ -77,7 +77,7 @@ class _DataArrayIndex(IntEnum):
 
 
 class _ValveTrackerIndex(IntEnum):
-    """Defines the indices of the ValveModule's valve_tracker SharedMemoryArray read by the maintenance GUI."""
+    """Defines the indices of the WaterValveInterface's valve_tracker SharedMemoryArray read by the maintenance GUI."""
 
     TOTAL_VOLUME = 0
     """Stores the cumulative volume of water dispensed by the valve during runtime."""
@@ -107,16 +107,16 @@ class MaintenanceControlUI:
         instance methods to start the UI process.
 
     Args:
-        valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count and valve open/close state to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer data between the UI process
             and the maintenance runtime process.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count and valve open/close state to other processes.
         _ui_process: The Process instance running the GUI cycle.
@@ -142,7 +142,7 @@ class MaintenanceControlUI:
         self._started: bool = False
 
     def __del__(self) -> None:
-        """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
+        """Terminates the UI process and releases the instance's shared memory buffer when garbage-collected."""
         self.shutdown()
         # Does not disconnect or destroy the trackers as they are owned by their respective interfaces.
 
@@ -307,8 +307,8 @@ class _MaintenanceUIWindow(QMainWindow):
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes during runtime.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             data to other processes during runtime.
         _reward_in_progress: Tracks whether a reward delivery is in progress.

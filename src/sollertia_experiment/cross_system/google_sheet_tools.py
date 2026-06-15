@@ -363,7 +363,7 @@ class SurgeryLog:
         """
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
-        # header row
+        # header row.
         animal_index = self._animals.index(str(self._animal_id).zfill(5))
         row_number = animal_index + 2
 
@@ -391,7 +391,7 @@ class SurgeryLog:
 
         # Parses the animal data and packages it into the SurgeryData instance:
 
-        # Subject Data. We expect all subject data headers to always be present in all surgery sheets.
+        # Subject Data. All subject data headers are expected to be present in every surgery sheet.
         subject_data = SubjectData(
             id=animal_data["id"],
             ear_punch=animal_data["ear punch"],
@@ -404,7 +404,7 @@ class SurgeryLog:
             status=animal_data["status"],
         )
 
-        # Procedure Data. Similar to subject data, we expect all required headers to be present for all procedures.
+        # Procedure Data. As with subject data, all required headers are expected to be present for every procedure.
         procedure_data = ProcedureData(
             surgery_start_us=_convert_date_time_to_timestamp(date=animal_data["date"], time=animal_data["start"]),
             surgery_end_us=_convert_date_time_to_timestamp(date=animal_data["date"], time=animal_data["end"]),
@@ -511,7 +511,7 @@ class SurgeryLog:
                     )
                 )
 
-        # Aggregates all data into a SurgeryData instance and returns it to caller
+        # Aggregates all data into a SurgeryData instance and returns it to the caller.
         return SurgeryData(
             subject=subject_data, procedure=procedure_data, drugs=drugs, implants=implants, injections=injections
         )
@@ -531,7 +531,7 @@ class SurgeryLog:
         quality_column = self._get_column_id("surgery quality")
 
         animal_index = self._animals.index(str(self._animal_id).zfill(5))
-        row_number = animal_index + 2  # +2 to account for header row and 0-indexing
+        row_number = animal_index + 2  # +2 to account for the header row and 0-indexing.
 
         cell_range = f"{quality_column}{row_number}"
         body = {"values": [[quality]]}
@@ -547,7 +547,7 @@ class SurgeryLog:
         column_index = 0
         for char in quality_column.upper():  # type: ignore[union-attr]
             column_index = column_index * 26 + (ord(char) - ord("A") + 1)
-        column_index -= 1  # Convert to 0-based index
+        column_index -= 1
         row_index_zero_based = row_number - 1
 
         # Gets the sheet ID for the project tab
@@ -623,6 +623,7 @@ class WaterLog:
         _sheet_id: The unique identifier of the water restriction and animal interaction log Google Sheet.
         _service: The API service instance that bidirectionally interfaces with the log.
         _animals: Stores the unique identifiers of all animals whose data is stored in the log.
+        _animal_id: The unique identifier of the target animal.
         _headers: Maps the water restriction and animal interaction log headers (column names) to the Excel-style
             Google Sheet column letters (A, B, etc.).
         _animal_tab_id: The unique identifier of the log's tab that stores the target animal's data.
@@ -674,7 +675,7 @@ class WaterLog:
             tab_name = tab["properties"]["title"]
             tab_id = tab["properties"]["sheetId"]
 
-            if tab_name.isdigit():  # Checks if the tab name contains only digits
+            if tab_name.isdigit():
                 animal_ids.append(tab_name)
 
                 # If this tab matches the target animal ID, stores its numeric sheet ID to the attribute
@@ -819,7 +820,7 @@ class WaterLog:
 
         for index, date_cell in enumerate(date_values):
             if date_cell and date_cell[0] == target_date:
-                # Adds 3 to account for 0-indexing and the fact we started from row 3
+                # Adds 3 to account for 0-indexing and the row-3 starting offset.
                 return index + 3
         message = (
             f"Unable to find the row for the target date {target_date} inside the water restriction and "
@@ -836,7 +837,7 @@ class WaterLog:
         Args:
             column_name: The name of the column to write to.
             row_index: The row index (1-based) to write to.
-            value: The value to write.
+            value: The value to write into the target spreadsheet cell.
         """
         column_letter = self._headers[column_name.lower()]
         cell_range = f"{column_letter}{row_index}"
@@ -859,7 +860,7 @@ class WaterLog:
         column_index = 0
         for char in column_letter.upper():
             column_index = column_index * 26 + (ord(char) - ord("A") + 1)
-        column_index -= 1  # Converts to 0-based index
+        column_index -= 1
         row_index_zero_based = row_index - 1
 
         # Applies formatting to the newly written value using the cached sheet ID

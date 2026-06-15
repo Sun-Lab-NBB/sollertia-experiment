@@ -271,8 +271,8 @@ class VRTaskDriver:
         """Forwards the latest animal position to Unity as a movement delta.
 
         Notes:
-            The driver internally tracks the last position reported to Unity and only emits an MQTT message when the
-            position has changed.
+            The driver internally tracks the last absolute position passed to this method and only emits an MQTT
+            message when the position has changed.
 
         Args:
             absolute_position: The current absolute position of the animal, in Unity units, relative to the origin of

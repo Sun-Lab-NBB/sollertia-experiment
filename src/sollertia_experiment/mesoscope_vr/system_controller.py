@@ -76,6 +76,10 @@ _MICROLITERS_PER_MILLILITER: float = 1000.0
 """The number of microliters in a single milliliter, used to convert dispensed water volumes from microliters to
 milliliters."""
 
+_MILLISECONDS_PER_SECOND: float = 1000.0
+"""The number of milliseconds in a single second, used to convert the per-window traveled distance into a running speed
+expressed in centimeters per second."""
+
 
 class MesoscopeVRSystem:
     """Provides methods for conducting data acquisition sessions using the Mesoscope-VR system.
@@ -122,7 +126,7 @@ class MesoscopeVRSystem:
         _lick_count: The total number of licks performed by the animal since runtime onset.
         _unconsumed_reward_count: The number of rewards delivered to the animal that have not yet been consumed
             by the animal.
-        _pause_start_time: The absolute time, in microseconds elapsed since the UTC epoch onset, of the last
+        _pause_start_time: The absolute time, in microseconds elapsed since the runtime onset, of the last
             runtime pause onset.
         paused_time: The total time, in seconds, the session's data acquisition runtime spent in the paused
             (idle) state.
@@ -132,9 +136,10 @@ class MesoscopeVRSystem:
             acquisition onset.
         _mesoscope_terminated: Tracks whether the system has detected that the Mesoscope has unexpectedly
             terminated its runtime.
-        _running_speed: The animal's running speed, in centimeters per second, computed over the last 50 milliseconds.
-        _speed_timer: The PrecisionTimer instance used to compute the animal's running speed in 50-millisecond
-            intervals.
+        _running_speed: The animal's running speed, in centimeters per second, computed over the configured
+            speed-calculation window.
+        _speed_timer: The PrecisionTimer instance used to time the speed-calculation window when computing the
+            animal's running speed.
         _paused_water_volume: Tracks the total volume of water, in microliters, dispensed by the water delivery valve
             when the session's data acquisition was paused.
         _logger: The DataLogger instance that logs the data from all sources managed by the Mesoscope-VR instance.
@@ -748,7 +753,7 @@ class MesoscopeVRSystem:
 
         Notes:
             In this state, the brake is engaged and the screens are turned off. The encoder sensor is
-            disabled, and the torque sensor is enabled.
+            disabled, and the torque and lick sensors are enabled.
 
             Calling this method automatically switches the runtime state to 255 (active training).
         """
@@ -775,8 +780,8 @@ class MesoscopeVRSystem:
         """Switches the Mesoscope-VR system to the run training state.
 
         Notes:
-            In this state, the brake is disengaged and the screens are turned off. The encoder sensor is
-            enabled, and the torque sensor is disabled.
+            In this state, the brake is disengaged and the screens are turned off. The encoder and lick sensors
+            are enabled, and the torque sensor is disabled.
 
             Calling this method automatically switches the runtime state to 255 (active training).
         """
@@ -838,8 +843,8 @@ class MesoscopeVRSystem:
         )
 
     def resolve_reward(self, reward_size: float = 5.0, tone_duration: int = 300) -> bool:
-        """Depending on the current number of unconsumed rewards and runtime configuration, either delivers or simulates
-        the requested volume of water reward.
+        """Delivers or simulates the requested volume of water reward, depending on the current number of unconsumed
+        rewards and the runtime configuration.
 
         Args:
             reward_size: The volume of water to deliver, in microliters.
@@ -1101,7 +1106,6 @@ class MesoscopeVRSystem:
         """
         # Continuously retries starting the mesoscope acquisition until successful.
         while True:
-            # Resets the frame counter.
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
 
             # Verifies that the mesoscope is not already acquiring frames.
@@ -1185,7 +1189,6 @@ class MesoscopeVRSystem:
             if self._microcontrollers.mesoscope_frame.pulse_count == 0:
                 break
 
-            # Resets counter and continues monitoring.
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
 
     def _change_system_state(self, new_state: int) -> None:
@@ -1357,10 +1360,13 @@ class MesoscopeVRSystem:
         traveled_distance = self._microcontrollers.wheel_encoder.traveled_distance
         current_position = self._microcontrollers.wheel_encoder.absolute_position
 
-        # Updates running speed over ~50 millisecond windows.
+        # Updates running speed over the configured speed-calculation window.
         if self._speed_timer.elapsed >= self._speed_calculation_window:
             self._speed_timer.reset()
-            running_speed = np.float64(((traveled_distance - self._distance) / 100) * 1000)
+            # Converts the centimeters traveled during the window into centimeters per second. The window is expressed
+            # in milliseconds, so the per-window distance is scaled by (1000 ms / window) to normalize to one second.
+            distance_delta = traveled_distance - self._distance
+            running_speed = np.float64(distance_delta * _MILLISECONDS_PER_SECOND / self._speed_calculation_window)
             self._distance = traveled_distance
             self._running_speed = running_speed
             self._visualizer.update_running_speed(running_speed=running_speed)
@@ -1570,7 +1576,6 @@ class MesoscopeVRSystem:
         if not self._ui.pause_runtime:
             self._ui.set_pause_state(paused=True)
 
-        # Records pause onset time.
         self._pause_start_time = self._timestamp_timer.elapsed
 
         # Switches the Mesoscope-VR system into the idle state.
@@ -1640,7 +1645,6 @@ class MesoscopeVRSystem:
         elif self._system_state == MesoscopeVRStates.RUN_TRAINING:
             self.run_train()
 
-        # Resets the paused flag.
         self._paused = False
 
     def _terminate_runtime(self) -> None:

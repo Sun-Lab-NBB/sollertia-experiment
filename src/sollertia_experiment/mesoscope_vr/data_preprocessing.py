@@ -67,7 +67,7 @@ when parsing mesoscope-generated metadata. This schema is statically written to 
 used by the Mesoscope-VR system."""
 
 _IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
-"""Stores the frame-invariant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
+"""Stores the frame-variant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
 
 _PREPROCESSING_WORKER_COUNT: int = 31
 """The number of parallel processes and threads used for the compute- and disk-bound preprocessing steps (log
@@ -231,6 +231,9 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         animal: The animal for which to migrate the data.
         source_project: The name of the project from which to migrate the data.
         target_project: The name of the project to which the data should be migrated.
+
+    Raises:
+        FileNotFoundError: If the target project does not exist on the host machine.
     """
     console.echo(message=f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
 
@@ -435,7 +438,7 @@ def _process_stack(
         start_frame = first_frame_number
         end_frame = first_frame_number + stack_size - 1
 
-        # Creates the output path for the compressed stack, using configured digit padding for frame numbering.
+        # Creates the output path for the compressed stack, using fixed 6-digit zero-padding for frame numbering.
         output_path = output_directory.joinpath(f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff")
 
         # Calculates the total number of batches required to fully process the stack.
@@ -466,12 +469,12 @@ def _process_stack(
 
 def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: Path, metadata_path: Path) -> None:
     """Extracts the frame-invariant ScanImage metadata from the target mesoscope frame stack TIFF file and uses it to
-    generate the metadata.json and cindra_parameters.json files.
+    generate the frame_invariant_metadata.json and cindra_parameters.json files.
 
     Args:
         frame_stack_path: The path to the TIFF file that stores a stack of the mesoscope-acquired frames.
         cindra_parameters_path: The path to the cindra_parameters.json file to be created.
-        metadata_path: The path to the metadata.json file to be created.
+        metadata_path: The path to the frame_invariant_metadata.json file to be created.
     """
     # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
     # all frames and stacks.
@@ -480,7 +483,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         # Loads the data for the first frame in the stack to generate cindra_parameters.json.
         frame_data = tiff.asarray(key=0)
 
-    # Writes the metadata as a JSON file.
     with metadata_path.open(mode="w") as json_file:
         json.dump(obj=metadata, fp=json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
@@ -497,10 +499,10 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
 
     # Extracts the ROI dimensions for each ROI.
     roi_number = len(rois)
-    roi_heights = np.array([roi["scanfields"]["pixelResolutionXY"][1] for roi in rois])
-    roi_widths = np.array([roi["scanfields"]["pixelResolutionXY"][0] for roi in rois])
-    roi_centers = np.array([roi["scanfields"]["centerXY"][::-1] for roi in rois])
-    roi_sizes = np.array([roi["scanfields"]["sizeXY"][::-1] for roi in rois])
+    roi_heights = np.array([roi["scanfields"]["pixelResolutionXY"][1] for roi in rois], dtype=np.int64)
+    roi_widths = np.array([roi["scanfields"]["pixelResolutionXY"][0] for roi in rois], dtype=np.int64)
+    roi_centers = np.array([roi["scanfields"]["centerXY"][::-1] for roi in rois], dtype=np.float64)
+    roi_sizes = np.array([roi["scanfields"]["sizeXY"][::-1] for roi in rois], dtype=np.float64)
 
     # Transforms ROI coordinates into pixel-units, while maintaining accurate relative positions for each ROI.
     # Shifts ROI coordinates to mark the top left corner.
@@ -522,9 +524,7 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
     # Creates an array that stores the start and end row indices for each ROI.
     roi_rows = np.zeros(shape=(2, roi_number), dtype=np.int32)
     cumulative_row_indices = np.concatenate([[0], np.cumsum(roi_heights + flyback_pixels)])
-    # Stores the first line index for each ROI.
     roi_rows[0] = cumulative_row_indices[:-1]
-    # Stores the last line index for each ROI.
     roi_rows[1] = roi_rows[0] + roi_heights
 
     # Extracts the invariant data necessary for the cindra processing pipeline to be able to load and work with the
@@ -541,7 +541,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         ],
     }
 
-    # Saves the generated config as a JSON file (cindra_parameters).
     with cindra_parameters_path.open(mode="w") as parameters_file:
         json.dump(obj=data, fp=parameters_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
@@ -561,6 +560,10 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
         mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
             Mesoscope-VR data acquisition system.
         threads: The number of parallel threads to use for transferring the data.
+
+    Raises:
+        RuntimeError: If any required mesoscope files (MotionEstimator.me, fov.roi, zstack.tiff) are missing from the
+            session's ScanImagePC directory.
     """
     # Determines the source directory that stores the session's data on the ScanImagePC.
     session_name = session_data.session_name
@@ -746,7 +749,7 @@ def _preprocess_mesoscope_directory(
 
 def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: MesoscopeGoogleSheets) -> None:
     """Updates the water restriction log to include the processed session's data and adds the animal's
-    surgical intervention record to the session's data directory as the surgery_data.yaml file.
+    surgical intervention record to the session's data directory as the surgery_metadata.yaml file.
 
     Notes:
         Google Sheets processing is optional and gated on the configured sheet identifiers. If neither sheet identifier
@@ -804,7 +807,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
 
     # Loads the session's descriptor data.
     descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
-    descriptor = descriptor_class.from_yaml(descriptor_path)  # type: ignore[attr-defined]
+    descriptor = descriptor_class.from_yaml(file_path=descriptor_path)  # type: ignore[attr-defined]
 
     # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file, if
     # the surgery log Google Sheet is configured. The returned handle reuses the established Google Sheets connection
@@ -944,7 +947,7 @@ def _migrate_sessions_via_destination(
             # deletion by creating the 'nk.bin' marker and then calls the purge pipeline on that session.
             old_session_data = SessionData.load(session_path=old_session_data_path.parents[1])
             old_session_data.raw_data.nk_path.touch()
-            purge_session(old_session_data)
+            purge_session(session_data=old_session_data)
             migrated = True
         finally:
             # On a failed or interrupted migration, removes the in-flight source-project session directory recreated

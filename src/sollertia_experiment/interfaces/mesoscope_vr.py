@@ -2,9 +2,9 @@
 system.
 
 This module combines all Mesoscope-VR-specific interfaces into a single command group: system configuration
-('configure'), system maintenance ('maintain'), data acquisition sessions ('run'), and session data management
-('preprocess', 'delete', 'migrate'). The general, hardware-agnostic discovery commands are exposed separately via the
-'sle get' command group.
+('configure'), system maintenance ('maintain'), checking the mesoscope control bridge ('check-bridge'), data
+acquisition sessions ('run'), and session data management ('preprocess', 'delete', 'migrate'). The general,
+hardware-agnostic discovery commands are exposed separately via the 'sle get' command group.
 """
 
 from pathlib import Path
@@ -37,7 +37,8 @@ def mesoscope() -> None:  # pragma: no cover
     """Configures, runs, and manages the Mesoscope-VR data acquisition system.
 
     This command group exposes every Mesoscope-VR-specific runtime: generating the system configuration file,
-    performing system maintenance, running data acquisition sessions, and managing the data collected by the system.
+    performing system maintenance, checking the mesoscope control bridge, running data acquisition sessions, and
+    managing the data collected by the system.
     """
 
 
@@ -417,7 +418,8 @@ def run_training(
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking."
+        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "Defaults to 1."
     ),
 )
 @click.pass_context

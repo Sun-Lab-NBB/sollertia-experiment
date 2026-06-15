@@ -41,7 +41,7 @@ _DURATION_THRESHOLD_SCALE: int = 1000
 """Converts between seconds and the millisecond integer units used to store the runtime-driven duration threshold
 inside the integer shared memory array.
 """
-_MODIFIER_STEP_CM_S: float = 0.01
+_MODIFIER_STEP: float = 0.01
 """The resolution represented by a single increment of the threshold modifiers: 0.01 cm/s for the speed modifier and
 0.01 s (10 ms) for the duration modifier.
 """
@@ -99,7 +99,7 @@ class _DataArrayIndex(IntEnum):
 
 
 class _WaterValveTrackerIndex(IntEnum):
-    """Defines the indices of the water delivery valve tracker SharedMemoryArray managed by the ValveModule."""
+    """Defines the indices of the water delivery valve tracker SharedMemoryArray managed by the WaterValveInterface."""
 
     OPEN_STATE = 2
     """Stores the valve open/close state (0 - closed, 1 - open)."""
@@ -123,16 +123,16 @@ class RuntimeControlUI:
         methods to start the UI process.
 
     Args:
-        valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             state to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             state to other processes.
         _mode: The VisualizerMode that determines which UI elements are enabled.
@@ -149,7 +149,7 @@ class RuntimeControlUI:
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state.
         prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance.
         prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance.
-        prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 uL rewards.
+        prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 μL rewards.
         prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100  # Preconfigures gas puff delivery to use 100 ms puffs.
 
         self._data_array: SharedMemoryArray = SharedMemoryArray.create_array(
@@ -241,7 +241,7 @@ class RuntimeControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Note: Does not disconnect trackers here - they're owned by their respective interfaces and disconnecting
+        # Does not disconnect the trackers here. They are owned by their respective interfaces, and disconnecting
         # them would break access to delivered_volume when generating the session descriptor during shutdown.
 
         self._started = False
@@ -274,8 +274,8 @@ class RuntimeControlUI:
         """Signals the GUI that the initial setup phase is complete and the runtime has started.
 
         Notes:
-            Once setup is complete, the valve open/close buttons are permanently disabled for the remainder of the
-            runtime. This method should be called after the initial checkpoint loop exits.
+            Once setup is complete, the water and gas valve open/close buttons are permanently disabled for the
+            remainder of the runtime. This method should be called after the initial checkpoint loop exits.
         """
         self._data_array[_DataArrayIndex.SETUP_COMPLETE] = 1
 
@@ -392,6 +392,9 @@ class RuntimeControlUI:
             mode: The VisualizerMode that determines which UI elements are enabled.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
             has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+
+        Raises:
+            RuntimeError: If the GUI application for the runtime control interface cannot be initialized.
         """
         self._data_array.connect()
         self._valve_tracker.connect()
@@ -543,8 +546,8 @@ class _ControlUIWindow(QMainWindow):
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes during runtime.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             data to other processes during runtime.
         _mode: The VisualizerMode that determines which UI elements are enabled.
@@ -741,7 +744,7 @@ class _ControlUIWindow(QMainWindow):
         self._valve_close_button.setObjectName("valveCloseButton")
 
         self._reward_button = QPushButton("● Reward")
-        self._reward_button.setToolTip("Delivers 5 uL of water through the solenoid valve.")
+        self._reward_button.setToolTip("Delivers 5 μL of water through the solenoid valve.")
         self._reward_button.clicked.connect(self._deliver_reward)
         self._reward_button.setObjectName("rewardButton")
 
@@ -1321,7 +1324,9 @@ class _ControlUIWindow(QMainWindow):
                 """)
 
     def _setup_monitoring(self) -> None:
-        """Sets up a QTimer to monitor the runtime termination status."""
+        """Sets up a QTimer that periodically polls the externally addressable shared-memory state (termination, pause,
+        guidance, setup-complete, run-training thresholds, and valve states) to refresh the GUI.
+        """
         self._monitor_timer = QTimer(self)
         self._monitor_timer.timeout.connect(self._check_external_state)
         self._monitor_timer.start(_UI_REFRESH_INTERVAL_MS)
@@ -1459,7 +1464,7 @@ class _ControlUIWindow(QMainWindow):
         # recover the requested value, so the offset is preserved as the runtime component progresses.
         target_speed = self._speed_spinbox.value()
         auto_speed = int(self._data_array[_DataArrayIndex.RUNTIME_SPEED_THRESHOLD]) / _SPEED_THRESHOLD_SCALE
-        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = round((target_speed - auto_speed) / _MODIFIER_STEP_CM_S)
+        self._data_array[_DataArrayIndex.SPEED_MODIFIER] = round((target_speed - auto_speed) / _MODIFIER_STEP)
 
     def _update_duration_modifier(self) -> None:
         """Converts the user-requested absolute running epoch duration threshold into the modifier offset consumed by
@@ -1472,9 +1477,7 @@ class _ControlUIWindow(QMainWindow):
         # recover the requested value, so the offset is preserved as the runtime component progresses.
         target_duration = self._duration_spinbox.value()
         auto_duration = int(self._data_array[_DataArrayIndex.RUNTIME_DURATION_THRESHOLD]) / _DURATION_THRESHOLD_SCALE
-        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = round(
-            (target_duration - auto_duration) / _MODIFIER_STEP_CM_S
-        )
+        self._data_array[_DataArrayIndex.DURATION_MODIFIER] = round((target_duration - auto_duration) / _MODIFIER_STEP)
 
     def _sync_run_training_spinbox(
         self,
@@ -1509,7 +1512,7 @@ class _ControlUIWindow(QMainWindow):
         # threshold. Blocks signals to avoid recomputing the modifier from this programmatic value change.
         modifier = int(self._data_array[modifier_index])
         with QSignalBlocker(spinbox):
-            spinbox.setValue(auto_raw / divisor + modifier * _MODIFIER_STEP_CM_S)
+            spinbox.setValue(auto_raw / divisor + modifier * _MODIFIER_STEP)
         return auto_raw
 
     @staticmethod

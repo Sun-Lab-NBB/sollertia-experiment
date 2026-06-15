@@ -121,7 +121,7 @@ class TrialState:
     completed: int = 0
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
-    """Stores the total cumulative distance, in centimeters, the animals would travel at the end of each trial."""
+    """Stores the total cumulative distance, in centimeters, the animal will have traveled at the end of each trial."""
 
     # Reinforcing (water reward) trial tracking.
     reinforcing_guided_trials: int = 0

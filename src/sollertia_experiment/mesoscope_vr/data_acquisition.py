@@ -169,7 +169,7 @@ def window_checking_logic(
         # Initializes the data logger. This initialization follows the same procedure as the MesoscopeVRSystem class.
         logger = DataLogger(
             output_directory=session_data.raw_data_path,
-            # Creates the behavior_log subdirectory under raw_data.
+            # Creates the behavior_data_log subdirectory under raw_data.
             instance_name="behavior",
             thread_count=10,
         )
@@ -1182,7 +1182,6 @@ def experiment_logic(
         for state in experiment_config.experiment_states.values():
             runtime_timer.reset()
 
-            # Sets the Experiment state.
             system.change_runtime_state(new_state=state.experiment_state_code)
 
             # Resets the tracker used to update the progress bar every second.
@@ -1400,19 +1399,15 @@ def maintenance_logic() -> None:
                 if ui.valve_calibrate_signal:
                     valve.calibrate_valve(pulse_duration=ui.calibration_pulse_duration)
 
-                # Locks the wheel brake.
                 if ui.brake_lock_signal:
                     wheel.set_state(state=True)
 
-                # Unlocks the wheel brake.
                 if ui.brake_unlock_signal:
                     wheel.set_state(state=False)
 
-                # Opens the gas puff valve.
                 if ui.gas_valve_open_signal:
                     gas_puff_valve.set_state(state=True)
 
-                # Closes the gas puff valve.
                 if ui.gas_valve_close_signal:
                     gas_puff_valve.set_state(state=False)
 
@@ -1435,7 +1430,7 @@ def maintenance_logic() -> None:
                 )
                 console.echo(message=message, level=LogLevel.WARNING)
 
-                # Delays for 2 seconds to ensure the user reads the message before continuing.
+                # Delays for 500 milliseconds to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
                 wait_for_enter(message="Press Enter to continue.")
