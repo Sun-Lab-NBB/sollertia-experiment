@@ -44,8 +44,8 @@ from ..cross_system import (
     GasPuffValveInterface,
     wait_for_enter,
     get_version_data,
-    request_confirmation,
     get_project_experiments,
+    request_required_confirmation,
 )
 from .maintenance_ui import MaintenanceControlUI
 from .binding_classes import ZaberMotors, VideoSystems
@@ -1294,7 +1294,7 @@ def maintenance_logic() -> None:
         message="Do you want to position the managed Zaber motors for valve calibration or referencing procedure?",
         level=LogLevel.INFO,
     )
-    move_zaber_motors: bool = request_confirmation(message="Position the managed Zaber motors?", default=False)
+    move_zaber_motors: bool = request_required_confirmation(message="Position the managed Zaber motors?")
 
     # All calibration procedures are executed in a temporary directory deleted after runtime.
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:

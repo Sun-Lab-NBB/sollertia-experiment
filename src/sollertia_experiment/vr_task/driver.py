@@ -4,11 +4,10 @@ Virtual Reality task.
 
 from __future__ import annotations
 
-import sys
 from enum import IntEnum, StrEnum
 import json
-import select
 from typing import TYPE_CHECKING
+import threading
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -566,7 +565,7 @@ class VRTaskDriver:
         message = (
             "Verify the Virtual Reality scene on the VR screens. The scene animates continuously; fix any display "
             "issues now, including starting and stopping the scene through the editor, which does not interrupt the "
-            "animation. Press Enter only once you are fully satisfied that the display renders correctly."
+            "animation."
         )
         console.echo(message=message, level=LogLevel.INFO)
         self._animate_until_satisfied()
@@ -579,24 +578,31 @@ class VRTaskDriver:
         self._arm_unity()
 
     def _animate_until_satisfied(self) -> None:
-        """Sends incremental position updates to Unity until the operator presses Enter to signal satisfaction.
+        """Animates the Virtual Reality scene on a background thread until the operator confirms the display.
 
         Notes:
-            The method polls standard input without blocking between position updates so the Virtual Reality scene
-            keeps animating on the VR screens while it waits for the operator. The pending MQTT buffer is drained
-            each cycle so it does not accumulate the messages the verification animation does not consume.
+            The animation runs on a background thread so the foreground can block on the shared wait_for_enter prompt
+            while the Virtual Reality scene keeps scrolling on the VR screens. Driving the MQTT client from the thread
+            is safe because its publish path and inbound message queue are both thread-safe. The thread stops as soon
+            as the operator presses Enter, and the pending MQTT buffer is drained each cycle so the verification
+            animation does not accumulate the messages it does not consume.
         """
-        while True:
-            self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
+        stop_animation = threading.Event()
 
-            payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
-            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
-            self._clear_buffer()
+        def animate() -> None:
+            while not stop_animation.is_set():
+                self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
+                payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
+                self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
+                self._clear_buffer()
 
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if ready:
-                sys.stdin.readline()
-                return
+        animation_thread = threading.Thread(target=animate, daemon=True)
+        animation_thread.start()
+        try:
+            wait_for_enter(message="Press Enter once you are satisfied that the display renders correctly.")
+        finally:
+            stop_animation.set()
+            animation_thread.join()
 
     def _wait_for_topic(self, expected_topic: str) -> bytes | bytearray:
         """Blocks until Unity sends a message on the specified topic and returns the payload."""

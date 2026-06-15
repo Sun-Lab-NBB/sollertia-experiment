@@ -12,7 +12,7 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
 
-from .terminal_prompts import request_confirmation
+from .terminal_prompts import request_required_confirmation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -770,8 +770,9 @@ class ZaberDevice:
             )
             console.echo(message=message, level=LogLevel.WARNING)
 
-            # Blocks until the user confirms or declines the unsupervised reset procedure.
-            if not request_confirmation(message="Proceed with initializing this motor?", default=False):
+            # Blocks until the user confirms or declines the unsupervised reset procedure. The prompt has no default,
+            # so an accidental empty Enter cannot silently decide whether this motor is initialized.
+            if not request_required_confirmation(message="Proceed with initializing this motor?"):
                 message = (
                     f"Unsafe automatic reset procedure for the {self._controller.label} "
                     f"({self._controller.name}) device: Declined. Manually set the value of the shutdown tracker "

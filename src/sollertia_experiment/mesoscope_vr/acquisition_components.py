@@ -27,7 +27,7 @@ from sollertia_shared_assets import (
 
 from .system import MesoscopeData, MesoscopePositions
 from .runtime_ui import collect_surgery_quality, collect_experimenter_notes, collect_experimenter_given_water_volume
-from ..cross_system import request_text, wait_for_enter, request_confirmation
+from ..cross_system import request_text, wait_for_enter, request_confirmation, request_required_confirmation
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -320,8 +320,9 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until the operator confirms or declines the Zaber motor setup sequence.
-    if not request_confirmation(message="Carry out the Zaber motor setup sequence?", default=False):
+    # Blocks until the operator confirms or declines the Zaber motor setup sequence. The prompt has no default, so an
+    # accidental empty Enter cannot silently skip positioning the motors.
+    if not request_required_confirmation(message="Carry out the Zaber motor setup sequence?"):
         # Aborts method runtime, as no further Zaber setup is required.
         return
 
@@ -411,8 +412,9 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence.
-    if not request_confirmation(message="Carry out the Zaber motor shutdown sequence?", default=False):
+    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence. The prompt has no default, so
+    # an accidental empty Enter cannot silently choose whether the motors are parked.
+    if not request_required_confirmation(message="Carry out the Zaber motor shutdown sequence?"):
         # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
         # before disconnecting.
         zaber_motors.disconnect()

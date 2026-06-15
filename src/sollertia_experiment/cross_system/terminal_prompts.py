@@ -18,6 +18,13 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
+_AFFIRMATIVE_RESPONSES: frozenset[str] = frozenset({"y", "yes"})
+"""The lowercased responses interpreted as confirmation by request_required_confirmation."""
+
+_NEGATIVE_RESPONSES: frozenset[str] = frozenset({"n", "no"})
+"""The lowercased responses interpreted as rejection by request_required_confirmation."""
+
+
 def wait_for_enter(message: str = "Press Enter to continue.") -> None:
     """Blocks runtime execution until the user presses the Enter key.
 
@@ -44,6 +51,25 @@ def request_confirmation(message: str, *, default: bool = False) -> bool:
     _flush_input_buffer()
     response: bool = questionary.confirm(message=message, default=default, auto_enter=False).unsafe_ask()
     return response
+
+
+def request_required_confirmation(message: str) -> bool:
+    """Prompts the user to confirm or decline an action, re-prompting until an explicit yes or no is entered.
+
+    Unlike request_confirmation, this prompt has no default response. Submitting an empty or unrecognized answer
+    re-displays the question instead of falling back to a default, which forces the user to make a deliberate choice.
+    This suits high-stakes actions, such as Zaber motor positioning, where an accidental Enter keypress must not
+    silently select an outcome.
+
+    Args:
+        message: The yes-or-no question presented to the user.
+
+    Returns:
+        True if the user confirmed the action, False if the user declined it.
+    """
+    _flush_input_buffer()
+    response: str = questionary.text(message=message, default="", validate=_validate_confirmation_response).unsafe_ask()
+    return response.strip().lower() in _AFFIRMATIVE_RESPONSES
 
 
 def request_text(message: str, *, default: str = "", multiline: bool = False, validate: Any = None) -> str:
@@ -78,6 +104,20 @@ def request_selection(message: str, choices: Sequence[questionary.Choice | str])
     _flush_input_buffer()
     response: Any = questionary.select(message=message, choices=list(choices)).unsafe_ask()
     return response
+
+
+def _validate_confirmation_response(response: str) -> bool | str:
+    """Validates a yes-or-no response, accepting only explicit affirmative or negative answers.
+
+    Args:
+        response: The raw text entered by the user.
+
+    Returns:
+        True when the response is a recognized yes or no answer, or an error message describing the constraint.
+    """
+    if response.strip().lower() in _AFFIRMATIVE_RESPONSES | _NEGATIVE_RESPONSES:
+        return True
+    return "Enter 'yes' or 'no'."
 
 
 def _flush_input_buffer() -> None:
