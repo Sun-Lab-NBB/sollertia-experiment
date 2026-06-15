@@ -527,7 +527,7 @@ def collect_experimenter_given_water_volume(
 
     console.echo(
         message=f"Hand-deliver {water_to_give_ml} ml to reach the {total_water_volume_ml} ml session total.",
-        level=LogLevel.INFO,
+        level=LogLevel.WARNING,
     )
     return water_to_give_ml
 

@@ -58,7 +58,7 @@ _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
 _TRIAL_HISTORY_SIZE: int = 20
 """The number of trials to display in the trial performance panel."""
 
-_SPEED_AXIS_YLIM: tuple[float, float] = (-2.0, 42.0)
+_SPEED_AXIS_YLIM: tuple[float, float] = (-5.0, 105.0)
 """The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
 _BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
 """The lower and upper Y-axis bounds for the binary state plots (lick, valve, and air puff)."""

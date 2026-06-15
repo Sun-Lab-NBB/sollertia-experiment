@@ -278,8 +278,11 @@ function preloadEstimator(hSI, hSICtl, payload, root)
     % Aborts any active acquisition before reconfiguring the motion manager.
     hSI.abort();
 
-    % Resets the motion manager and configures it to use the Marius motion-correction classes.
+    % Resets the motion manager and configures it to use the Marius motion-correction classes. Both the existing
+    % estimators and the existing ROI group are cleared before the persisted estimator is loaded, so the loaded
+    % estimator's ROIs replace the current selection instead of being appended to it.
     hSI.hMotionManager.clearAndDeleteEstimators();
+    hSI.hRoiManager.currentRoiGroup.clear
     hSI.hMotionManager.estimatorClassName = 'scanimage.components.motionEstimators.MariusMotionEstimator';
     hSI.hMotionManager.correctorClassName = 'scanimage.components.motionCorrectors.MariusMotionCorrector2';
 

@@ -103,9 +103,10 @@ class EncoderInterface(ModuleInterface):
 
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
-        # Pre-creates a shared memory array used to track and share the absolute distance, in centimeters, traveled by
-        # the animal since class initialization and the current absolute position of the animal in centimeters relative
-        # to the onset position.
+        # Pre-creates a shared memory array that shares two encoder metrics with other processes: the absolute distance
+        # traveled by the animal since class initialization, in centimeters (index 0), and the signed encoder
+        # displacement relative to the onset position, in pulses, used to derive the animal's Unity-space position
+        # (index 1).
         self._distance_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{int(self._module_type)}_{int(self._module_id)}_distance_tracker",
             prototype=np.zeros(shape=2, dtype=np.float64),
@@ -144,10 +145,6 @@ class EncoderInterface(ModuleInterface):
         _ccw_rotation_code = 51
         sign = 1 if message.event == _ccw_rotation_code else -1
 
-        # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
-        # using the precomputed conversion factor.
-        unity_motion = message.data_object * self._unity_unit_per_pulse * sign
-
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
         # traveled distance regardless of the traveled direction.
         cm_motion = message.data_object * self._cm_per_pulse
@@ -155,9 +152,11 @@ class EncoderInterface(ModuleInterface):
         # Increments the total distance traveled by the animal.
         self._distance_tracker[0] += cm_motion
 
-        # Updates the current absolute position of the animal in the VR environment (given relative to experiment onset
-        # position 0).
-        self._distance_tracker[1] += unity_motion
+        # Accumulates the signed encoder displacement, in pulses, that encodes the animal's position relative to the
+        # experiment onset. The pulse-to-Unity-unit conversion is deferred to the absolute_position property because
+        # set_unity_scale() configures the conversion factor on the main process after this communication process has
+        # already started, so the updated factor is not visible here.
+        self._distance_tracker[1] += np.float64(message.data_object) * sign
 
     def set_parameters(
         self,
@@ -201,8 +200,14 @@ class EncoderInterface(ModuleInterface):
 
     @property
     def absolute_position(self) -> np.float64:
-        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset."""
-        return np.float64(self._distance_tracker[1])
+        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset.
+
+        Notes:
+            The position scales the signed encoder displacement accumulated in the shared memory buffer by the current
+            Unity conversion factor. The scaling is applied here, on the main process, because set_unity_scale()
+            updates the factor after the communication process that fills the buffer has already started.
+        """
+        return np.float64(self._distance_tracker[1] * self._unity_unit_per_pulse)
 
     @property
     def traveled_distance(self) -> np.float64:
@@ -219,8 +224,8 @@ class EncoderInterface(ModuleInterface):
 
         Notes:
             VR-experiment runtimes call this method at experiment-start with the cm-per-Unity-unit conversion factor
-            loaded from the VR TaskTemplate. The new value takes effect on the next encoder message processed by
-            the interface.
+            loaded from the VR TaskTemplate. The factor is stored on the main process and applied when the
+            absolute_position property is read, so it can be updated after the communication process has started.
 
         Args:
             cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in
