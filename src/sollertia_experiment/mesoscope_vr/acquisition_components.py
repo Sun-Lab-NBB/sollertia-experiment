@@ -605,7 +605,23 @@ def setup_mesoscope(
             default=False,
         )
 
-    mesoscope_driver.generate_reference()
+    # Reference generation can fail for operator-fixable reasons reported by the ScanImagePC (for example, no active ROI
+    # within the scanner FOV). Surfacing the exact ScanImagePC error and holding here for a retry lets the operator
+    # correct the issue on the spot, rather than propagating the error into a session teardown and data purge.
+    while True:
+        try:
+            mesoscope_driver.generate_reference()
+            break
+        except RuntimeError as error:
+            message = (
+                f"Mesoscope reference generation failed. {error} Address the issue on the ScanImagePC (for example, "
+                f"ensure at least one active ROI with a scanfield exists within the scanner FOV), then retry. Select "
+                f"'no' to abort the session and shut down."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+            if not request_confirmation(message="Retry mesoscope reference generation?", default=True):
+                raise
 
     # Window checking sessions only need the generated reference files, so they release the mesoscope without acquiring
     # any session frames.

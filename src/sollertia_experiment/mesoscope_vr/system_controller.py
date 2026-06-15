@@ -1633,9 +1633,21 @@ class MesoscopeVRSystem:
                 "acquisition."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            self._mesoscope.recover()
-
-            self._start_mesoscope()
+            try:
+                self._mesoscope.recover()
+                self._start_mesoscope()
+            except RuntimeError as error:
+                # A failed re-arm (for example, the ScanImagePC still reports no active ROI) must drop the runtime back
+                # into the emergency pause rather than propagate out and tear down the live session. Re-engaging the GUI
+                # pause flag holds the runtime in the paused cycle so the operator can correct the issue and resume
+                # again. The 'paused' and 'mesoscope_terminated' trackers are intentionally left set by the early return.
+                message = (
+                    f"Mesoscope re-arm failed. {error} Resolve the issue on the ScanImagePC, then resume the runtime "
+                    f"again to retry. Alternatively, terminate the runtime to attempt a graceful shutdown."
+                )
+                console.echo(message=message, level=LogLevel.ERROR)
+                self._ui.set_pause_state(paused=True)
+                return
 
             # Resets the termination tracker if Mesoscope acquisition restarts successfully.
             self._mesoscope_terminated = False
