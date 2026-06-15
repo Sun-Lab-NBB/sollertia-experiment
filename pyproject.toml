@@ -46,8 +46,8 @@ dependencies = [
     "ataraxis-base-utilities==6.0.0",
     "ataraxis-data-structures==6.0.0",
     "ataraxis-transport-layer-pc==4.0.0",
-    "ataraxis-communication-interface==6.0.0",
-    "ataraxis-video-system==4.0.0",
+    "ataraxis-communication-interface==6.0.1",
+    "ataraxis-video-system==4.0.1",
 
     # Sollertia Libraries
     "sollertia-shared-assets==9.0.0",
