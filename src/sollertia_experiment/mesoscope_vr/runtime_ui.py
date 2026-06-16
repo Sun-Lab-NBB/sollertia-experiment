@@ -490,19 +490,24 @@ def collect_surgery_quality(session_name: str) -> int:
 def collect_experimenter_given_water_volume(
     current_weight_g: float,
     previous_weight_g: float | None,
+    previous_received_water_volume_ml: float | None,
     session_water_volume_ml: float,
     default_total_water_volume_ml: float,
 ) -> float:
     """Reports the session water summary and prompts for the total water, returning the volume to hand-deliver.
 
     The prompt runs during a non-window-checking session's teardown. It first reports the animal's current and previous
-    weights together with the water delivered during the session, then asks for the total water the animal should
-    receive. Only session water counts toward that total; water dispensed while the system was paused is excluded.
+    weights, the total water the animal received on the previous session, and the water delivered during this session,
+    then asks for the total water the animal should receive. Only session water counts toward that total; water
+    dispensed while the system was paused is excluded.
 
     Args:
         current_weight_g: The animal's weight at the start of the session, in grams.
         previous_weight_g: The animal's weight recorded by the most recent prior session, in grams, or None when no
             prior session recorded one.
+        previous_received_water_volume_ml: The total water volume the animal received during the most recent prior
+            session, in milliliters, or None when no prior session recorded one. Always provided together with
+            previous_weight_g.
         session_water_volume_ml: The water volume delivered during the session runtime, in milliliters, excluding water
             dispensed while paused.
         default_total_water_volume_ml: The total session water volume offered as the default, in milliliters.
@@ -510,7 +515,10 @@ def collect_experimenter_given_water_volume(
     Returns:
         The additional water volume the experimenter should hand-deliver, in milliliters, clamped to zero at minimum.
     """
-    previous_weight_message = f"{previous_weight_g} g" if previous_weight_g is not None else "not available"
+    if previous_weight_g is not None:
+        previous_weight_message = f"{previous_weight_g} g (received {previous_received_water_volume_ml} ml)"
+    else:
+        previous_weight_message = "not available"
     summary = (
         f"Session water summary. Current weight: {current_weight_g} g. Previous weight: {previous_weight_message}. "
         f"Water received this session: {session_water_volume_ml} ml."
