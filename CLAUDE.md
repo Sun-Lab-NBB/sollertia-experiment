@@ -56,7 +56,8 @@ state to prevent integration errors.
 
 ## Available skills
 
-The sollertia marketplace ships an `experiment` plugin with skills that target this library directly, backed by the
+The sollertia marketplace ships two plugins that target this library directly: the system-agnostic `experiment` core
+plugin and the `mesoscope` plugin (Mesoscope-VR system-specific skills, layered on `experiment`). Both are backed by the
 `sollertia-experiment` MCP server (`sle mcp`). The ataraxis marketplace ships the `automation` plugin used across all
 Sollertia platform repositories. Low-level hardware work also draws on the `video`, `communication`, and
 `microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Acquisition System
@@ -76,18 +77,20 @@ Configuration below).
 | `automation:audit-facts`                      | Audit documentation against source code for factual accuracy         |
 | `automation:audit-style`                      | Audit files against the applicable style skill checklists            |
 | `experiment:pipeline`                         | Orchestrate the end-to-end experiment lifecycle                      |
+| `experiment:system-design-pipeline`           | Orchestrate building a new acquisition system end-to-end             |
 | `experiment:acquisition-system-design`        | Design a new acquisition system (config, bindings, runtime)          |
 | `experiment:acquisition-system-runtime`       | Runtime pattern: per-mode logic, state machine, dispatch             |
 | `experiment:acquisition-system-setup`         | Discover and verify connected acquisition hardware                   |
 | `experiment:system-health-check`              | Pre-flight checks of configuration, mounts, and hardware             |
-| `experiment:mesoscope-vr`                     | Mesoscope-VR hardware inventory, configuration, and bindings         |
-| `experiment:mesoscope-vr-runtime`             | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
 | `experiment:zaber-interface`                  | Implement Zaber motor interfaces and binding classes                 |
 | `experiment:microcontroller-interface`        | Paired Module + ModuleInterface registry and conventions             |
 | `experiment:vr-driver-interface`              | VR task driver, Unity MQTT contract, trial decomposition             |
 | `experiment:data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`           |
-| `experiment:mesoscope-vr-snapshots`           | Read/write per-session Zaber and Mesoscope position snapshots        |
+| `experiment:google-sheets-processing`         | Implement SurgeryLog / WaterLog Google Sheets processors             |
 | `experiment:experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                        |
+| `mesoscope:mesoscope-vr`                      | Mesoscope-VR hardware inventory, configuration, and bindings         |
+| `mesoscope:mesoscope-vr-runtime`              | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
+| `mesoscope:mesoscope-vr-snapshots`            | Read/write per-session Zaber and Mesoscope position snapshots        |
 
 ## Acquisition system configuration
 
@@ -107,7 +110,7 @@ configuration".
 
 **For configuration authoring**, use the appropriate `assets:*` skill from the `assets` plugin (backed by the
 `slsa mcp` server), which reads, writes, and validates the shared configuration and metadata YAMLs. For Mesoscope-VR
-hardware and calibration parameters, also consult the `experiment:mesoscope-vr` skill. Invoke these when users want to:
+hardware and calibration parameters, also consult the `mesoscope:mesoscope-vr` skill. Invoke these when users want to:
 - Set up or configure an acquisition system
 - Change system parameters (ports, calibration values, thresholds)
 
@@ -147,7 +150,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 
 ### Workflow guidance
 
-**Adding hardware to mesoscope-vr:** (see `experiment:acquisition-system-design` and `experiment:mesoscope-vr`)
+**Adding hardware to mesoscope-vr:** (see `experiment:acquisition-system-design` and `mesoscope:mesoscope-vr`)
 
 1. Add configuration dataclasses in `sollertia-shared-assets`
 2. Implement binding classes in `sollertia-experiment`
@@ -170,7 +173,7 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
 4. Use configuration dataclasses from `sollertia-shared-assets` for hardware parameters
 
-**Modifying CLI commands:** (see `experiment:mesoscope-vr-runtime`)
+**Modifying CLI commands:** (see `mesoscope:mesoscope-vr-runtime`)
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
    `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`,

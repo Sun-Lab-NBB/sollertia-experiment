@@ -431,19 +431,24 @@ class BehaviorVisualizer:
                     visible=False,
                 )
 
+                # Anchors both labels in axes-fraction coordinates so their placement stays fixed relative to the
+                # panel regardless of the speed-axis data range. Pinning them in data units couples their position
+                # to _SPEED_AXIS_YLIM, which silently misaligns the labels whenever the axis is rescaled.
                 self._speed_threshold_text = self._speed_axis.text(
-                    -self._time_window + 0.5,  # x position: left edge and padding.
-                    40,  # y position: near top of plot.
+                    0.05,  # x position: axes fraction, just inside the left edge.
+                    0.954,  # y position: axes fraction, near the top.
                     f"Target speed: {0:.2f} cm/s",
+                    transform=self._speed_axis.transAxes,
                     fontdict=_FONTDICT_LEGEND,
                     verticalalignment="top",
                     bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
                 )
 
                 self._duration_threshold_text = self._speed_axis.text(
-                    -self._time_window + 0.5,  # x position: left edge and padding.
-                    35.5,  # y position: below speed text.
+                    0.05,  # x position: axes fraction, just inside the left edge.
+                    0.852,  # y position: axes fraction, below the speed text.
                     f"Target duration: {0:.2f} s",
+                    transform=self._speed_axis.transAxes,
                     fontdict=_FONTDICT_LEGEND,
                     verticalalignment="top",
                     bbox={"facecolor": "white", "alpha": 1.0, "edgecolor": "none", "pad": 3},
