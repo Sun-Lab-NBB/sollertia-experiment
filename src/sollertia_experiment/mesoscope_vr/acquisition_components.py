@@ -233,6 +233,17 @@ class TrialState:
         return self.reinforcing_failed_trials
 
 
+@dataclass(frozen=True, slots=True)
+class _PreviousSessionWaterContext:
+    """Stores the animal weight and total water intake recovered from the most recent non-window-checking session."""
+
+    animal_weight_g: float
+    """The animal's weight, in grams, recorded at the start of the most recent prior session."""
+    received_water_volume_ml: float
+    """The total water volume, in milliliters, the animal received during the most recent prior session. This sums the
+    runtime-dispensed and experimenter-given volumes and excludes water dispensed while the system was paused."""
+
+
 def generate_mesoscope_position_snapshot(
     session_data: SessionData, mesoscope_data: MesoscopeData, mesoscope_driver: MesoscopeDriver
 ) -> None:
@@ -698,13 +709,20 @@ def finalize_session_descriptor(
         descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
     else:
         # Non-window-checking sessions report the water delivered during the session alongside the animal's current
-        # and previous weights, then prompt for the total water the animal should receive. The returned value is the
-        # additional volume the experimenter must hand-deliver to reach that total, counting only session water.
+        # and previous weights and the water it received on the previous session, then prompt for the total water the
+        # animal should receive. The returned value is the additional volume the experimenter must hand-deliver to
+        # reach that total, counting only session water.
+        previous_context = _resolve_previous_session_water_context(
+            persistent_data_path=mesoscope_data.vrpc_data.persistent_data_path
+        )
+        previous_weight_g = previous_context.animal_weight_g if previous_context is not None else None
+        previous_received_water_volume_ml = (
+            previous_context.received_water_volume_ml if previous_context is not None else None
+        )
         descriptor.experimenter_given_water_volume_ml = collect_experimenter_given_water_volume(
             current_weight_g=descriptor.animal_weight_g,
-            previous_weight_g=_resolve_previous_animal_weight(
-                persistent_data_path=mesoscope_data.vrpc_data.persistent_data_path
-            ),
+            previous_weight_g=previous_weight_g,
+            previous_received_water_volume_ml=previous_received_water_volume_ml,
             session_water_volume_ml=descriptor.dispensed_water_volume_ml,
             default_total_water_volume_ml=_DEFAULT_TOTAL_WATER_VOLUME_ML,
         )
@@ -726,19 +744,22 @@ def finalize_session_descriptor(
     )
 
 
-def _resolve_previous_animal_weight(persistent_data_path: Path) -> float | None:
-    """Returns the animal weight recorded by the most recent non-window-checking session, or None when unavailable.
+def _resolve_previous_session_water_context(persistent_data_path: Path) -> _PreviousSessionWaterContext | None:
+    """Returns the animal weight and total water intake from the most recent non-window-checking session, or None.
 
     Notes:
-        The weight is read from the newest per-session-type descriptor that a prior session cached in the animal's
-        persistent directory. Window checking descriptors are skipped because they do not record the animal's weight.
-        The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData class.
+        Both values are read from the newest per-session-type descriptor that a prior session cached in the animal's
+        persistent directory. Window checking descriptors are skipped because they record neither the animal's weight
+        nor its water intake. The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData
+        class. The total intake matches the preprocessing definition, summing the runtime-dispensed and
+        experimenter-given volumes while excluding water dispensed during the paused state.
 
     Args:
         persistent_data_path: The path to the animal's persistent directory that stores the cached descriptors.
 
     Returns:
-        The animal weight from the most recent prior session, in grams, or None when no prior session recorded one.
+        A _PreviousSessionWaterContext carrying the most recent prior session's animal weight and total water intake,
+        or None when no prior session recorded them.
     """
     descriptor_file_names = (
         "lick_training_descriptor.yaml",
@@ -755,10 +776,21 @@ def _resolve_previous_animal_weight(persistent_data_path: Path) -> float | None:
 
     newest_path = max(existing_paths, key=lambda path: path.stat().st_mtime)
     if newest_path.name == descriptor_file_names[0]:
-        return float(LickTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
-    if newest_path.name == descriptor_file_names[1]:
-        return float(RunTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
-    return float(MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
+        descriptor: LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor = (
+            LickTrainingDescriptor.from_yaml(file_path=newest_path)
+        )
+    elif newest_path.name == descriptor_file_names[1]:
+        descriptor = RunTrainingDescriptor.from_yaml(file_path=newest_path)
+    else:
+        descriptor = MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path)
+
+    received_water_volume_ml = round(
+        descriptor.dispensed_water_volume_ml + descriptor.experimenter_given_water_volume_ml, ndigits=3
+    )
+    return _PreviousSessionWaterContext(
+        animal_weight_g=float(descriptor.animal_weight_g),
+        received_water_volume_ml=received_water_volume_ml,
+    )
 
 
 def _prompt_red_dot_alignment(previous_value: float) -> float:
