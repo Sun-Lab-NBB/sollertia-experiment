@@ -127,8 +127,6 @@ def get_system_configuration_path() -> Path:
             f"host-machine to belong to exactly one acquisition system."
         )
         console.error(message=message, error=FileNotFoundError)
-        # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
-        raise FileNotFoundError(message)  # pragma: no cover
 
     return configuration_files[0]
 
@@ -163,5 +161,5 @@ def get_system_configuration_data() -> SystemConfiguration:
         f"registered acquisition system. Registered configuration files: {supported}."
     )
     console.error(message=message, error=ValueError)
-    # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
+    # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
     raise ValueError(message)  # pragma: no cover

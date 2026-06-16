@@ -19,8 +19,8 @@ def get_version_data() -> tuple[str, str]:
     Returns:
         The Python version first, then the sollertia-experiment version.
     """
-    sollertia_experiment_version = _metadata("sollertia-experiment")["version"]
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    sollertia_experiment_version: str = _metadata("sollertia-experiment")["version"]
+    python_version: str = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     return python_version, sollertia_experiment_version
 
 
@@ -33,5 +33,5 @@ def get_project_experiments(project_directory: Path) -> tuple[str, ...]:
     Returns:
         A tuple of naturally-sorted experiment configurations available for the target project.
     """
-    project = ProjectData(root=project_directory.parent, project_name=project_directory.name)
+    project: ProjectData = ProjectData(root=project_directory.parent, project_name=project_directory.name)
     return tuple(natsorted([configuration.stem for configuration in project.experiment_configs()]))

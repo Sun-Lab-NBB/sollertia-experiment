@@ -12,51 +12,10 @@ from ataraxis_time import PrecisionTimer, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
 
-from .terminal_prompts import request_confirmation
+from .terminal_prompts import request_required_confirmation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-@dataclass
-class _ZaberAxisData:
-    """Stores the identification data for an axis of a Zaber device."""
-
-    axis_id: int
-    """The unique motor type code of the axis."""
-    axis_label: str
-    """The user-assigned name of the axis."""
-
-
-@dataclass
-class _ZaberDeviceData:
-    """Stores the identification data about a Zaber device."""
-
-    device_number: int
-    """The positional index of the device in the daisy-chain of devices connected to the same serial port."""
-    device_id: int
-    """The unique identifier code of the device."""
-    label: str
-    """The user-assigned name of the device."""
-    name: str
-    """The manufacturer-assigned name of the device."""
-    axes: list[_ZaberAxisData] = field(default_factory=list)
-    """Stores _ZaberAxisData instances for each axis managed by this device."""
-
-
-@dataclass
-class _ZaberPortData:
-    """Stores the identification data for all Zaber devices connected to a serial port."""
-
-    port_name: str
-    """The name of the USB port."""
-    devices: list[_ZaberDeviceData] = field(default_factory=list)
-    """Stores _ZaberDeviceData instances for each device connected to this port."""
-
-    @property
-    def has_devices(self) -> bool:
-        """Returns True if any devices are connected to this port."""
-        return bool(self.devices)
 
 
 @dataclass(frozen=True)
@@ -101,6 +60,47 @@ class ZaberValidationResult:
     """Contains critical issues that prevent the device from being used with the binding library."""
     warnings: tuple[str, ...]
     """Contains non-critical issues that may affect device operation."""
+
+
+@dataclass
+class _ZaberAxisData:
+    """Stores the identification data for an axis of a Zaber device."""
+
+    axis_id: int
+    """The 1-based positional number of the axis within its parent device."""
+    axis_label: str
+    """The user-assigned name of the axis."""
+
+
+@dataclass
+class _ZaberDeviceData:
+    """Stores the identification data about a Zaber device."""
+
+    device_number: int
+    """The positional index of the device in the daisy-chain of devices connected to the same serial port."""
+    device_id: int
+    """The unique identifier code of the device."""
+    label: str
+    """The user-assigned name of the device."""
+    name: str
+    """The manufacturer-assigned name of the device."""
+    axes: list[_ZaberAxisData] = field(default_factory=list)
+    """Stores _ZaberAxisData instances for each axis managed by this device."""
+
+
+@dataclass
+class _ZaberPortData:
+    """Stores the identification data for all Zaber devices connected to a serial port."""
+
+    port_name: str
+    """The name of the USB port."""
+    devices: list[_ZaberDeviceData] = field(default_factory=list)
+    """Stores _ZaberDeviceData instances for each device connected to this port."""
+
+    @property
+    def has_devices(self) -> bool:
+        """Returns True if any devices are connected to this port."""
+        return bool(self.devices)
 
 
 @dataclass(frozen=True)
@@ -691,7 +691,7 @@ class ZaberAxis:
             self._shutdown_flag = True
             return
 
-        # If the motor is moving, stops it
+        # If the motor is moving, stops it.
         if self.is_busy:
             self._motor.stop(wait_until_idle=True)
 
@@ -720,9 +720,9 @@ class ZaberDevice:
 
     Raises:
         ValueError: If the device checksum stored in the device's non-volatile memory does not match the CRC32-XFER
-            checksum of the device's label. If the device is unsafe and has not been properly shut down during the
-            previous runtime as indicated by its non-volatile trackers. If the device manages more than a single axis
-            (motor).
+            checksum of the device's label. If the device is unsafe and was not properly shut down during the previous
+            runtime as indicated by its non-volatile trackers, and the user declines the interactive confirmation
+            prompt to proceed. If the device manages more than a single axis (motor).
     """
 
     def __init__(self, device: Device) -> None:
@@ -770,8 +770,9 @@ class ZaberDevice:
             )
             console.echo(message=message, level=LogLevel.WARNING)
 
-            # Blocks until the user confirms or declines the unsupervised reset procedure.
-            if not request_confirmation(message="Proceed with initializing this motor?", default=False):
+            # Blocks until the user confirms or declines the unsupervised reset procedure. The prompt has no default,
+            # so an accidental empty Enter cannot silently decide whether this motor is initialized.
+            if not request_required_confirmation(message="Proceed with initializing this motor?"):
                 message = (
                     f"Unsafe automatic reset procedure for the {self._controller.label} "
                     f"({self._controller.name}) device: Declined. Manually set the value of the shutdown tracker "
@@ -873,7 +874,7 @@ class ZaberConnection:
         if self.is_connected:
             return
 
-        # Establishes connection
+        # Establishes the connection.
         connection = Connection.open_serial_port(port_name=self._port, direct=False)
         self._connection = connection
         self._is_connected = True
@@ -894,7 +895,7 @@ class ZaberConnection:
         for device in self._devices:
             device.shutdown()
 
-        # Releases all runtime assets
+        # Releases all runtime assets.
         self._devices = ()
         self._is_connected = False
         if self._connection is not None:
@@ -909,7 +910,7 @@ class ZaberConnection:
                 # necessarily fail with an error.
                 self._connection.detect_devices()
             except Exception:
-                # Otherwise, the connection is broken
+                # Otherwise, the connection is broken.
                 self._is_connected = False
             else:
                 self._is_connected = True  # If device check succeeded the connection is active.
@@ -980,7 +981,7 @@ def _scan_active_ports() -> list[_ZaberPortData]:
     """
     port_info_list = []
 
-    # Gets the list of serial ports active for the current platform and scans each to determine if any zaber devices
+    # Gets the list of serial ports active for the current platform and scans each to determine if any Zaber devices
     # are connected to that port.
     for port in Tools.list_serial_ports():
         try:
@@ -1023,7 +1024,7 @@ def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
                     axis_row = [*device_row, str(axis.axis_id), axis.axis_label]
                     table_data.append(axis_row)
                     device_row = [""] * 5
-        table_data.append([""] * 7)  # Adds an empty row to separate port sections
+        table_data.append([""] * 7)  # Adds an empty row to separate port sections.
 
     return tabulate(
         tabular_data=table_data,

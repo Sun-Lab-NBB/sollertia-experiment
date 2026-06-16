@@ -88,7 +88,6 @@ class EncoderInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Saves additional data to class attributes.
         self._ppr: int = encoder_ppr
         self._wheel_diameter: float = wheel_diameter
 
@@ -102,12 +101,12 @@ class EncoderInterface(ModuleInterface):
         # loaded from the VR TaskTemplate before consuming encoder data.
         self._unity_unit_per_pulse: np.float64 = np.float64(0.0)
 
-        # Saves the encoder's polling frequency in microseconds.
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
-        # Pre-creates a shared memory array used to track and share the absolute distance, in centimeters, traveled by
-        # the animal since class initialization and the current absolute position of the animal in centimeters relative
-        # to the onset position.
+        # Pre-creates a shared memory array that shares two encoder metrics with other processes: the absolute distance
+        # traveled by the animal since class initialization, in centimeters (index 0), and the signed encoder
+        # displacement relative to the onset position, in pulses, used to derive the animal's Unity-space position
+        # (index 1).
         self._distance_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{int(self._module_type)}_{int(self._module_id)}_distance_tracker",
             prototype=np.zeros(shape=2, dtype=np.float64),
@@ -117,7 +116,6 @@ class EncoderInterface(ModuleInterface):
         self._check_state: np.uint8 = np.uint8(1)
         self._reset_encoder: np.uint8 = np.uint8(2)
 
-        # Tracks the current encoder monitoring status
         self._monitoring: bool = False
 
     def __del__(self) -> None:
@@ -147,10 +145,6 @@ class EncoderInterface(ModuleInterface):
         _ccw_rotation_code = 51
         sign = 1 if message.event == _ccw_rotation_code else -1
 
-        # Translates the absolute motion into the CW / CCW vector and converts from raw pulse count to Unity units
-        # using the precomputed conversion factor.
-        unity_motion = message.data_object * self._unity_unit_per_pulse * sign
-
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
         # traveled distance regardless of the traveled direction.
         cm_motion = message.data_object * self._cm_per_pulse
@@ -158,9 +152,11 @@ class EncoderInterface(ModuleInterface):
         # Increments the total distance traveled by the animal.
         self._distance_tracker[0] += cm_motion
 
-        # Updates the current absolute position of the animal in the VR environment (given relative to experiment onset
-        # position 0).
-        self._distance_tracker[1] += unity_motion
+        # Accumulates the signed encoder displacement, in pulses, that encodes the animal's position relative to the
+        # experiment onset. The pulse-to-Unity-unit conversion is deferred to the absolute_position property because
+        # set_unity_scale() configures the conversion factor on the main process after this communication process has
+        # already started, so the updated factor is not visible here.
+        self._distance_tracker[1] += np.float64(message.data_object) * sign
 
     def set_parameters(
         self,
@@ -188,13 +184,11 @@ class EncoderInterface(ModuleInterface):
         if state is self._monitoring:
             return
 
-        # Enables sensor monitoring
         if state:
             self.send_command(command=self._reset_encoder, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
             self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
             self._monitoring = True
 
-        # Disables sensor monitoring
         else:
             self.reset_command_queue()
             self._monitoring = False
@@ -206,8 +200,14 @@ class EncoderInterface(ModuleInterface):
 
     @property
     def absolute_position(self) -> np.float64:
-        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset."""
-        return np.float64(self._distance_tracker[1])
+        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset.
+
+        Notes:
+            The position scales the signed encoder displacement accumulated in the shared memory buffer by the current
+            Unity conversion factor. The scaling is applied here, on the main process, because set_unity_scale()
+            updates the factor after the communication process that fills the buffer has already started.
+        """
+        return np.float64(self._distance_tracker[1] * self._unity_unit_per_pulse)
 
     @property
     def traveled_distance(self) -> np.float64:
@@ -224,8 +224,8 @@ class EncoderInterface(ModuleInterface):
 
         Notes:
             VR-experiment runtimes call this method at experiment-start with the cm-per-Unity-unit conversion factor
-            loaded from the VR TaskTemplate. The new value takes effect on the next encoder message processed by
-            the interface.
+            loaded from the VR TaskTemplate. The factor is stored on the main process and applied when the
+            absolute_position property is read, so it can be updated after the communication process has started.
 
         Args:
             cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in
@@ -289,7 +289,6 @@ class LickInterface(ModuleInterface):
 
         self._check_state: np.uint8 = np.uint8(1)
 
-        # Tracks the current sensor monitoring status
         self._monitoring: bool = False
 
     def __del__(self) -> None:
@@ -359,12 +358,10 @@ class LickInterface(ModuleInterface):
         if state is self._monitoring:
             return
 
-        # Enables sensor monitoring
         if state:
             self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
             self._monitoring = True
 
-        # Disables sensor monitoring
         else:
             self.reset_command_queue()
             self._monitoring = False
@@ -419,7 +416,6 @@ class TorqueInterface(ModuleInterface):
             error_codes=None,
         )
 
-        # Caches the polling frequency to an instance attribute
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
         # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
@@ -432,7 +428,6 @@ class TorqueInterface(ModuleInterface):
 
         self._check_state: np.uint8 = np.uint8(1)
 
-        # Tracks the current sensor monitoring status
         self._monitoring: bool = False
 
     def initialize_remote_assets(self) -> None:
@@ -488,12 +483,10 @@ class TorqueInterface(ModuleInterface):
         if state is self._monitoring:
             return
 
-        # Enables sensor monitoring
         if state:
             self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
             self._monitoring = True
 
-        # Disables sensor monitoring
         else:
             self.reset_command_queue()
             self._monitoring = False
@@ -545,12 +538,11 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
             exists_ok=True,
         )
 
-        # Note, commands codes 1 through 3 are reserved for commands that output TTL signals. This module's
+        # Command codes 1 through 3 are reserved for commands that output TTL signals. This module's
         # functionality is currently NOT used by the Mesoscope-VR system, so these command codes are not stored here to
         # avoid unnecessary clutter.
         self._check_state: np.uint8 = np.uint8(4)
 
-        # Tracks the current sensor monitoring status
         self._monitoring: bool = False
 
     def __del__(self) -> None:
@@ -604,12 +596,10 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
         if state is self._monitoring:
             return
 
-        # Enables sensor monitoring
         if state:
             self.send_command(command=self._check_state, noblock=_FALSE, repetition_delay=self._polling_frequency)
             self._monitoring = True
 
-        # Disables sensor monitoring
         else:
             self.reset_command_queue()
             self._monitoring = False
@@ -745,6 +735,8 @@ class WaterValveInterface(ModuleInterface):
 
     Attributes:
         _calibration_count: The number of reward delivery cycles to use during calibration and referencing procedures.
+            This value is also sent as the firmware calibration_count parameter on every reward and simulated-reward
+            command.
         _scale_coefficient: The scale coefficient derived from fitting the power-law model to the valve's
             calibration data.
         _nonlinearity_exponent: The nonlinearity exponent derived from fitting the power-law model to the valve's
@@ -814,11 +806,13 @@ class WaterValveInterface(ModuleInterface):
         self._calibrate: np.uint8 = np.uint8(4)
         self._tone: np.uint8 = np.uint8(5)
 
-        # Initializes additional trackers and runtime assets.
         # Reflects what the microcontroller reported it is actually doing.
         self._previous_module_state: bool = False
         # Reflects what this interface last commanded the module to do.
         self._configured_valve_state: bool = False
+        # The 0.0 initial value is a deliberate sentinel: it is below the valve's dispensable minimum, so it can never
+        # match a real commanded volume. This forces the first deliver_reward() to re-send the valve parameters and
+        # actually configure the firmware. Do not initialize this to a valid volume (see simulate_reward()).
         self._previous_volume: float = 0.0
         self._previous_tone_duration: int = 0
         self._cycle_timer: PrecisionTimer | None = None
@@ -900,10 +894,12 @@ class WaterValveInterface(ModuleInterface):
             volume: The volume of water to deliver, in microliters.
             tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
                 reward.
+
+        Raises:
+            ValueError: If the requested volume is too small to be reliably dispensed by the valve.
         """
-        # This ensures that the valve settings are only updated if volume, tone_duration, or both changed compared to
-        # the previous command runtime. This ensures that the valve settings are only updated when this is necessary,
-        # reducing communication overhead.
+        # This ensures the valve settings are only updated when volume, tone_duration, or both changed compared to
+        # the previous command runtime, reducing communication overhead.
         if volume != self._previous_volume or tone_duration != self._previous_tone_duration:
             # Parameters are cached here to use the tone_duration before it is converted to microseconds.
             self._previous_volume = volume
@@ -925,16 +921,23 @@ class WaterValveInterface(ModuleInterface):
         Args:
             tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
                 reward delivery.
+
+        Raises:
+            ValueError: If the previously delivered volume is too small to be reliably dispensed by the valve.
         """
-        # This ensures that the valve settings are only updated if tone_duration changed compared to the previous
-        # command runtime. This ensures that the valve settings are only updated when this is necessary, reducing
-        # communication overhead.
+        # This ensures the valve settings are only updated when tone_duration changed compared to the previous
+        # command runtime, reducing communication overhead.
         if tone_duration != self._previous_tone_duration:
             # Parameters are cached here to use the tone_duration before it is converted to microseconds.
             self._previous_tone_duration = tone_duration
 
-            # Maintains the same pulse duration.
-            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=self._previous_volume)
+            # Reuses the last commanded reward volume to keep the valve pulse duration consistent with real rewards.
+            # Before the first deliver_reward(), _previous_volume is still the 0.0 sentinel, which is below the
+            # dispensable minimum; falls back to the default reward volume so get_duration_from_volume does not reject
+            # it. The valve never opens during a simulated reward, so the exact pulse duration is immaterial, and the
+            # sentinel is left unchanged so the next deliver_reward() still re-sends the valve parameters.
+            reference_volume = self._previous_volume if self._previous_volume > 0.0 else 5.0
+            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=reference_volume)
             tone_duration_us: np.uint32 = np.uint32(
                 round(
                     convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
@@ -945,8 +948,8 @@ class WaterValveInterface(ModuleInterface):
         self.send_command(command=self._tone, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
     def reference_valve(self) -> None:
-        """Opens the valve 200 times for the duration necessary to deliver 5 microliters of water to verify the valve's
-        calibration.
+        """Opens the valve the configured number of calibration pulses, each delivering 5 microliters of water, to
+        verify the valve's calibration.
 
         Notes:
             A well-calibrated valve is expected to deliver 1.0 milliliter of water during this procedure.
@@ -996,9 +999,10 @@ class WaterValveInterface(ModuleInterface):
         Returns:
             The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
         """
-        # Determines the minimum valid pulse duration, hardcoded at 10 ms: calibrating below this is empirically
-        # pointless for most water valves, so it is treated as the lower pulse-duration bound.
-        min_dispensed_volume = self._scale_coefficient * np.power(10.0, self._nonlinearity_exponent)
+        # Determines the minimum valid pulse duration, hardcoded at 10 ms (10000 microseconds): calibrating below this
+        # is empirically pointless for most water valves, so it is treated as the lower pulse-duration bound. The
+        # calibration power-law operates in microseconds, so the 10 ms floor is expressed as 10000.0.
+        min_dispensed_volume = self._scale_coefficient * np.power(10000.0, self._nonlinearity_exponent)
 
         if target_volume < min_dispensed_volume:
             message = (
@@ -1040,7 +1044,9 @@ class WaterValveInterface(ModuleInterface):
 
     @property
     def calibrating(self) -> bool:
-        """Returns True if the module is currently performing a valve calibration cycle and False otherwise."""
+        """Returns True if the module is currently performing a valve calibration or referencing cycle and False
+        otherwise.
+        """
         return bool(self._valve_tracker[1] == 0)
 
 
@@ -1068,7 +1074,6 @@ class ScreenInterface(ModuleInterface):
 
         self._toggle: np.uint8 = np.uint8(1)
 
-        # Tracks the state of the managed screens
         self._enabled: bool = False
 
     def initialize_remote_assets(self) -> None:
@@ -1146,7 +1151,6 @@ class GasPuffValveInterface(ModuleInterface):
         self._open: np.uint8 = np.uint8(2)
         self._close: np.uint8 = np.uint8(3)
 
-        # Tracks the state of the managed valve
         self._configured_state: bool = False
         self._previous_module_state: bool = False
 
@@ -1187,7 +1191,6 @@ class GasPuffValveInterface(ModuleInterface):
         _valve_closed_code = 52
 
         if message.event == _valve_open_code and not self._previous_module_state:
-            # Tracks valve open transitions.
             self._previous_module_state = True
             self._puff_tracker[1] = 1
 
@@ -1231,11 +1234,11 @@ class GasPuffValveInterface(ModuleInterface):
         if duration_ms != self._previous_duration:
             self._previous_duration = duration_ms
             duration_us = np.uint32(duration_ms * 1000)
-            # Parameters: pulse_duration, calibration_count (unused), tone_duration (unused)
+            # Sends pulse_duration with placeholder calibration_count and tone_duration values (both unused here).
             self.send_parameters(parameter_data=(duration_us, np.uint16(1), _ZERO_UINT32))
 
         self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
-        # Note: Puff count is incremented in process_received_data when valve_closed event is received
+        # Increments the puff count in process_received_data when a valve_closed event is received.
 
     @property
     def puff_count(self) -> int:

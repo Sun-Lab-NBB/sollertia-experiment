@@ -654,6 +654,7 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
 
     Raises:
         FileNotFoundError: If the local working directory does not contain exactly one system configuration file.
+        ValueError: If the local configuration file does not belong to any registered acquisition system.
         TypeError: If the host-machine does not belong to the Mesoscope-VR data acquisition system.
     """
     system_configuration = get_system_configuration_data()
@@ -665,8 +666,6 @@ def get_system_configuration() -> MesoscopeSystemConfiguration:
             f"command to reconfigure the host-machine to belong to the Mesoscope-VR data acquisition system."
         )
         console.error(message=message, error=TypeError)
-        # console.error() raises but is not typed NoReturn, so mypy needs an explicit raise to narrow the return type.
-        raise TypeError(message)  # pragma: no cover
     return system_configuration
 
 

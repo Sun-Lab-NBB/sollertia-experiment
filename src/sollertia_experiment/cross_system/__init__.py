@@ -18,6 +18,7 @@ from .terminal_prompts import (
     wait_for_enter,
     request_selection,
     request_confirmation,
+    request_required_confirmation,
 )
 from .module_interfaces import (
     LickInterface,
@@ -82,6 +83,7 @@ __all__ = [
     "register_system_configuration",
     "rename_session_videos",
     "request_confirmation",
+    "request_required_confirmation",
     "request_selection",
     "request_text",
     "set_zaber_device_setting",

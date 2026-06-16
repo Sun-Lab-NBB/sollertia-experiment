@@ -17,3 +17,6 @@ if not console.enabled:
     console.enable()
 if not console.progress_enabled:
     console.enable_progress()
+
+# The library does not expose any Python-level API symbols, so the public namespace is intentionally empty.
+__all__: list[str] = []

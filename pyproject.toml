@@ -46,8 +46,8 @@ dependencies = [
     "ataraxis-base-utilities==6.0.0",
     "ataraxis-data-structures==6.0.0",
     "ataraxis-transport-layer-pc==4.0.0",
-    "ataraxis-communication-interface==6.0.0",
-    "ataraxis-video-system==4.0.0",
+    "ataraxis-communication-interface==6.0.1",
+    "ataraxis-video-system==4.0.1",
 
     # Sollertia Libraries
     "sollertia-shared-assets==9.0.0",
@@ -110,6 +110,7 @@ dev = [
     # Type stubs
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
+    "types-pyyaml>=6,<7",
     "types-tabulate>=0,<1",
     "types-tqdm>=4,<5",
 ]

@@ -60,7 +60,7 @@ The sollertia marketplace ships an `experiment` plugin with skills that target t
 `sollertia-experiment` MCP server (`sle mcp`). The ataraxis marketplace ships the `automation` plugin used across all
 Sollertia platform repositories. Low-level hardware work also draws on the `video`, `communication`, and
 `microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Acquisition System
-Configuration above).
+Configuration below).
 
 | Skill                                         | Description                                                          |
 |-----------------------------------------------|----------------------------------------------------------------------|
@@ -151,7 +151,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 
 1. Add configuration dataclasses in `sollertia-shared-assets`
 2. Implement binding classes in `sollertia-experiment`
-3. Integrate the binding classes with the `_MesoscopeVRSystem` lifecycle in `mesoscope_vr/system_controller.py`
+3. Integrate the binding classes with the `MesoscopeVRSystem` lifecycle in `mesoscope_vr/system_controller.py`
 
 For low-level camera hardware implementation, use the `video:camera-interface` skill.
 
@@ -174,8 +174,8 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
    `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`,
-   `preprocess`, `delete`, `migrate`, and the `run` command group with its `window-checking`, `lick-training`,
-   `run-training`, and `experiment` subcommands)
+   `check-bridge`, `preprocess`, `delete`, `migrate`, and the `run` command group with its `window-checking`,
+   `lick-training`, `run-training`, and `experiment` subcommands)
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
 4. Register commands with the appropriate Click group (the `get` and `mesoscope` groups are auto-registered on the

@@ -21,7 +21,15 @@ mcp = FastMCP(name="sollertia-experiment", json_response=True)
 
 
 def serialize(value: Any) -> Any:
-    """Recursively converts a dataclass, Path, Enum, mapping, or sequence into JSON-friendly Python."""
+    """Recursively converts a dataclass, Path, Enum, mapping, or sequence into JSON-friendly Python.
+
+    Args:
+        value: The object to convert. Dataclasses, paths, enumerations, mappings, and sequences are converted
+            recursively, while all other values are returned unchanged.
+
+    Returns:
+        The JSON-serializable representation of the input value.
+    """
     if value is None:
         return None
     if is_dataclass(value) and not isinstance(value, type):
@@ -41,7 +49,16 @@ def serialize(value: Any) -> Any:
 
 
 def describe_dataclass(cls: type, *, seen: frozenset[type] | None = None) -> dict[str, Any]:
-    """Returns a structured schema description of a dataclass type, recursively describing nested dataclasses."""
+    """Returns a structured schema description of a dataclass type, recursively describing nested dataclasses.
+
+    Args:
+        cls: The dataclass type to describe.
+        seen: The set of dataclass types already visited, used to guard against infinite recursion on
+            self-referential schemas.
+
+    Returns:
+        A mapping describing the class name and each field's type, default value, and nested schema.
+    """
     seen = frozenset() if seen is None else seen
     if cls in seen:
         return {"class": cls.__name__, "recursive_reference": True}
@@ -83,7 +100,18 @@ def write_yaml_validated(
     overwrite: bool = False,
     use_save_method: bool = False,
 ) -> dict[str, Any]:
-    """Writes a payload as YAML and validates by round-tripping through ``validator_cls``."""
+    """Writes a payload as YAML and validates it by round-tripping through ``validator_cls``.
+
+    Args:
+        file_path: The path to the YAML file to write.
+        payload: The data to serialize into the YAML file.
+        validator_cls: The YamlConfig subclass used to validate the written payload.
+        overwrite: Determines whether to replace an existing file at the target path.
+        use_save_method: Determines whether to persist via the instance's save() method instead of to_yaml().
+
+    Returns:
+        A mapping with the written file path and serialized data on success, or an error description on failure.
+    """
     if file_path.exists() and not overwrite:
         return {"error": f"File already exists: {file_path}. Pass overwrite=True to replace."}
 
@@ -115,7 +143,15 @@ def write_yaml_validated(
 
 
 def read_yaml(file_path: Path, validator_cls: type[YamlConfig]) -> dict[str, Any]:
-    """Loads a YAML file via ``validator_cls`` and returns its serialized form."""
+    """Loads a YAML file via ``validator_cls`` and returns its serialized form.
+
+    Args:
+        file_path: The path to the YAML file to load.
+        validator_cls: The YamlConfig subclass used to parse and validate the file.
+
+    Returns:
+        A mapping with the file path and serialized data on success, or an error description on failure.
+    """
     if not file_path.exists():
         return {"error": f"File not found: {file_path}"}
     try:
@@ -127,6 +163,9 @@ def read_yaml(file_path: Path, validator_cls: type[YamlConfig]) -> dict[str, Any
 
 def probe_writable(path: Path) -> str | None:
     """Probes write access to a directory by creating and removing a uniquely-named temporary file.
+
+    Args:
+        path: The directory whose write access is probed.
 
     Returns:
         None when the directory is writable, or a human-readable reason describing why it is not.

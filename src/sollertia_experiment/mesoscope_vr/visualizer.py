@@ -37,7 +37,7 @@ _FONTDICT_AXIS_LABEL: dict[str, str | int] = {"family": "Arial", "weight": "norm
 _FONTDICT_TITLE: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 20}
 """The font properties used for plot titles."""
 _FONTDICT_LEGEND: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 14}
-"""The font properties used for legend and annotation text."""
+"""The font properties used for annotation text."""
 
 _LINE_STYLE_DICT: dict[str, str] = {"solid": "-", "dashed": "--", "dotdashed": "-.", "dotted": ":"}
 """Maps colloquial line style names to pyplot linestyle string-codes."""
@@ -58,7 +58,7 @@ _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
 _TRIAL_HISTORY_SIZE: int = 20
 """The number of trials to display in the trial performance panel."""
 
-_SPEED_AXIS_YLIM: tuple[float, float] = (-2.0, 42.0)
+_SPEED_AXIS_YLIM: tuple[float, float] = (-5.0, 105.0)
 """The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
 _BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
 """The lower and upper Y-axis bounds for the binary state plots (lick, valve, and air puff)."""
@@ -115,9 +115,11 @@ class BehaviorVisualizer:
         _valve_axis: The axis for the solenoid valve data plot.
         _puff_axis: The axis for the air puff valve data plot (only in EXPERIMENT mode with aversive trials).
         _speed_axis: The axis for the average running speed data plot.
-        _speed_threshold_line: The horizontal line that shows the running speed threshold used during training sessions.
-        _duration_threshold_line: The vertical line that shows the running epoch duration used during training sessions.
-        _running_speed: The current running speed of the animal, in cm / s, averaged over a time-window of 50 ms.
+        _speed_threshold_line: The horizontal line that shows the running speed threshold used during run-training
+            sessions.
+        _duration_threshold_line: The vertical line that shows the running epoch duration used during run-training
+            sessions.
+        _running_speed: The current running speed of the animal, in cm / s, averaged over the speed-calculation window.
         _once: Limits certain visualizer setup operations to only be called once during runtime.
         _is_open: Tracks whether the visualizer plot has been created.
         _blit_manager: The _BlitManager that performs partial figure redraws during runtime updates.
@@ -218,8 +220,8 @@ class BehaviorVisualizer:
             This method must be called before any visualization updates can occur.
 
         Args:
-            mode: The display mode that determines the subplot layout. Must be a valid VisualizerMode
-                enumeration member.
+            mode: The display mode that determines the subplot layout. Should be a VisualizerMode member; any
+                unrecognized value is treated as EXPERIMENT.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
                 When True, the trial panel shows a row for reinforcing trial outcomes.
             has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
@@ -582,7 +584,6 @@ class BehaviorVisualizer:
         else:
             outcome = np.int8(0)
 
-        # Rolls arrays left by 1 position and inserts new trial at the rightmost position.
         self._trial_types = np.roll(a=self._trial_types, shift=-1)
         self._trial_outcomes = np.roll(a=self._trial_outcomes, shift=-1)
         self._trial_types[-1] = np.int8(1) if is_aversive else np.int8(0)
@@ -638,7 +639,6 @@ class BehaviorVisualizer:
 
     def _sample_data(self) -> None:
         """Updates the visualization data arrays with the data accumulated since the last visualization update."""
-        # Rolls arrays by one position to the left, so the first element becomes the last.
         self._valve_data = np.roll(a=self._valve_data, shift=-1)
         self._lick_data = np.roll(a=self._lick_data, shift=-1)
 
@@ -649,7 +649,7 @@ class BehaviorVisualizer:
             self._lick_data[-1] = self._event_tick_true
         else:
             self._lick_data[-1] = self._event_tick_false
-        self._lick_event = False  # Resets the lick event flag.
+        self._lick_event = False
 
         # If the runtime has detected at least one water reward (valve) event since the last visualizer update, emits a
         # valve activation tick.
@@ -657,7 +657,7 @@ class BehaviorVisualizer:
             self._valve_data[-1] = self._event_tick_true
         else:
             self._valve_data[-1] = self._event_tick_false
-        self._valve_event = False  # Resets the valve event flag.
+        self._valve_event = False
 
         # If the runtime has detected at least one air puff event since the last visualizer update, emits a puff tick.
         # Only updates if puff axis exists (EXPERIMENT mode with aversive trials).

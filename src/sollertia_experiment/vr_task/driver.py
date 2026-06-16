@@ -4,11 +4,10 @@ Virtual Reality task.
 
 from __future__ import annotations
 
-import sys
 from enum import IntEnum, StrEnum
 import json
-import select
 from typing import TYPE_CHECKING
+import threading
 from dataclasses import field, dataclass
 
 import numpy as np
@@ -17,7 +16,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
 from .bridge import UnityBridgeError, UnityBridgeClient
-from ..cross_system import wait_for_enter, request_confirmation
+from ..cross_system import wait_for_enter
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
@@ -243,7 +242,14 @@ class VRTaskDriver:
         self._mqtt.connect()
 
     def disconnect(self) -> None:
-        """Closes the MQTT connection to the Unity game engine and the bridge connection to the Unity Editor."""
+        """Stops the active Unity scene and closes the MQTT and bridge connections to the Unity game engine.
+
+        Notes:
+            Exits Play Mode through the bridge before tearing down the connections so the Unity scene does not keep
+            running after the session ends. Stopping the scene is a best-effort step: if the bridge is unreachable
+            because the editor was closed, the driver logs a warning and proceeds with the teardown.
+        """
+        self._stop_unity()
         self._mqtt.disconnect()
         self._bridge.close()
 
@@ -252,12 +258,12 @@ class VRTaskDriver:
 
         Notes:
             Requires the Unity Editor MCP Bridge to be reachable, opens the expected scene, arms Unity, verifies the
-            active scene matches the expected one, drives the VR display verification loop, and requests the wall cue
-            sequence used by the task. Scene activation and Play Mode control are issued through the bridge; the
-            operator only confirms that the VR display renders correctly.
+            active scene matches the expected one, prompts the operator to verify the VR display, and requests the
+            wall cue sequence used by the task. Scene activation and Play Mode control are issued through the bridge;
+            the operator only confirms that the VR display renders correctly.
 
             The caller must enable the VR screens before invoking this method and disable them once it returns, as
-            the display verification stage relies on the screens rendering the verification animation.
+            the display verification stage relies on the screens rendering the active scene.
         """
         self._require_bridge()
         self._activate_scene()
@@ -271,8 +277,8 @@ class VRTaskDriver:
         """Forwards the latest animal position to Unity as a movement delta.
 
         Notes:
-            The driver internally tracks the last position reported to Unity and only emits an MQTT message when the
-            position has changed.
+            The driver internally tracks the last absolute position passed to this method and only emits an MQTT
+            message when the position has changed.
 
         Args:
             absolute_position: The current absolute position of the animal, in Unity units, relative to the origin of
@@ -544,58 +550,59 @@ class VRTaskDriver:
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     def _verify_vr_display(self) -> None:
-        """Drives the VR display verification loop until the operator confirms the scene renders correctly.
+        """Animates the VR scene while the operator verifies the display, then cycles Unity into a fresh armed state.
 
         Notes:
-            Unity animates continuously while the operator inspects the VR screens. When the operator signals they
-            have seen enough, the driver stops Play Mode and asks whether the display rendered correctly. A negative
-            answer lets the operator adjust the configuration before the driver re-arms Unity and repeats the check.
-            A positive answer re-arms Unity so the session continues from a fresh Virtual Reality origin.
+            The driver animates the scene continuously while the operator inspects the VR screens and resolves any
+            display issues, which may include starting and stopping the scene through the editor without disrupting
+            the background animation. Pressing Enter signals that the display renders correctly, so the operator is
+            responsible for fixing any issues before confirming. The driver then reads the current play state through
+            the bridge and cycles the scene off and back on so the session begins from a fresh Virtual Reality origin
+            regardless of the state the operator left the editor in.
         """
         self._polling_timer.delay(delay=_DISPLAY_SCREENS_WARMUP_DELAY_MS, block=False)
 
-        while True:
-            message = (
-                "Verify that the Virtual Reality scene displays on the VR screens as intended. The scene is "
-                "animating; press Enter once you have seen enough to judge the display."
-            )
-            console.echo(message=message, level=LogLevel.INFO)
-            self._animate_until_satisfied()
+        message = (
+            "Verify the Virtual Reality scene on the VR screens. The scene animates continuously; fix any display "
+            "issues now, including starting and stopping the scene through the editor, which does not interrupt the "
+            "animation."
+        )
+        console.echo(message=message, level=LogLevel.INFO)
+        self._animate_until_satisfied()
+
+        # Regardless of the play state the operator left Unity in, cycles the scene off and back on so the session
+        # starts from a fresh, armed Virtual Reality origin.
+        state, _ = self._bridge.get_play_state()
+        if state == "playing":
             self._stop_unity()
-
-            message = "Did the Virtual Reality display render correctly on the VR screens?"
-            console.echo(message=message, level=LogLevel.INFO)
-
-            if request_confirmation(message="Did the display render correctly?", default=True):
-                self._arm_unity()
-                return
-
-            message = (
-                "Adjust the Unity configuration as needed, then confirm when you are ready to re-verify the display."
-            )
-            console.echo(message=message, level=LogLevel.WARNING)
-            wait_for_enter(message="Press Enter once you are ready to re-verify.")
-            self._arm_unity()
+        self._arm_unity()
 
     def _animate_until_satisfied(self) -> None:
-        """Sends incremental position updates to Unity until the operator presses Enter to signal satisfaction.
+        """Animates the Virtual Reality scene on a background thread until the operator confirms the display.
 
         Notes:
-            The method polls standard input without blocking between position updates so the Virtual Reality scene
-            keeps animating on the VR screens while it waits for the operator. The pending MQTT buffer is drained
-            each cycle so it does not accumulate the messages the verification animation does not consume.
+            The animation runs on a background thread so the foreground can block on the shared wait_for_enter prompt
+            while the Virtual Reality scene keeps scrolling on the VR screens. Driving the MQTT client from the thread
+            is safe because its publish path and inbound message queue are both thread-safe. The thread stops as soon
+            as the operator presses Enter, and the pending MQTT buffer is drained each cycle so the verification
+            animation does not accumulate the messages it does not consume.
         """
-        while True:
-            self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
+        stop_animation = threading.Event()
 
-            payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
-            self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
-            self._clear_buffer()
+        def animate() -> None:
+            while not stop_animation.is_set():
+                self._polling_timer.delay(delay=_DISPLAY_ANIMATION_STEP_DELAY_MS, block=False)
+                payload = json.dumps(obj={"movement": _DISPLAY_ANIMATION_STEP_UNITS}).encode("utf-8")
+                self._mqtt.send_data(topic=_VRTaskMQTTTopics.MOTION, payload=payload)
+                self._clear_buffer()
 
-            ready, _, _ = select.select([sys.stdin], [], [], 0)
-            if ready:
-                sys.stdin.readline()
-                return
+        animation_thread = threading.Thread(target=animate, daemon=True)
+        animation_thread.start()
+        try:
+            wait_for_enter(message="Press Enter once you are satisfied that the display renders correctly.")
+        finally:
+            stop_animation.set()
+            animation_thread.join()
 
     def _wait_for_topic(self, expected_topic: str) -> bytes | bytearray:
         """Blocks until Unity sends a message on the specified topic and returns the payload."""

@@ -21,7 +21,8 @@ if TYPE_CHECKING:
 
 
 _BROKER_POLL_DELAY_MS: int = 10
-"""The delay, in milliseconds, between consecutive ScanImagePC status-buffer polls during the command handshake."""
+"""The delay, in milliseconds, between consecutive ScanImagePC reply-buffer polls during command handshakes and state
+queries."""
 
 _ACK_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for the ScanImagePC to acknowledge a command before resending it. The
@@ -96,9 +97,10 @@ class MesoscopeDriver:
     """Drives the ScanImage software that controls the Mesoscope over the shared Virtual Reality MQTT broker.
 
     Encapsulates the MQTT command contract with the runAcquisition MATLAB function running on the ScanImagePC:
-    connection lifecycle, the estimator-preload and reference-generation setup handshake, and the begin, abort, and
-    recover acquisition commands. Mesoscope control is tightly coupled to the Virtual Reality task, so the driver
-    reuses the Virtual Reality broker discovery configuration rather than defining its own. Each command is dispatched
+    connection lifecycle, the estimator-preload and reference-generation setup handshake, the begin, abort, and
+    recover acquisition commands, and a one-shot state query. Mesoscope control is tightly coupled to the Virtual
+    Reality task, so the driver reuses the Virtual Reality broker discovery configuration rather than defining its
+    own. Each command is dispatched
     with a reception acknowledgement and, where applicable, a terminal-state confirmation; the actual frame
     acquisition is confirmed by the caller through the hardware TTL frame stream, not over MQTT.
 

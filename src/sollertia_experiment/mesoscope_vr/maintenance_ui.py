@@ -77,7 +77,7 @@ class _DataArrayIndex(IntEnum):
 
 
 class _ValveTrackerIndex(IntEnum):
-    """Defines the indices of the ValveModule's valve_tracker SharedMemoryArray read by the maintenance GUI."""
+    """Defines the indices of the WaterValveInterface's valve_tracker SharedMemoryArray read by the maintenance GUI."""
 
     TOTAL_VOLUME = 0
     """Stores the cumulative volume of water dispensed by the valve during runtime."""
@@ -107,16 +107,16 @@ class MaintenanceControlUI:
         instance methods to start the UI process.
 
     Args:
-        valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count and valve open/close state to other processes.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer data between the UI process
             and the maintenance runtime process.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             count and valve open/close state to other processes.
         _ui_process: The Process instance running the GUI cycle.
@@ -142,7 +142,7 @@ class MaintenanceControlUI:
         self._started: bool = False
 
     def __del__(self) -> None:
-        """Terminates the UI process and releases the instance's shared memory buffers when garbage-collected."""
+        """Terminates the UI process and releases the instance's shared memory buffer when garbage-collected."""
         self.shutdown()
         # Does not disconnect or destroy the trackers as they are owned by their respective interfaces.
 
@@ -307,13 +307,16 @@ class _MaintenanceUIWindow(QMainWindow):
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
-        _valve_tracker: The SharedMemoryArray instance used by the ValveModule to export the valve's state to other
-            processes during runtime.
+        _valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             data to other processes during runtime.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
         _calibration_in_progress: Tracks whether a calibration procedure is in progress.
         _referencing_in_progress: Tracks whether a referencing procedure is in progress.
+        _calibration_seen_active: Tracks whether the valve has reported the active (calibrating) state since the
+            current calibration or referencing procedure was requested, used to prevent a stale completion signal from
+            prematurely resetting the status label.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
         _valve_open_button: The button that opens the water valve.
         _valve_close_button: The button that closes the water valve.
@@ -348,6 +351,7 @@ class _MaintenanceUIWindow(QMainWindow):
         self._reward_in_progress: bool = False
         self._calibration_in_progress: bool = False
         self._referencing_in_progress: bool = False
+        self._calibration_seen_active: bool = False
         self._puff_in_progress: bool = False
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
@@ -866,12 +870,18 @@ class _MaintenanceUIWindow(QMainWindow):
                 self._valve_status_label.setText("Valve: Closed")
                 self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
-            # Detects when calibration or referencing completes (valve_tracker indicates no longer calibrating).
-            if (self._calibration_in_progress or self._referencing_in_progress) and not is_calibrating:
-                self._calibration_in_progress = False
-                self._referencing_in_progress = False
-                self._calibration_status_label.setText("Calibration: Idle")
-                self._calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
+            # Detects when calibration or referencing completes. Waits until the valve first reports the active
+            # (calibrating) state before honoring the completion signal, so a stale 'calibrated' flag left over from a
+            # previous procedure does not prematurely reset the label for a freshly requested procedure.
+            if self._calibration_in_progress or self._referencing_in_progress:
+                if is_calibrating:
+                    self._calibration_seen_active = True
+                elif self._calibration_seen_active:
+                    self._calibration_in_progress = False
+                    self._referencing_in_progress = False
+                    self._calibration_seen_active = False
+                    self._calibration_status_label.setText("Calibration: Idle")
+                    self._calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
 
             # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
             if self._puff_in_progress and gas_valve_state == 0:
@@ -913,6 +923,7 @@ class _MaintenanceUIWindow(QMainWindow):
         """Signals to run the valve referencing procedure."""
         self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 1
         self._referencing_in_progress = True
+        self._calibration_seen_active = False
         self._calibration_status_label.setText("Calibration: Referencing")
         self._calibration_status_label.setStyleSheet("QLabel { color: #9b59b6; font-weight: bold; }")
 
@@ -920,6 +931,7 @@ class _MaintenanceUIWindow(QMainWindow):
         """Signals to run the valve calibration procedure for the currently set pulse duration."""
         self._data_array[_DataArrayIndex.VALVE_CALIBRATE] = 1
         self._calibration_in_progress = True
+        self._calibration_seen_active = False
         self._calibration_status_label.setText("Calibration: Calibrating")
         self._calibration_status_label.setStyleSheet("QLabel { color: #16a085; font-weight: bold; }")
 

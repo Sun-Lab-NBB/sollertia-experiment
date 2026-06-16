@@ -27,7 +27,7 @@ from sollertia_shared_assets import (
 
 from .system import MesoscopeData, MesoscopePositions
 from .runtime_ui import collect_surgery_quality, collect_experimenter_notes, collect_experimenter_given_water_volume
-from ..cross_system import request_text, wait_for_enter, request_confirmation
+from ..cross_system import request_text, wait_for_enter, request_confirmation, request_required_confirmation
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -121,7 +121,10 @@ class TrialState:
     completed: int = 0
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
-    """Stores the total cumulative distance, in centimeters, the animals would travel at the end of each trial."""
+    """Stores the total cumulative distance, in centimeters, the animal will have traveled at the end of each trial."""
+    current_trial_guided: bool = False
+    """Tracks whether the trial currently in progress is running under guidance, captured when the trial's stimulus
+    fires so the trial outcome can be labeled correctly even after the guided-trial counter is decremented."""
 
     # Reinforcing (water reward) trial tracking.
     reinforcing_guided_trials: int = 0
@@ -210,6 +213,9 @@ class TrialState:
         is_aversive = self.is_current_trial_aversive()
         self.completed += 1
 
+        # Clears the per-trial guidance capture so the next trial starts unguided until its stimulus sets it.
+        self.current_trial_guided = False
+
         if is_aversive:
             # Aversive trial: success = met occupancy requirement (no puff delivered).
             if not self.aversive_succeeded:
@@ -225,6 +231,17 @@ class TrialState:
             self.reinforcing_failed_trials = 0
         self.reinforcing_rewarded = False
         return self.reinforcing_failed_trials
+
+
+@dataclass(frozen=True, slots=True)
+class _PreviousSessionWaterContext:
+    """Stores the animal weight and total water intake recovered from the most recent non-window-checking session."""
+
+    animal_weight_g: float
+    """The animal's weight, in grams, recorded at the start of the most recent prior session."""
+    received_water_volume_ml: float
+    """The total water volume, in milliliters, the animal received during the most recent prior session. This sums the
+    runtime-dispensed and experimenter-given volumes and excludes water dispensed while the system was paused."""
 
 
 def generate_mesoscope_position_snapshot(
@@ -314,8 +331,9 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until the operator confirms or declines the Zaber motor setup sequence.
-    if not request_confirmation(message="Carry out the Zaber motor setup sequence?", default=False):
+    # Blocks until the operator confirms or declines the Zaber motor setup sequence. The prompt has no default, so an
+    # accidental empty Enter cannot silently skip positioning the motors.
+    if not request_required_confirmation(message="Carry out the Zaber motor setup sequence?"):
         # Aborts method runtime, as no further Zaber setup is required.
         return
 
@@ -405,8 +423,9 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence.
-    if not request_confirmation(message="Carry out the Zaber motor shutdown sequence?", default=False):
+    # Blocks until the operator confirms or declines the Zaber motor shutdown sequence. The prompt has no default, so
+    # an accidental empty Enter cannot silently choose whether the motors are parked.
+    if not request_required_confirmation(message="Carry out the Zaber motor shutdown sequence?"):
         # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
         # before disconnecting.
         zaber_motors.disconnect()
@@ -599,7 +618,23 @@ def setup_mesoscope(
             default=False,
         )
 
-    mesoscope_driver.generate_reference()
+    # Reference generation can fail for operator-fixable reasons reported by the ScanImagePC (for example, no active ROI
+    # within the scanner FOV). Surfacing the exact ScanImagePC error and holding here for a retry lets the operator
+    # correct the issue on the spot, rather than propagating the error into a session teardown and data purge.
+    while True:
+        try:
+            mesoscope_driver.generate_reference()
+            break
+        except RuntimeError as error:
+            message = (
+                f"Mesoscope reference generation failed. {error} Address the issue on the ScanImagePC (for example, "
+                f"ensure at least one active ROI with a scanfield exists within the scanner FOV), then retry. Select "
+                f"'no' to abort the session and shut down."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+            if not request_confirmation(message="Retry mesoscope reference generation?", default=True):
+                raise
 
     # Window checking sessions only need the generated reference files, so they release the mesoscope without acquiring
     # any session frames.
@@ -674,13 +709,20 @@ def finalize_session_descriptor(
         descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
     else:
         # Non-window-checking sessions report the water delivered during the session alongside the animal's current
-        # and previous weights, then prompt for the total water the animal should receive. The returned value is the
-        # additional volume the experimenter must hand-deliver to reach that total, counting only session water.
+        # and previous weights and the water it received on the previous session, then prompt for the total water the
+        # animal should receive. The returned value is the additional volume the experimenter must hand-deliver to
+        # reach that total, counting only session water.
+        previous_context = _resolve_previous_session_water_context(
+            persistent_data_path=mesoscope_data.vrpc_data.persistent_data_path
+        )
+        previous_weight_g = previous_context.animal_weight_g if previous_context is not None else None
+        previous_received_water_volume_ml = (
+            previous_context.received_water_volume_ml if previous_context is not None else None
+        )
         descriptor.experimenter_given_water_volume_ml = collect_experimenter_given_water_volume(
             current_weight_g=descriptor.animal_weight_g,
-            previous_weight_g=_resolve_previous_animal_weight(
-                persistent_data_path=mesoscope_data.vrpc_data.persistent_data_path
-            ),
+            previous_weight_g=previous_weight_g,
+            previous_received_water_volume_ml=previous_received_water_volume_ml,
             session_water_volume_ml=descriptor.dispensed_water_volume_ml,
             default_total_water_volume_ml=_DEFAULT_TOTAL_WATER_VOLUME_ML,
         )
@@ -702,19 +744,22 @@ def finalize_session_descriptor(
     )
 
 
-def _resolve_previous_animal_weight(persistent_data_path: Path) -> float | None:
-    """Returns the animal weight recorded by the most recent non-window-checking session, or None when unavailable.
+def _resolve_previous_session_water_context(persistent_data_path: Path) -> _PreviousSessionWaterContext | None:
+    """Returns the animal weight and total water intake from the most recent non-window-checking session, or None.
 
     Notes:
-        The weight is read from the newest per-session-type descriptor that a prior session cached in the animal's
-        persistent directory. Window checking descriptors are skipped because they do not record the animal's weight.
-        The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData class.
+        Both values are read from the newest per-session-type descriptor that a prior session cached in the animal's
+        persistent directory. Window checking descriptors are skipped because they record neither the animal's weight
+        nor its water intake. The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData
+        class. The total intake matches the preprocessing definition, summing the runtime-dispensed and
+        experimenter-given volumes while excluding water dispensed during the paused state.
 
     Args:
         persistent_data_path: The path to the animal's persistent directory that stores the cached descriptors.
 
     Returns:
-        The animal weight from the most recent prior session, in grams, or None when no prior session recorded one.
+        A _PreviousSessionWaterContext carrying the most recent prior session's animal weight and total water intake,
+        or None when no prior session recorded them.
     """
     descriptor_file_names = (
         "lick_training_descriptor.yaml",
@@ -731,10 +776,21 @@ def _resolve_previous_animal_weight(persistent_data_path: Path) -> float | None:
 
     newest_path = max(existing_paths, key=lambda path: path.stat().st_mtime)
     if newest_path.name == descriptor_file_names[0]:
-        return float(LickTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
-    if newest_path.name == descriptor_file_names[1]:
-        return float(RunTrainingDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
-    return float(MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path).animal_weight_g)
+        descriptor: LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor = (
+            LickTrainingDescriptor.from_yaml(file_path=newest_path)
+        )
+    elif newest_path.name == descriptor_file_names[1]:
+        descriptor = RunTrainingDescriptor.from_yaml(file_path=newest_path)
+    else:
+        descriptor = MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path)
+
+    received_water_volume_ml = round(
+        descriptor.dispensed_water_volume_ml + descriptor.experimenter_given_water_volume_ml, ndigits=3
+    )
+    return _PreviousSessionWaterContext(
+        animal_weight_g=float(descriptor.animal_weight_g),
+        received_water_volume_ml=received_water_volume_ml,
+    )
 
 
 def _prompt_red_dot_alignment(previous_value: float) -> float:

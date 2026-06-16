@@ -80,8 +80,13 @@ ___
 
 The Mesoscope-VR runtime prompts the experimenter to call `runAcquisition(hSI, hSICtl)` as part of
 the broader Mesoscope preparation sequence, where `hSI` is the ScanImage handle object and `hSICtl`
-is the ScanImage controller. Use `help runAcquisition` in the MATLAB Command Window for the full
-list of supported arguments.
+is the ScanImage controller. Beyond these two handles, the function accepts only two optional
+name-value arguments: `root`, the ScanImagePC-local Mesoscope data root (default `F:\mesodata`),
+beneath which the function resolves the shared `mesoscope_data` output folder and the per-animal
+persistent reference hierarchy; and `broker`, the MQTT broker address described below. All remaining
+acquisition parameters - the z-step, z-range, exclusion zone, and related settings - are owned by the
+VRPC system configuration and delivered over MQTT with each command, not passed as function arguments.
+Use `help runAcquisition` in the MATLAB Command Window for the full argument documentation.
 
 ***Critical!*** `runAcquisition` is a **lock-in** function. It is launched **once** and then runs a
 persistent command loop that services VRPC commands continuously and **holds the MATLAB command line for
@@ -90,11 +95,11 @@ the runtime ends. To stop the control loop and free the command line, press **Ct
 Command Window (the broker connection dropping also ends the loop). The function prints this reminder when
 it starts.
 
-***Critical!*** The MQTT broker runs on the **VRPC**, not on the ScanImagePC, so the cross-machine
-connection must be configured explicitly. Pass the VRPC's network address through the `broker` argument,
-for example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`, replacing `VRPC-IP` with the
-VRPC's address on the local network. The default `tcp://127.0.0.1:1883` only works when the broker and
-ScanImage run on the same machine, which is not the standard two-machine deployment. The VRPC's broker
+***Critical!*** The MQTT broker runs on the **VRPC**, not on the ScanImagePC, so the connection is
+cross-machine. The `broker` argument defaults to `tcp://192.168.0.13:1883`, which targets the current
+VRPC and matches the broker listener configured on the VRPC's local network interface. Override it only
+if the broker host address or listener port changes, by passing the new address through the `broker`
+argument, for example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`. The VRPC's broker
 must also be configured to accept connections from the ScanImagePC over the local network.
 
 In most cases, the function executes three major steps:
@@ -102,15 +107,21 @@ In most cases, the function executes three major steps:
 1. **Motion estimation setup.** The function configures the acquisition according to the
    user-defined parameters and establishes the single plane or the z-stack of planes to image at
    runtime. It then acquires a set of reference sub-planes above and below each target plane and
-   uses the resulting volume to build the `MotionEstimator.me` file that detects and corrects motion
-   in the X, Y, and Z axes.
+   uses the resulting volume to build the `MotionEstimator.me` file, which stores the per-ROI motion
+   estimators. During the runtime, the motion manager pairs these estimators with the
+   `MariusMotionCorrector2` class to correct X and Y drift with the galvos and Z drift with the
+   fast-Z actuator.
 2. **High-definition z-stack acquisition.** The function increases the resolution of the target ROIs
    and repeats the z-stack acquisition, generating a high-definition `zstack.tiff` file that is kept
-   alongside the TIFF files acquired during runtime.
+   alongside the TIFF files acquired during runtime. It then rescales the ROIs back to their runtime
+   dimensions and saves a snapshot of the imaging field as a `fov.roi` file. Together with the
+   `MotionEstimator.me` file from step 1, the `zstack.tiff` and `fov.roi` files make up the three
+   reference files produced for each session.
 3. **Data acquisition.** The function configures the acquisition and motion-detection parameters for
    the runtime and enters its MQTT command loop. While in the loop, it begins, aborts, or recovers
-   frame acquisition in response to the commands published by the sollertia-experiment library, and
-   reports command reception and progress back to the library.
+   frame acquisition in response to the commands published by the sollertia-experiment library,
+   answers liveness probes and state queries, and reports command reception and progress back to the
+   library.
 
 ***Note,*** the function can also resume an interrupted runtime in response to the recover command.
 In this mode, it skips steps 1 and 2, reloads the existing `MotionEstimator.me` file from the shared

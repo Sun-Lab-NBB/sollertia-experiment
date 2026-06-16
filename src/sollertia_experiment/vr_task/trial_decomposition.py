@@ -56,6 +56,10 @@ class CachedMotifDecomposer:
     ) -> tuple[NDArray[np.uint8], NDArray[np.int32], NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
         """Prepares and caches the flattened motif data for faster cue sequence-to-trial decomposition.
 
+        Notes:
+            When the input trial motifs are element-wise equal to those cached on the previous call, the method returns
+            the previously cached flattened arrays and distances without recomputation.
+
         Args:
             trial_motifs: The trial motifs (wall cue sequences) to decompose.
             trial_distances: The trial motif distances, in centimeters.
