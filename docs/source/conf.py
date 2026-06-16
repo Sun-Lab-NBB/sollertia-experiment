@@ -3,6 +3,7 @@ import importlib_metadata
 
 # -- Project information -----------------------------------------------------
 project = 'sollertia-experiment'
+# noinspection PyShadowingBuiltins
 copyright = '2026, Sun (NeuroAI) lab'
 authors = ['Ivan Kondratyev (Inkaros)', 'Kushaan Gupta', 'Natalie Yeung', 'Katlynn Ryu', 'Jasmine Si']
 # Extracts the project version from the metadata .toml file.

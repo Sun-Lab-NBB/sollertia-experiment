@@ -60,7 +60,7 @@ The sollertia marketplace ships an `experiment` plugin with skills that target t
 `sollertia-experiment` MCP server (`sle mcp`). The ataraxis marketplace ships the `automation` plugin used across all
 Sollertia platform repositories. Low-level hardware work also draws on the `video`, `communication`, and
 `microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Acquisition System
-Configuration above).
+Configuration below).
 
 | Skill                                         | Description                                                          |
 |-----------------------------------------------|----------------------------------------------------------------------|

@@ -110,6 +110,7 @@ dev = [
     # Type stubs
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
+    "types-pyyaml>=6,<7",
     "types-tabulate>=0,<1",
     "types-tqdm>=4,<5",
 ]

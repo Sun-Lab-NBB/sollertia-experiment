@@ -33,6 +33,7 @@ ___
 
 ## Table of Contents
 
+- [Dependencies](#dependencies)
 - [Installation](#installation)
 - [Data Acquisition Systems](#data-acquisition-systems)
 - [Mesoscope-VR Data Acquisition System](#mesoscope-vr-data-acquisition-system)
@@ -47,6 +48,15 @@ ___
 
 ___
 
+## Dependencies
+
+For users, all Python library dependencies are installed automatically by all supported installation methods. Each
+acquisition system additionally relies on external software and hardware components that must be installed and
+configured separately; for the Mesoscope-VR system, these are documented in the
+[Software Dependencies](#software-dependencies) and [Hardware Dependencies](#hardware-dependencies) sections.
+
+___
+
 ## Installation
 
 ### Source
@@ -54,15 +64,17 @@ ___
 ***Note,*** installation from source is ***highly discouraged*** for anyone who is not an active project developer.
 
 1. Download this repository to the local machine using the preferred method, such as git-cloning. Use one of the
-   [stable releases](https://github.com/Sun-Lab-NBB/sollertia-experiment/releases).
+   [stable releases](https://github.com/Sun-Lab-NBB/sollertia-experiment/tags) that include precompiled binary and
+   source code distribution (sdist) wheels.
 2. If the downloaded distribution is stored as a compressed archive, unpack it using the appropriate decompression tool.
 3. `cd` to the root directory of the prepared project distribution.
-4. Run `python -m pip install .` to install the project. Alternatively, if using a distribution with precompiled
-   binaries, use `python -m pip install WHEEL_PATH`, replacing 'WHEEL_PATH' with the path to the wheel file.
+4. Run `pip install .` to install the project and its dependencies. Alternatively, if using a distribution with
+   precompiled binaries, use `pip install WHEEL_PATH`, replacing 'WHEEL_PATH' with the path to the wheel file.
 
 ### pip
 
-Use the following command to install the library using pip: `pip install sollertia-experiment`.
+Use the following command to install the library and all of its dependencies via
+[pip](https://pip.pypa.io/en/stable/): `pip install sollertia-experiment`
 
 ___
 
@@ -173,8 +185,8 @@ to the head-fixed animal's body and is used to position the animal on the runnin
 behavior.
 
 The current snapshot of Zaber motor configurations used by the Sollertia platform, alongside the motor parts list and
-electrical wiring instructions, is available
-[here](https://drive.google.com/drive/folders/1SL75KE3S2vuR9TTkxe6N4wvrYdK-Zmxn?usp=drive_link).
+electrical wiring instructions, is available in the
+[Zaber configuration snapshot folder](https://drive.google.com/drive/folders/1SL75KE3S2vuR9TTkxe6N4wvrYdK-Zmxn?usp=drive_link).
 
 ***Warning!*** Zaber motors have to be configured correctly to work with this library. To (re)configure the motors to work
 with the library, apply the setting snapshots from the link above via the
@@ -226,8 +238,8 @@ the cameras, the system leverages customized
 [ataraxis-video-system](https://github.com/Sun-Lab-NBB/ataraxis-video-system) bindings.
 
 Specific information about the cameras and related imaging hardware, as well as the snapshot of the configuration
-parameters used by each camera, is available
-[here](https://drive.google.com/drive/folders/1l9dLT2s1ysdA3lLpYfLT1gQlTXotq79l?usp=sharing).
+parameters used by each camera, is available in the
+[camera configuration snapshot folder](https://drive.google.com/drive/folders/1l9dLT2s1ysdA3lLpYfLT1gQlTXotq79l?usp=sharing).
 
 ### MicroControllers
 To interface with all other hardware components **other** than cameras and Zaber motors, the Mesoscope-VR system uses
@@ -368,8 +380,8 @@ will be populated once the final design implementation is constructed and tested
 The Mesoscope-VR assembly mostly consists of two types of components. First, it includes custom components manufactured
 via 3D-printing or machining (for metalwork). Second, it consists of generic components available from vendors such as
 ThorLabs, which are altered in workshops to fit the specific requirements of the Mesoscope-VR system. The blueprints and
-CAD files for all components of the Mesoscope-VR systems, including CAD renders of the assembled system, are available
-[here](https://drive.google.com/drive/folders/1Oz2qWAg3HkMqw6VXKlY_c3clcz-rDBgi?usp=sharing).
+CAD files for all components of the Mesoscope-VR systems, including CAD renders of the assembled system, are available in the
+[CAD and blueprint folder](https://drive.google.com/drive/folders/1Oz2qWAg3HkMqw6VXKlY_c3clcz-rDBgi?usp=sharing).
 
 ___
 
@@ -744,9 +756,8 @@ to the parent `sle mesoscope run` command before specifying the session type.
 The Mesoscope-VR system supports four types of runtime sessions:
 
 **1. Window Checking Session**
-```bash
-sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT window-checking
-```
+
+`sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT window-checking`
 
 This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
 zstack.tiff files for the checked animal. This session is typically used ~2–3 weeks after the surgical intervention and
@@ -754,9 +765,8 @@ before any training or experiment sessions to assess the quality of the interven
 the animal in experiment cohorts.
 
 **2. Lick Training Session**
-```bash
-sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]
-```
+
+`sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT lick-training [OPTIONS]`
 
 All animals that participate in Mesoscope-VR experiments undergo a two-stage training protocol, with lick training
 being the first stage. During this runtime, the animals are head fixed in the Mesoscope enclosure for ~20 minutes. The
@@ -768,9 +778,8 @@ Optional arguments include maximum training time, reward delay parameters, maxim
 tracking threshold.
 
 **3. Run Training Session**
-```bash
-sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]
-```
+
+`sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT run-training [OPTIONS]`
 
 This is the second stage of the mandatory two-stage Mesoscope-VR training protocol. During this runtime, the animals
 are head fixed in the Mesoscope enclosure for ~40 minutes. The primary goal of the runtime is to teach the animals to
@@ -782,9 +791,8 @@ Optional arguments include maximum training time, speed and duration thresholds,
 water volume, idle time allowance, and unconsumed reward tracking threshold.
 
 **4. Experiment Session**
-```bash
-sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]
-```
+
+`sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]`
 
 This session type is designed to execute the experiment specified in the target *experiment_configuration.yaml* file
 (see above). The system supports varying experiment configurations and Virtual Reality environments, offering
@@ -803,9 +811,7 @@ CLI command.
 
 The most commonly used operation is to **preprocess** the acquired data. This can be done manually by calling:
 
-```bash
-sle mesoscope preprocess -sp SESSION_PATH
-```
+`sle mesoscope preprocess -sp SESSION_PATH`
 
 Preprocessing consists of two major steps. The first step pulls all available data to the main data acquisition system
 machine (PC) and re-packages (re-compresses) the data to reduce its size without loss. The second step distributes
@@ -826,9 +832,7 @@ not generate any valid data. This involves removing all session data from **both
 long-term storage destinations. This runtime is extremely dangerous and, if not used carefully, can
 ***permanently delete valid data***. This mode can be triggered using:
 
-```bash
-sle mesoscope delete -sp SESSION_PATH
-```
+`sle mesoscope delete -sp SESSION_PATH`
 
 ***Warning!*** This command is not recommended for most users.
 
@@ -836,9 +840,7 @@ sle mesoscope delete -sp SESSION_PATH
 
 To transfer all sessions for an animal from one project to another, use:
 
-```bash
-sle mesoscope migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID
-```
+`sle mesoscope migrate -s SOURCE_PROJECT -d DESTINATION_PROJECT -a ANIMAL_ID`
 
 This moves the animal's data across all accessible storage destinations.
 
