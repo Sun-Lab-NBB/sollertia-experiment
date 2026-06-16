@@ -623,6 +623,7 @@ Mesoscope-VR `sle mesoscope` group.
 | `sle mesoscope configure system`     | Generate the Mesoscope-VR data acquisition system configuration file |
 | `sle mesoscope configure experiment` | Create a Mesoscope-VR experiment configuration from a task template  |
 | `sle mesoscope maintain`             | Run the Mesoscope-VR system maintenance session                      |
+| `sle mesoscope check-bridge`         | Check whether the ScanImagePC runAcquisition loop is reachable       |
 | `sle mesoscope run`                  | Execute Mesoscope-VR data acquisition and training sessions          |
 | `sle mesoscope preprocess`           | Preprocess a session's data and push it to long-term storage         |
 | `sle mesoscope delete`               | Remove a session's data from all storage destinations                |
@@ -699,6 +700,10 @@ acquisition system:
 ***Note,*** project and experiment discovery is provided by the sollertia-shared-assets library. Use `slsa get
 projects` and `slsa get experiments -p PROJECT` to list the projects and experiment configurations stored under the
 data root.
+
+***Note,*** the Mesoscope imaging control bridge has its own pre-flight check outside the `sle get` group. Use `sle
+mesoscope check-bridge` to confirm the ScanImagePC's `runAcquisition` control loop is reachable before starting a
+Mesoscope imaging session.
 
 ### Step 4: Maintaining the Acquisition System
 
@@ -873,8 +878,10 @@ The Mesoscope-VR-specific tools mirror the `sle mesoscope` CLI layer:
 | `read_system_configuration_tool`             | Loads the Mesoscope-VR system configuration                  |
 | `write_system_configuration_tool`            | Creates or replaces the Mesoscope-VR system configuration    |
 | `validate_system_configuration_tool`         | Validates the system configuration and reports mount status  |
+| `verify_camera_configuration_tool`           | Compares each camera's live GenICam config to its .yaml      |
 | `describe_system_configuration_schema_tool`  | Returns the system configuration dataclass schema            |
 | `check_system_mounts_tool`                   | Verifies all configured filesystem paths are accessible      |
+| `check_mesoscope_bridge_tool`                | Checks whether ScanImagePC runAcquisition loop is reachable  |
 | `read_session_zaber_positions_tool`          | Loads a session's ZaberPositions snapshot                    |
 | `write_session_zaber_positions_tool`         | Creates or replaces a session's ZaberPositions snapshot      |
 | `read_session_mesoscope_positions_tool`      | Loads a session's MesoscopePositions snapshot                |
