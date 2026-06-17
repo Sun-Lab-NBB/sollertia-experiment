@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING, Any
+import logging
 from datetime import datetime
 
 from ataraxis_base_utilities import console
@@ -21,6 +22,12 @@ from google.oauth2.service_account import Credentials
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+# Silences the googleapiclient transport's per-retry WARNING records. Every Google Sheet request below is issued with
+# num_retries=_GOOGLE_API_MAX_RETRIES, so transient timeouts and 5xx/429 responses are retried automatically and only
+# matter when they exhaust all retries, at which point the failure surfaces as a raised exception. Left enabled, the
+# retry warnings flood the runtime console during session-shutdown preprocessing without conveying actionable state.
+logging.getLogger("googleapiclient.http").setLevel(logging.ERROR)
 
 _SUPPORTED_DATE_FORMATS: set[str] = {"%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", "%m/%d/%Y"}
 """Stores the date format schemas supported when parsing dates read from Google Sheet files."""
