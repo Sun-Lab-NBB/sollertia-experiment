@@ -66,11 +66,24 @@ class VRTaskEventKind(IntEnum):
     """No dispatchable Unity event was produced this cycle: either the MQTT buffer was empty, or the consumed message
     was on a topic that cycle() does not surface (a handshake topic)."""
     STIMULUS_TRIGGERED = 1
-    """The animal triggered a trial's stimulus delivery. The firing trial is identified by the event's trial_name."""
+    """A trial resolved its stimulus outcome. The event's trial_name, delivered, and cause carry the result."""
     TRIGGER_DELAY_REQUESTED = 2
     """Unity requested the acquisition system to apply a brake pulse for the specified duration."""
     UNITY_TERMINATED = 3
     """Unity reported that its runtime has been terminated; the acquisition system must enter an emergency pause."""
+
+
+class StimulusCause(StrEnum):
+    """Defines the cause of a trial's stimulus outcome as reported by Unity.
+
+    Unity stamps this on every Stimulus message so the acquisition system can distinguish a self-driven success
+    from a guidance-driven outcome without knowing the appetitive-or-aversive stimulus valence.
+    """
+
+    BEHAVIOR = "behavior"
+    """The animal's own action produced the outcome."""
+    GUIDANCE = "guidance"
+    """The guidance fallback produced the outcome."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +95,13 @@ class VRTaskEvent:
     delay_ms: int = 0
     """The brake pulse duration in milliseconds. Populated only for the TRIGGER_DELAY_REQUESTED event."""
     trial_name: str = ""
-    """The name of the trial whose stimulus zone fired. Populated only for the STIMULUS_TRIGGERED event."""
+    """The name of the trial that resolved. Populated only for the STIMULUS_TRIGGERED event."""
+    delivered: bool = True
+    """Determines whether the trial's physical stimulus was delivered. Populated only for the STIMULUS_TRIGGERED
+    event; defaults to True so payloads predating the field resolve as a delivery."""
+    cause: StimulusCause = StimulusCause.BEHAVIOR
+    """The cause of the trial outcome: the animal's behavior or the guidance fallback. Populated only for the
+    STIMULUS_TRIGGERED event."""
 
 
 @dataclass(slots=True)
@@ -130,8 +149,9 @@ class _VRTaskMQTTTopics(StrEnum):
     """Sensor-interaction event published by the acquisition runtime when the animal engages an interaction sensor
     (empty trigger payload). The Mesoscope-VR system resolves this generic event to the lick sensor."""
     STIMULUS = "Stimulus"
-    """Stimulus delivery event published by Unity when a stimulus trigger zone fires (StimulusMessage with string
-    trialName identifying the trial whose zone fired)."""
+    """Trial outcome event published by Unity when a stimulus trigger zone resolves a trial (StimulusMessage with
+    string trialName, bool delivered, and string cause reporting whether the physical stimulus fired and whether
+    the animal's behavior or the guidance fallback produced the outcome)."""
     DELAY = "Delay"
     """Brake activation request published by Unity carrying the remaining occupancy duration in milliseconds
     (TriggerDelayMessage with uint delayMilliseconds)."""
@@ -344,10 +364,25 @@ class VRTaskDriver:
 
         if topic == _VRTaskMQTTTopics.STIMULUS:
             trial_name = ""
+            delivered = True
+            cause = StimulusCause.BEHAVIOR
             if payload is not None:
                 stimulus_payload = json.loads(payload.decode("utf-8"))
                 trial_name = str(stimulus_payload.get("trialName", ""))
-            return VRTaskEvent(kind=VRTaskEventKind.STIMULUS_TRIGGERED, trial_name=trial_name)
+                delivered = bool(stimulus_payload.get("delivered", True))
+                # Any cause value other than the explicit guidance marker resolves to behavior, so missing or
+                # unrecognized values default to the self-driven outcome.
+                cause = (
+                    StimulusCause.GUIDANCE
+                    if stimulus_payload.get("cause") == StimulusCause.GUIDANCE.value
+                    else StimulusCause.BEHAVIOR
+                )
+            return VRTaskEvent(
+                kind=VRTaskEventKind.STIMULUS_TRIGGERED,
+                trial_name=trial_name,
+                delivered=delivered,
+                cause=cause,
+            )
 
         if topic == _VRTaskMQTTTopics.DELAY:
             delay_payload = json.loads(payload.decode("utf-8"))
