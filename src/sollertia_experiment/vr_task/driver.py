@@ -133,7 +133,7 @@ class _VRTaskMQTTTopics(StrEnum):
     task environment.
 
     Notes:
-        The catalog mirrors the flat PascalCase contract published by sollertia-unity-tasks' MQTTTopics constant
+        The catalog mirrors the flat PascalCase contract published by sollertia-virtual-reality' MQTTTopics constant
         set.
     """
 
@@ -171,7 +171,7 @@ class _VRTaskMQTTTopics(StrEnum):
 
 
 class VRTaskDriver:
-    """Drives the Unity game engine that runs the Virtual Reality task implemented in sollertia-unity-tasks.
+    """Drives the Unity game engine that runs the Virtual Reality task implemented in sollertia-virtual-reality.
 
     Encapsulates the MQTT contract with Unity: connection lifecycle, scene handshake, VR display verification, wall
     cue sequence retrieval, per-cycle stimulus pump, guidance toggling, and resume-after-Unity-restart. The driver

@@ -1,5 +1,5 @@
 """Provides the UnityBridgeClient used to drive Unity Editor scene activation and play-mode control from the Virtual
-Reality task driver via the editor-only MCP Bridge HTTP endpoint exposed by sollertia-unity-tasks.
+Reality task driver via the editor-only MCP Bridge HTTP endpoint exposed by sollertia-virtual-reality.
 """
 
 from __future__ import annotations
@@ -16,11 +16,11 @@ import httpx
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _BRIDGE_HOST: str = "127.0.0.1"
-"""The loopback host the sollertia-unity-tasks editor MCP Bridge binds its HTTP listener to. The bridge only accepts
+"""The loopback host the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener to. The bridge only accepts
 loopback connections, so the runtime must execute on the same machine as the Unity Editor."""
 
 _BRIDGE_PORT: int = 8090
-"""The TCP port the sollertia-unity-tasks editor MCP Bridge binds its HTTP listener to."""
+"""The TCP port the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener to."""
 
 _BRIDGE_REQUEST_TIMEOUT_S: float = 5.0
 """The per-request timeout, in seconds, applied to every bridge HTTP call. Kept short because the bridge runs on the
@@ -34,7 +34,7 @@ class UnityBridgeError(RuntimeError):
 class UnityBridgeClient:
     """Drives Unity Editor scene activation and play-mode transitions over the editor-only MCP Bridge.
 
-    Wraps the bridge's HTTP JSON tool protocol exposed by McpBridge.cs in sollertia-unity-tasks. Every call POSTs
+    Wraps the bridge's HTTP JSON tool protocol exposed by McpBridge.cs in sollertia-virtual-reality. Every call POSTs
     a single short-timeout localhost request and raises UnityBridgeError on a connection failure or a failed tool
     response, letting the caller decide between retrying, surfacing the error, or probing reachability.
 

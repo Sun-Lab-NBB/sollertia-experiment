@@ -1,5 +1,5 @@
 """Provides the acquisition-system-agnostic interface for the Unity Virtual Reality tasks in
-https://github.com/Sun-Lab-NBB/sollertia-unity-tasks.
+https://github.com/Sun-Lab-NBB/sollertia-virtual-reality.
 """
 
 from .bridge import UnityBridgeError, UnityBridgeClient

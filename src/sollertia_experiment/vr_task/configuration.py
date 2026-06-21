@@ -29,8 +29,8 @@ def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:
 
     Notes:
         Templates are resolved from the task templates directory persisted by the sollertia-shared-assets 'slsa
-        configure templates' CLI command. The directory typically points to the local sollertia-unity-tasks repository
-        copy. The template file name is expected to match the Unity scene name with a '.yaml' suffix.
+        configure templates' CLI command. The directory typically points to the local sollertia-virtual-reality
+        repository copy. The template file name is expected to match the Unity scene name with a '.yaml' suffix.
 
     Args:
         unity_scene_name: Stem of a YAML template file stored in the configured task templates directory.
