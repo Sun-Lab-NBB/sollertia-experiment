@@ -173,8 +173,8 @@ parts:
 2. The [Unity game engine](https://unity.com/products/unity-engine) running the Virtual Reality game world used in all
    experiments to control the task environment and resolve the task logic. The virtual environment runs on the main
    data acquisition computer referred to as the **'VRPC'** and relies on the [MQTT](https://mqtt.org/) communication
-   protocol and the [sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) Unity package to
-   bidirectionally interface with the virtual task environment.
+   protocol and the [sollertia-virtual-reality](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality) Unity
+   package to bidirectionally interface with the virtual task environment.
 3. The [microcontroller-powered hardware](https://github.com/Sun-Lab-NBB/sollertia-micro-controllers) that allows the
    animal to bidirectionally interface with various physical components (modules) of the Mesoscope-VR system.
 4. A set of visual and IR-range cameras, used to acquire behavior video data.
@@ -325,9 +325,9 @@ and firmware side.
 ### Virtual Reality Task Environment (Unity)
 The task environment used in all Mesoscope-VR experiments is rendered and controlled by the Unity game engine. To make
 Unity work with this library, each project-specific Unity task must use the bindings and assets released as part of the
-[sollertia-unity-tasks repository](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks). Follow the instructions from
-that repository to set up the Unity game engine to interface with this library and to create new virtual task
-environments.
+[sollertia-virtual-reality repository](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality). Follow the
+instructions from that repository to set up the Unity game engine to interface with this library and to create
+new virtual task environments.
 
 ***Note,*** The Unity Editor must be running with the project open before starting an experiment session. The editor
 exposes an HTTP MCP Bridge that starts automatically with it, and this library uses that bridge to open the correct
@@ -342,7 +342,7 @@ communication is used to:
   it against the scene name expected from the experiment configuration.
 - **Decompose the cue sequence**: Unity sends the active VR environment's wall cue sequence to sollertia-experiment,
   which decomposes it into individual trials. The spatial trial layout (per-trial cue sequences and segment lengths) is
-  sourced from the Virtual Reality **task template** (defined in sollertia-unity-tasks and persisted as
+  sourced from the Virtual Reality **task template** (defined in sollertia-virtual-reality and persisted as
   `vr_configuration.yaml`), not from the experiment configuration. The acquisition-side per-trial parameters (reward
   size, gas puff duration, etc.) from the experiment configuration are then joined back to each decomposed trial by
   trial name.
@@ -626,7 +626,7 @@ following files and subdirectories:
 10. **vr_configuration.yaml**: This file is created for every Virtual Reality task session. It stores a snapshot of the
     Virtual Reality task template — the linear infinite corridor cues, VR environment, and trial structures — that the
     Unity game engine renders during the session, sourced from the
-    [sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) task template. Together with
+    [sollertia-virtual-reality](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality) task template. Together with
     `experiment_configuration.yaml`, it contains the information necessary to fully replicate the Virtual Reality
     environment used during the experiment.
 
@@ -809,9 +809,9 @@ documentation* of the appropriate data-acquisition system available from the
 [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library.
 
 **Mesoscope-VR Note:** Mesoscope-VR experiments also require a valid Virtual Reality environment generated through the
-[sollertia-unity-tasks](https://github.com/Sun-Lab-NBB/sollertia-unity-tasks) package. The experiment configuration
-supplies the acquisition-side, per-trial parameters, while the Virtual Reality **task template** defines the corridor
-cues, VR environment, and spatial trial structures that Unity renders (persisted with the session as
+[sollertia-virtual-reality](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality) package. The experiment
+configuration supplies the acquisition-side, per-trial parameters, while the Virtual Reality **task template** defines
+the corridor cues, VR environment, and spatial trial structures that Unity renders (persisted with the session as
 `vr_configuration.yaml`); the two are joined by trial name at runtime. After creating the experiment configuration, use
 the Unity package to generate the corresponding VR scene before running experiment sessions.
 
@@ -1120,7 +1120,7 @@ available:
 | Plugin       | Targets                  | MCP server | Role                                                                        |
 |--------------|--------------------------|------------|-----------------------------------------------------------------------------|
 | `assets`     | sollertia-shared-assets  | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
-| `unity`      | sollertia-unity-tasks    | (relay)    | Unity task authoring, VR scenes, and the MQTT contract; uses the slsa relay |
+| `unity`      | sollertia-virtual-reality    | (relay)    | Unity task authoring, VR scenes, and the MQTT contract; uses the slsa relay |
 | `experiment` | sollertia-experiment     | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
 | `mesoscope`  | sollertia-experiment     | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
 | `forging`    | sollertia-forgery        | `sl-mcp`   | Downstream behavior processing and analysis                                 |
