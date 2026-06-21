@@ -346,8 +346,9 @@ communication is used to:
   `vr_configuration.yaml`), not from the experiment configuration. The acquisition-side per-trial parameters (reward
   size, gas puff duration, etc.) from the experiment configuration are then joined back to each decomposed trial by
   trial name.
-- **Synchronize runtime state**: sollertia-experiment sends the per-cycle animal motion delta to Unity and receives
-  stimulus-trigger events (each carrying the name of the trial that fired).
+- **Synchronize runtime state**: sollertia-experiment sends the per-cycle animal motion delta to Unity and receives one
+  stimulus event per trial (carrying the trial name, whether the stimulus was delivered, and whether the animal's own
+  behavior or the guidance fallback produced the outcome), resolving each trial's outcome from it.
 - **Control task guidance**: sollertia-experiment sends task guidance state updates based on animal performance.
 
 Two configuration files are preserved with each Virtual Reality task session's raw data for reproducibility: the
