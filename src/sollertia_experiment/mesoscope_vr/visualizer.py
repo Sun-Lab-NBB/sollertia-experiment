@@ -58,6 +58,15 @@ _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
 _TRIAL_HISTORY_SIZE: int = 20
 """The number of trials to display in the trial performance panel."""
 
+_TRIAL_OUTCOME_EMPTY: np.int8 = np.int8(-1)
+"""The trial-outcome code marking an unfilled slot in the trial-history buffer."""
+_TRIAL_OUTCOME_FAILURE: np.int8 = np.int8(0)
+"""The trial-outcome code for a trial in which the animal did not reach the desired outcome."""
+_TRIAL_OUTCOME_SUCCESS: np.int8 = np.int8(1)
+"""The trial-outcome code for a trial the animal completed unaided."""
+_TRIAL_OUTCOME_GUIDED: np.int8 = np.int8(2)
+"""The trial-outcome code for a trial completed via the guidance fallback."""
+
 _SPEED_AXIS_YLIM: tuple[float, float] = (-5.0, 105.0)
 """The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
 _BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
@@ -195,8 +204,10 @@ class BehaviorVisualizer:
 
         # Stores trial types: -1=empty, 0=reinforcing, 1=aversive. Newest trial is at the rightmost index.
         self._trial_types: NDArray[np.int8] = np.full(shape=_TRIAL_HISTORY_SIZE, fill_value=-1, dtype=np.int8)
-        # Stores trial outcomes: -1=empty, 0=failed, 1=success, 2=guided. Newest trial is at the rightmost index.
-        self._trial_outcomes: NDArray[np.int8] = np.full(shape=_TRIAL_HISTORY_SIZE, fill_value=-1, dtype=np.int8)
+        # Stores trial outcomes (newest at the rightmost index), see the _TRIAL_OUTCOME_* codes for the values.
+        self._trial_outcomes: NDArray[np.int8] = np.full(
+            shape=_TRIAL_HISTORY_SIZE, fill_value=_TRIAL_OUTCOME_EMPTY, dtype=np.int8
+        )
         self._total_trials: int = 0  # Tracks total trial count for x-axis labeling.
 
         self._trial_axis: Axes | None = None
@@ -573,7 +584,8 @@ class BehaviorVisualizer:
                 treated as a reinforcing (water reward) trial.
             succeeded: Determines whether the animal succeeded in the trial. For reinforcing trials, success means
                 the animal received a reward. For aversive trials, success means the animal avoided the puff.
-            was_guided: Determines whether the trial was in guidance mode (automatic rewards/puffs).
+            was_guided: Determines whether the guidance fallback produced the outcome, as opposed to the animal
+                reaching it unaided. Only meaningful when succeeded is True.
         """
         if self._trial_axis is None:
             return
@@ -581,13 +593,14 @@ class BehaviorVisualizer:
         # Increments total trial count for x-axis labeling.
         self._total_trials += 1
 
-        # Maps the boolean outcome flags to integer values: 2=guided, 1=success, 0=failure.
-        if was_guided:
-            outcome = np.int8(2)
-        elif succeeded:
-            outcome = np.int8(1)
+        # Maps the boolean outcome flags to a trial-outcome code with failure taking priority: a failed trial did
+        # not reach the desired outcome, a guided trial reached it via the fallback, and a success reached it unaided.
+        if not succeeded:
+            outcome = _TRIAL_OUTCOME_FAILURE
+        elif was_guided:
+            outcome = _TRIAL_OUTCOME_GUIDED
         else:
-            outcome = np.int8(0)
+            outcome = _TRIAL_OUTCOME_SUCCESS
 
         self._trial_types = np.roll(a=self._trial_types, shift=-1)
         self._trial_outcomes = np.roll(a=self._trial_outcomes, shift=-1)
@@ -781,7 +794,7 @@ class BehaviorVisualizer:
         Args:
             rectangles: The list of rectangle patches (either reinforcing or aversive).
             index: The index of the trial in the circular buffer (0 to _TRIAL_HISTORY_SIZE - 1).
-            outcome: The outcome value (-1=empty, 0=failure, 1=success, 2=guided).
+            outcome: The trial-outcome code to render, one of the _TRIAL_OUTCOME_* values.
         """
         if index >= len(rectangles):
             return
@@ -789,9 +802,9 @@ class BehaviorVisualizer:
         rectangle = rectangles[index]
 
         # Sets rectangle color based on outcome: green=success, red=failure, gray=guided.
-        if outcome == 1:
+        if outcome == _TRIAL_OUTCOME_SUCCESS:
             rectangle.set_facecolor(_plt_palette(color="green"))
-        elif outcome == 0:
+        elif outcome == _TRIAL_OUTCOME_FAILURE:
             rectangle.set_facecolor(_plt_palette(color="red"))
         else:
             rectangle.set_facecolor(_plt_palette(color="gray"))

@@ -3,13 +3,14 @@ https://github.com/Sun-Lab-NBB/sollertia-unity-tasks.
 """
 
 from .bridge import UnityBridgeError, UnityBridgeClient
-from .driver import VRTaskEvent, VRTaskState, VRTaskDriver, VRTaskEventKind
+from .driver import VRTaskEvent, VRTaskState, VRTaskDriver, StimulusCause, VRTaskEventKind
 from .configuration import VRTaskConfiguration, load_vr_task_template
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 __all__ = [
     "CachedMotifDecomposer",
     "DecomposedTrials",
+    "StimulusCause",
     "UnityBridgeClient",
     "UnityBridgeError",
     "VRTaskConfiguration",

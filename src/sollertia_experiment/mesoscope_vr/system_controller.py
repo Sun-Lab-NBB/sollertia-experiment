@@ -25,6 +25,7 @@ from ataraxis_data_structures import DataLogger, LogPackage
 from .system import MesoscopeData, ZaberPositions, MesoscopePositions, get_system_configuration
 from ..vr_task import (
     VRTaskDriver,
+    StimulusCause,
     VRTaskEventKind,
     load_vr_task_template,
 )
@@ -1379,24 +1380,13 @@ class MesoscopeVRSystem:
             # only sends an MQTT message when the position has changed.
             self._vr_task.push_position(absolute_position=current_position)
 
-            # Checks if the animal has completed the current trial.
+            # Checks if the animal has completed the current trial. The trial's outcome was already resolved and
+            # reported to the visualizer at the stimulus point (in _unity_cycle); this block only advances the
+            # distance-based trial counter and drives recovery mode from the resolved outcome flags.
             if self._trial_state.trial_completed(traveled_distance=traveled_distance):
-                # Captures the trial outcome before advance_trial() resets the flags.
+                # Captures the trial type before advance_trial() increments the trial position.
                 is_aversive = self._trial_state.is_current_trial_aversive()
-                if is_aversive:
-                    succeeded = self._trial_state.aversive_succeeded
-                else:
-                    succeeded = self._trial_state.reinforcing_rewarded
-
-                # Reads the guidance flag captured when the trial's stimulus fired (in _unity_cycle) rather than
-                # re-deriving it from the guided-trial counter, which the stimulus has already decremented. This keeps
-                # the last guided trial of each block from being mislabeled as non-guided.
-                was_guided = self._trial_state.current_trial_guided
-
                 failed_count = self._trial_state.advance_trial()
-
-                # Reports the trial outcome to the visualizer.
-                self._visualizer.add_trial_outcome(is_aversive=is_aversive, succeeded=succeeded, was_guided=was_guided)
 
                 # Handles recovery mode activation based on trial type.
                 if is_aversive:
@@ -1447,45 +1437,42 @@ class MesoscopeVRSystem:
         event = self._vr_task.cycle()
 
         if event.kind == VRTaskEventKind.STIMULUS_TRIGGERED:
-            if self._trial_state.is_current_trial_aversive():
-                # Aversive trial: delivers the gas puff.
-                puff_duration = self._trial_state.get_current_puff_duration()
-                self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
+            # Resolves the trial outcome from the stimulus message: delivered drives both the physical stimulus and
+            # the success determination, while the cause distinguishes a self-driven outcome from a guided one.
+            is_aversive = self._trial_state.is_current_trial_aversive()
+            guided = event.cause == StimulusCause.GUIDANCE
+            if is_aversive:
+                # Aversive trial: a delivered stimulus is the gas puff the animal failed to avoid, while an omitted
+                # stimulus means the animal met the occupancy requirement and avoided the puff.
+                if event.delivered:
+                    puff_duration = self._trial_state.get_current_puff_duration()
+                    self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
+                    self._visualizer.add_puff_event()
+                succeeded = not event.delivered
+                self._trial_state.aversive_succeeded = succeeded
 
-                # Configures the visualizer to display the gas puff valve activation event during the next update cycle.
-                self._visualizer.add_puff_event()
-
-                # Captures whether this trial is guided before decrementing the counter, so _data_cycle can label the
-                # outcome correctly even for the last guided trial of a block (where the decrement would otherwise zero
-                # the counter before the completion handler reads it).
-                self._trial_state.current_trial_guided = self._trial_state.aversive_guided_trials > 0
-
-                # Decrements the guided trial counter for aversive trials.
+                # Decrements the guided trial counter once per aversive trial, disabling guidance when the block ends.
                 if self._trial_state.aversive_guided_trials > 0:
                     self._trial_state.aversive_guided_trials -= 1
                     if self._trial_state.aversive_guided_trials == 0:
                         self._ui.set_aversive_guidance_state(enabled=False)
-
-                # Marks the aversive trial as failed (puff was delivered).
-                self._trial_state.aversive_succeeded = False
             else:
-                # Reinforcing trial: delivers the water reward.
-                reward_size, tone_duration = self._trial_state.get_current_reward()
-                self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
+                # Reinforcing trial: a delivered stimulus is the water reward, while an omitted stimulus means the
+                # animal left the reward zone without earning it.
+                if event.delivered:
+                    reward_size, tone_duration = self._trial_state.get_current_reward()
+                    self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
+                succeeded = event.delivered
+                self._trial_state.reinforcing_rewarded = succeeded
 
-                # Captures whether this trial is guided before decrementing the counter, so _data_cycle can label the
-                # outcome correctly even for the last guided trial of a block (where the decrement would otherwise zero
-                # the counter before the completion handler reads it).
-                self._trial_state.current_trial_guided = self._trial_state.reinforcing_guided_trials > 0
-
-                # Decrements the guided trial counter for reinforcing trials.
+                # Decrements the guided trial counter once per reinforcing trial, disabling guidance when it ends.
                 if self._trial_state.reinforcing_guided_trials > 0:
                     self._trial_state.reinforcing_guided_trials -= 1
                     if self._trial_state.reinforcing_guided_trials == 0:
                         self._ui.set_reinforcing_guidance_state(enabled=False)
 
-                # Marks the reinforcing trial as rewarded.
-                self._trial_state.reinforcing_rewarded = True
+            # Reports the resolved trial outcome to the visualizer at the stimulus point.
+            self._visualizer.add_trial_outcome(is_aversive=is_aversive, succeeded=succeeded, was_guided=guided)
 
         elif event.kind == VRTaskEventKind.TRIGGER_DELAY_REQUESTED:
             if event.delay_ms > 0:
