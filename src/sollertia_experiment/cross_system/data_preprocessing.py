@@ -157,7 +157,8 @@ def snapshot_surgery_data(
 
     Notes:
         Returns the SurgeryLog handle so callers can reuse the established Google Sheets connection for follow-up
-        operations, such as updating the surgery quality assessment.
+        operations, such as updating the surgery quality assessment. The caller owns the returned handle and must
+        close it (typically from a try/finally block) once it is no longer needed to release the underlying SSL socket.
 
     Args:
         session_data: The SessionData instance that defines the processed session.

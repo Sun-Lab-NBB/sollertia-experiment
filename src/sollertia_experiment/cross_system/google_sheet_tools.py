@@ -353,13 +353,24 @@ class SurgeryLog:
             )
             console.error(message=message, error=ValueError)
 
-    def __del__(self) -> None:
-        """Terminates the HTTP connection to the processed surgery log when the instance is garbage-collected."""
+    def close(self) -> None:
+        """Closes the underlying HTTP connection to the processed surgery log, releasing its SSL socket.
+
+        Notes:
+            Callers should invoke this method (typically from a try/finally block) as soon as they finish using the
+            instance. Relying on garbage collection to release the connection leaves the SSL socket open until an
+            unpredictable finalization point, which surfaces as a ResourceWarning during interpreter shutdown.
+        """
         # Guards the close because __init__ may fail before _service is assigned (e.g. an invalid credentials path),
-        # which would otherwise raise a confusing secondary AttributeError that masks the original error.
+        # which would otherwise raise a confusing secondary AttributeError that masks the original error. The underlying
+        # googleapiclient connection tolerates repeated close() calls, so this method is safe to call more than once.
         service = getattr(self, "_service", None)
         if service is not None:
             service.close()
+
+    def __del__(self) -> None:
+        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
+        self.close()
 
     def extract_animal_data(self) -> SurgeryData:
         """Extracts and returns the processed animal's surgical intervention data as a SurgeryData object.
@@ -775,15 +786,25 @@ class WaterLog:
         # pre-filled with dates. If not, this method will enter a loop to prompt the user to resolve the date issue.
         self._session_row_index: int = self._find_date_row(formatted_date)
 
-    def __del__(self) -> None:
-        """Terminates the HTTP connection to the processed water restriction and animal interaction log when the
-        instance is garbage-collected.
+    def close(self) -> None:
+        """Closes the underlying HTTP connection to the processed water restriction and animal interaction log,
+        releasing its SSL socket.
+
+        Notes:
+            Callers should invoke this method (typically from a try/finally block) as soon as they finish using the
+            instance. Relying on garbage collection to release the connection leaves the SSL socket open until an
+            unpredictable finalization point, which surfaces as a ResourceWarning during interpreter shutdown.
         """
         # Guards the close because __init__ may fail before _service is assigned (e.g. an invalid credentials path),
-        # which would otherwise raise a confusing secondary AttributeError that masks the original error.
+        # which would otherwise raise a confusing secondary AttributeError that masks the original error. The underlying
+        # googleapiclient connection tolerates repeated close() calls, so this method is safe to call more than once.
         service = getattr(self, "_service", None)
         if service is not None:
             service.close()
+
+    def __del__(self) -> None:
+        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
+        self.close()
 
     def update_water_log(self, weight: float, water_ml: float, experimenter_id: str, session_type: str) -> None:
         """Updates the processed data acquisition session's row in the processed log file with the input animal's data.

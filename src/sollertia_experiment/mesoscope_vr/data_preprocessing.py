@@ -818,70 +818,81 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file, if
     # the surgery log Google Sheet is configured. The returned handle reuses the established Google Sheets connection
     # for any follow-up surgery log updates.
+    # Tracks both Google Sheets handles so the enclosing try/finally can close their HTTP connections deterministically.
+    # Relying on garbage collection to release these connections leaves the underlying SSL sockets open until an
+    # unpredictable finalization point, which surfaces as a ResourceWarning during interpreter shutdown.
     surgery_log: SurgeryLog | None = None
-    if sheets_data.surgery_sheet_id:
-        surgery_log = snapshot_surgery_data(
-            session_data=session_data,
-            animal_id=animal_id,
-            credentials_path=credentials_path,
-            surgery_sheet_id=sheets_data.surgery_sheet_id,
-        )
-    else:
-        message = (
-            f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery data snapshot "
-            f"for the session {session_data.session_name}."
-        )
-        console.echo(message=message, level=LogLevel.WARNING)
-
-    # Handles window checking sessions differently - updates surgery quality instead of the water restriction log.
-    if is_window_checking:
-        # Updating the surgery quality requires the surgery log Google Sheet connection established above. Skips the
-        # update with a warning if the surgery log Google Sheet is not configured.
-        if surgery_log is None:
+    water_log_sheet: WaterLog | None = None
+    try:
+        if sheets_data.surgery_sheet_id:
+            surgery_log = snapshot_surgery_data(
+                session_data=session_data,
+                animal_id=animal_id,
+                credentials_path=credentials_path,
+                surgery_sheet_id=sheets_data.surgery_sheet_id,
+            )
+        else:
             message = (
-                f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery quality "
-                f"assessment update for the session {session_data.session_name}."
+                f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery data "
+                f"snapshot for the session {session_data.session_name}."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+
+        # Handles window checking sessions differently - updates surgery quality instead of the water restriction log.
+        if is_window_checking:
+            # Updating the surgery quality requires the surgery log Google Sheet connection established above. Skips the
+            # update with a warning if the surgery log Google Sheet is not configured.
+            if surgery_log is None:
+                message = (
+                    f"The surgery log Google Sheet is not configured for the host-machine. Skipping the surgery "
+                    f"quality assessment update for the session {session_data.session_name}."
+                )
+                console.echo(message=message, level=LogLevel.WARNING)
+                return
+
+            # Ensures that the quality is always between 0 and 3 inclusive.
+            quality = max(0, min(3, int(descriptor.surgery_quality)))
+            surgery_log.update_surgery_quality(quality=quality)
+            message = "Surgery quality: Updated."
+            console.echo(message=message, level=LogLevel.SUCCESS)
+            return
+
+        # For non-window-checking sessions, updates the water restriction log, if the water restriction log Google Sheet
+        # is configured. Skips the update with a warning otherwise.
+        if not sheets_data.water_log_sheet_id:
+            message = (
+                f"The water restriction log Google Sheet is not configured for the host-machine. Skipping the water "
+                f"restriction log update for the session {session_data.session_name}."
             )
             console.echo(message=message, level=LogLevel.WARNING)
             return
 
-        # Ensures that the quality is always between 0 and 3 inclusive.
-        quality = max(0, min(3, int(descriptor.surgery_quality)))
-        surgery_log.update_surgery_quality(quality=quality)
-        message = "Surgery quality: Updated."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-        return
+        # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
+        training_water = round(descriptor.dispensed_water_volume_ml, ndigits=3)
+        experimenter_water = round(descriptor.experimenter_given_water_volume_ml, ndigits=3)
+        total_water = training_water + experimenter_water
 
-    # For non-window-checking sessions, updates the water restriction log, if the water restriction log Google Sheet is
-    # configured. Skips the update with a warning otherwise.
-    if not sheets_data.water_log_sheet_id:
-        message = (
-            f"The water restriction log Google Sheet is not configured for the host-machine. Skipping the water "
-            f"restriction log update for the session {session_data.session_name}."
+        # Updates the Water Restriction log to reflect the processed session's data.
+        water_log_sheet = WaterLog(
+            session_date=session_data.session_name,
+            animal_id=animal_id,
+            credentials_path=credentials_path,
+            sheet_id=sheets_data.water_log_sheet_id,
         )
-        console.echo(message=message, level=LogLevel.WARNING)
-        return
-
-    # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
-    training_water = round(descriptor.dispensed_water_volume_ml, ndigits=3)
-    experimenter_water = round(descriptor.experimenter_given_water_volume_ml, ndigits=3)
-    total_water = training_water + experimenter_water
-
-    # Updates the Water Restriction log to reflect the processed session's data.
-    water_log_sheet = WaterLog(
-        session_date=session_data.session_name,
-        animal_id=animal_id,
-        credentials_path=credentials_path,
-        sheet_id=sheets_data.water_log_sheet_id,
-    )
-    water_log_sheet.update_water_log(
-        weight=descriptor.animal_weight_g,
-        water_ml=total_water,
-        experimenter_id=descriptor.experimenter,
-        session_type=session_data.session_type,
-    )
-    message = "Water restriction log entry: Written."
-    console.echo(message=message, level=LogLevel.SUCCESS)
+        water_log_sheet.update_water_log(
+            weight=descriptor.animal_weight_g,
+            water_ml=total_water,
+            experimenter_id=descriptor.experimenter,
+            session_type=session_data.session_type,
+        )
+        message = "Water restriction log entry: Written."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+    finally:
+        # Closes both Google Sheets connections regardless of which processing branch executed or whether it raised.
+        if surgery_log is not None:
+            surgery_log.close()
+        if water_log_sheet is not None:
+            water_log_sheet.close()
 
 
 def _migrate_sessions_via_destination(
