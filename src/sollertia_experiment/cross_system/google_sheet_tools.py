@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 import logging
 from datetime import datetime
+import contextlib
 
 from ataraxis_base_utilities import console
 from sollertia_shared_assets import (
@@ -37,6 +38,10 @@ _DIGIT_PATTERN: re.Pattern[str] = re.compile(r"\d+")
 
 _GOOGLE_API_MAX_RETRIES: int = 5
 """The number of automatic retries for Google API requests that fail with transient (5xx or 429) errors."""
+
+_REGIONAL_ACCESS_BOUNDARY_DRAIN_TIMEOUT: float = 5.0
+"""The maximum number of seconds to wait for the google-auth Regional Access Boundary background worker to finish
+before releasing a Google Sheets service connection."""
 
 _REQUIRED_SURGERY_HEADERS: set[str] = {
     # Subject Data headers
@@ -366,7 +371,7 @@ class SurgeryLog:
         # googleapiclient connection tolerates repeated close() calls, so this method is safe to call more than once.
         service = getattr(self, "_service", None)
         if service is not None:
-            service.close()
+            _close_google_service(service=service)
 
     def __del__(self) -> None:
         """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
@@ -800,7 +805,7 @@ class WaterLog:
         # googleapiclient connection tolerates repeated close() calls, so this method is safe to call more than once.
         service = getattr(self, "_service", None)
         if service is not None:
-            service.close()
+            _close_google_service(service=service)
 
     def __del__(self) -> None:
         """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
@@ -919,3 +924,36 @@ class WaterLog:
             spreadsheetId=self._sheet_id,
             body={"requests": requests},
         ).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
+
+
+def _close_google_service(service: Resource) -> None:
+    """Releases the input Google Sheets service connection together with every SSL socket it opened.
+
+    Notes:
+        Starting with google-auth 2.50.0, the first use of service-account credentials spawns a daemon thread that
+        performs a Regional Access Boundary lookup over a deep-copied HTTP transport. That transport is unreachable
+        from the service object, so the service's own close() cannot release its socket, which then surfaces as a
+        ResourceWarning during interpreter shutdown. This function drains the worker and closes its transport before
+        closing the service. Every step is best-effort and guarded, so the function gracefully degrades to closing
+        only the service if a future google-auth release changes this internal structure.
+
+    Args:
+        service: The googleapiclient service instance whose connections should be released.
+    """
+    # Reaches the Regional Access Boundary worker through the credentials attached to the service's authorized HTTP
+    # wrapper. The attribute chain is private google-auth state, so it is accessed defensively via getattr and any
+    # missing link simply skips the worker cleanup, falling back to garbage collection for that one transport.
+    with contextlib.suppress(Exception):
+        credentials = getattr(getattr(service, "_http", None), "credentials", None)
+        refresh_manager = getattr(getattr(credentials, "_rab_manager", None), "refresh_manager", None)
+        worker = getattr(refresh_manager, "_worker", None)
+        if worker is not None:
+            worker.join(timeout=_REGIONAL_ACCESS_BOUNDARY_DRAIN_TIMEOUT)
+            # Closing the transport while the worker is still issuing its request is unsafe because httplib2 is not
+            # thread-safe. Skips the cleanup in the rare case the lookup does not finish within the join timeout.
+            if not worker.is_alive():
+                worker_http = getattr(getattr(worker, "_request", None), "http", None)
+                if worker_http is not None:
+                    worker_http.close()
+
+    service.close()
