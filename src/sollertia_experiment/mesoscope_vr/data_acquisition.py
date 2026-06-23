@@ -1178,8 +1178,8 @@ def experiment_logic(
         session_data.mark_runtime_initialized()
 
         # Main session loop. It loops over all submitted experiment states and ends the session after executing the
-        # last state.
-        for state in experiment_config.experiment_states.values():
+        # last state. The state name is the key under which the state is registered in the experiment configuration.
+        for state_name, state in experiment_config.experiment_states.items():
             runtime_timer.reset()
 
             system.change_runtime_state(new_state=state.experiment_state_code)
@@ -1219,7 +1219,7 @@ def experiment_logic(
             # ProgressBar wrapper currently does not expose.
             with tqdm(
                 total=state.state_duration_s,
-                desc=f"Executing experiment state {state.experiment_state_code}",
+                desc=f"Executing experiment state {state.experiment_state_code} ({state_name})",
                 bar_format="{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}s",
             ) as progress_bar:
                 # Cycles until the state duration of seconds passes.
