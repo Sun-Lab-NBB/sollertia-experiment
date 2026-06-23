@@ -43,8 +43,8 @@ RESPONSE_DELAY: int = 500
 """Specifies the number of milliseconds to delay showing the response prompt after showing a message that requires
 user interaction."""
 _DEFAULT_TOTAL_WATER_VOLUME_ML: float = 1.0
-"""The total session water volume, in milliliters, offered as the default when the experimenter is prompted for the
-amount of water the animal should receive at session teardown."""
+"""The total session water volume, in milliliters, offered as the fallback default when the experimenter is prompted for
+the amount of water the animal should receive at session teardown and no prior session recorded a water intake."""
 
 
 class _ResponseDelayTimer:
@@ -688,7 +688,8 @@ def finalize_session_descriptor(
     sessions, the experimenter is additionally prompted for the cranial window quality rating, which is otherwise left
     at its default value. For the other session types, the experimenter is instead shown the session water summary and
     prompted for the total water the animal should receive, and the additional volume to hand-deliver is recorded as
-    the experimenter-given water volume.
+    the experimenter-given water volume. The prompt defaults to the total water the animal received on the previous
+    session, falling back to a standard default when no prior session recorded a water intake.
 
     Args:
         descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
@@ -713,12 +714,20 @@ def finalize_session_descriptor(
         previous_received_water_volume_ml = (
             previous_context.received_water_volume_ml if previous_context is not None else None
         )
+        # Pre-fills the prompt with the total water the animal received on the previous session, letting the
+        # experimenter keep the same intake by accepting the default. Falls back to the standard default when no prior
+        # session recorded a water intake.
+        default_total_water_volume_ml = (
+            previous_received_water_volume_ml
+            if previous_received_water_volume_ml is not None
+            else _DEFAULT_TOTAL_WATER_VOLUME_ML
+        )
         descriptor.experimenter_given_water_volume_ml = collect_experimenter_given_water_volume(
             current_weight_g=descriptor.animal_weight_g,
             previous_weight_g=previous_weight_g,
             previous_received_water_volume_ml=previous_received_water_volume_ml,
             session_water_volume_ml=descriptor.dispensed_water_volume_ml,
-            default_total_water_volume_ml=_DEFAULT_TOTAL_WATER_VOLUME_ML,
+            default_total_water_volume_ml=default_total_water_volume_ml,
         )
 
     # Collects the experimenter notes through a blocking terminal prompt and stores them inside the descriptor. The
