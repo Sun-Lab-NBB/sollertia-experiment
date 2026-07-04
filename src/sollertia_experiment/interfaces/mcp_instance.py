@@ -9,7 +9,7 @@ from pathlib import Path
 import contextlib
 from dataclasses import MISSING, fields, is_dataclass
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from mcp.server.fastmcp import FastMCP
 from ataraxis_base_utilities import ensure_directory_exists
 
