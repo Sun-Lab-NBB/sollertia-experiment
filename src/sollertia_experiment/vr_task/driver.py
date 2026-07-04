@@ -421,7 +421,7 @@ class VRTaskDriver:
                 "Unable to reach the Unity Editor. Open the Unity project in the editor; its MCP bridge starts "
                 "automatically. Run 'sle get unity' to verify the connection."
             )
-            console.echo(message=message, level=LogLevel.WARNING)
+            console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter once the Unity Editor is running.")
         console.echo(message="Unity bridge: Connected.", level=LogLevel.SUCCESS)
 

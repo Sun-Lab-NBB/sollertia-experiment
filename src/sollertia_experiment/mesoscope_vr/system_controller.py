@@ -448,11 +448,16 @@ class MesoscopeVRSystem:
             has_reinforcing_trials = any(isinstance(trial, MesoscopeWaterRewardTrial) for trial in trial_structures)
             has_aversive_trials = any(isinstance(trial, MesoscopeGasPuffTrial) for trial in trial_structures)
 
+        # Only mesoscope experiment sessions connect to and drive the mesoscope, so the reference regeneration button
+        # is exposed exclusively for them.
+        has_mesoscope = self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
+
         # Initializes the runtime control GUI with the appropriate mode and trial type configuration.
         self._ui.start(
             mode=visualizer_mode,
             has_reinforcing_trials=has_reinforcing_trials,
             has_aversive_trials=has_aversive_trials,
+            has_mesoscope=has_mesoscope,
         )
 
         # Synchronizes the Unity game engine's state with the initial state of the runtime control's UI before
@@ -1080,6 +1085,9 @@ class MesoscopeVRSystem:
             if self._ui.gas_valve_puff_signal:
                 self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=self._ui.gas_valve_puff_duration)
 
+            if self._ui.generate_reference_signal:
+                self._regenerate_reference()
+
             if self._vr_task is not None:
                 if self._ui.enable_reinforcing_guidance != self._vr_task.state.reinforcing_guidance_enabled:
                     self._vr_task.set_reinforcing_guidance(enabled=self._ui.enable_reinforcing_guidance)
@@ -1099,6 +1107,10 @@ class MesoscopeVRSystem:
 
         # Signals the UI that setup is complete - this permanently disables valve open/close buttons.
         self._ui.set_setup_complete()
+
+        # Disables the reference regeneration button now that the runtime is about to start acquiring mesoscope
+        # frames. The button is re-enabled only if the mesoscope later stops acquiring frames.
+        self._ui.set_reference_generation_enabled(enabled=False)
 
     def _start_mesoscope(self) -> None:
         """Commands the ScanImagePC to begin frame acquisition over MQTT and waits for the frame acquisition to begin.
@@ -1193,6 +1205,33 @@ class MesoscopeVRSystem:
                 break
 
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
+
+    def _regenerate_reference(self) -> None:
+        """Regenerates the Mesoscope reference (fresh motion estimator and high-definition z-stack) on demand.
+
+        Notes:
+            This exposes the reference generation sequence used during the initial mesoscope setup as an on-demand
+            operation triggered from the runtime control GUI. The button is disabled for the full, blocking duration
+            of the sequence so a second regeneration cannot be scheduled while one is already running, and it is
+            re-enabled afterward only while the mesoscope remains idle. A recoverable ScanImagePC failure is surfaced
+            to the operator, who can retry through the same button.
+        """
+        # Disables the button so the mesoscope cannot be asked to start another regeneration while this one runs.
+        self._ui.set_reference_generation_enabled(enabled=False)
+        try:
+            self._mesoscope.generate_reference()
+        except RuntimeError as error:
+            message = (
+                f"Mesoscope reference regeneration failed. {error} Address the issue on the ScanImagePC (for "
+                f"example, ensure at least one active ROI with a scanfield exists within the scanner FOV), then use "
+                f"the reference regeneration button to retry."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+        finally:
+            # Re-enables the button only while the mesoscope stays idle: before acquisition starts, or after it
+            # stopped acquiring frames. If acquisition is already running, the button remains disabled.
+            if not self._mesoscope_started or self._mesoscope_terminated:
+                self._ui.set_reference_generation_enabled(enabled=True)
 
     def _change_system_state(self, new_state: int) -> None:
         """Updates and logs the new Mesoscope-VR system state.
@@ -1524,6 +1563,14 @@ class MesoscopeVRSystem:
         if self._ui.gas_valve_puff_signal:
             self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=self._ui.gas_valve_puff_duration)
 
+        # Regenerates the mesoscope reference on demand. The request is consumed every cycle, mirroring the other
+        # momentary signals, so a press that leaked through the button's refresh latency cannot linger and fire at a
+        # later termination. The regeneration itself runs only while the mesoscope is idle after it stopped
+        # acquiring frames.
+        regenerate_requested = self._ui.generate_reference_signal
+        if self._mesoscope_terminated and regenerate_requested:
+            self._regenerate_reference()
+
         if self._vr_task is not None:
             # Synchronizes guidance state with UI.
             if self._ui.enable_reinforcing_guidance != self._vr_task.state.reinforcing_guidance_enabled:
@@ -1555,6 +1602,10 @@ class MesoscopeVRSystem:
 
         # Cleans up acquisition markers to facilitate restart.
         self._stop_mesoscope()
+
+        # Re-enables the reference regeneration button now that the mesoscope is idle, so the operator can optionally
+        # regenerate the reference before resuming acquisition.
+        self._ui.set_reference_generation_enabled(enabled=True)
 
         message = (
             "Address the issue that prevents the Mesoscope from acquiring frames and resume the runtime. Follow "
@@ -1611,6 +1662,10 @@ class MesoscopeVRSystem:
             self._trial_state.completed = 0
 
         if self._mesoscope_terminated:
+            # Disables the reference regeneration button while the mesoscope is re-armed, so a regeneration cannot be
+            # scheduled mid-recovery.
+            self._ui.set_reference_generation_enabled(enabled=False)
+
             # If the ScanImagePC or ScanImage software crashed, the user must relaunch the runAcquisition function
             # before resuming. The recover() command reloads the session estimator and re-arms the mesoscope without
             # regenerating the reference data, after which the start sequence re-triggers frame acquisition.
@@ -1627,16 +1682,21 @@ class MesoscopeVRSystem:
                 # A failed re-arm (for example, the ScanImagePC still reports no active ROI) must drop the runtime back
                 # into the emergency pause rather than propagate out and tear down the live session. Re-engaging the GUI
                 # pause flag holds the runtime in the paused cycle so the operator can correct the issue and resume
-                # again. The 'paused' and 'mesoscope_terminated' trackers are intentionally left set by the early return.
+                # again. The 'paused' and 'mesoscope_terminated' trackers are intentionally left set by the early
+                # return.
                 message = (
                     f"Mesoscope re-arm failed. {error} Resolve the issue on the ScanImagePC, then resume the runtime "
                     f"again to retry. Alternatively, terminate the runtime to attempt a graceful shutdown."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
+                # Re-enables the button so the operator can regenerate the reference or retry while the mesoscope
+                # remains idle in the emergency pause.
+                self._ui.set_reference_generation_enabled(enabled=True)
                 self._ui.set_pause_state(paused=True)
                 return
 
-            # Resets the termination tracker if Mesoscope acquisition restarts successfully.
+            # Resets the termination tracker if Mesoscope acquisition restarts successfully. The button stays
+            # disabled from the re-arm step above, matching the mesoscope resuming frame acquisition.
             self._mesoscope_terminated = False
 
         # Updates the 'paused_time' value to reflect the time spent inside the 'paused' state. Most runtimes use this
