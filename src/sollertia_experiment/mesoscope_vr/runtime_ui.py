@@ -96,6 +96,12 @@ class _DataArrayIndex(IntEnum):
     """Stores the runtime-driven running epoch duration threshold, in milliseconds, excluding the user-defined
     modifier.
     """
+    GENERATE_REFERENCE = 18
+    """Tracks the user's request to regenerate the Mesoscope reference (motion estimator and high-definition
+    z-stack).
+    """
+    REFERENCE_BUTTON_ENABLED = 19
+    """Tracks whether the Mesoscope reference regeneration button is currently enabled in the GUI."""
 
 
 class _WaterValveTrackerIndex(IntEnum):
@@ -138,6 +144,8 @@ class RuntimeControlUI:
         _mode: The VisualizerMode that determines which UI elements are enabled.
         _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
         _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+        _has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference regeneration
+            button.
         _ui_process: The Process instance running the GUI cycle.
         _started: Tracks whether the UI process is running.
     """
@@ -145,12 +153,13 @@ class RuntimeControlUI:
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
         # Defines the prototype array for the SharedMemoryArray initialization and sets the array elements to the
         # desired default state.
-        prototype = np.zeros(shape=18, dtype=np.int32)
+        prototype = np.zeros(shape=20, dtype=np.int32)
         prototype[_DataArrayIndex.PAUSE_STATE] = 1  # Ensures all runtimes start in a paused state.
         prototype[_DataArrayIndex.REINFORCING_GUIDANCE_ENABLED] = 0  # Initially disables reinforcing guidance.
         prototype[_DataArrayIndex.AVERSIVE_GUIDANCE_ENABLED] = 0  # Initially disables aversive guidance.
         prototype[_DataArrayIndex.REWARD_VOLUME] = 5  # Preconfigures reward delivery to use 5 μL rewards.
         prototype[_DataArrayIndex.GAS_VALVE_PUFF_DURATION] = 100  # Preconfigures gas puff delivery to use 100 ms puffs.
+        prototype[_DataArrayIndex.REFERENCE_BUTTON_ENABLED] = 1  # Enables reference regeneration during pre-start.
 
         self._data_array: SharedMemoryArray = SharedMemoryArray.create_array(
             name="runtime_control_ui", prototype=prototype, exists_ok=True
@@ -165,6 +174,9 @@ class RuntimeControlUI:
         # Trial type flags, set when start() is called based on experiment configuration.
         self._has_reinforcing_trials: bool = True
         self._has_aversive_trials: bool = True
+
+        # Determines whether the runtime uses the mesoscope, set when start() is called based on the session type.
+        self._has_mesoscope: bool = False
 
         # Defines but does not automatically start the UI process. The process target is set in start() to pass
         # the mode.
@@ -186,6 +198,7 @@ class RuntimeControlUI:
         *,
         has_reinforcing_trials: bool = True,
         has_aversive_trials: bool = True,
+        has_mesoscope: bool = False,
     ) -> None:
         """Starts the remote UI process.
 
@@ -196,6 +209,8 @@ class RuntimeControlUI:
                 When True, the UI shows the reinforcing guidance toggle button.
             has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True,
                 the UI shows the aversive guidance toggle button and the gas puff valve control group.
+            has_mesoscope: Determines whether the runtime uses the mesoscope. When True, the UI shows the reference
+                regeneration button.
         """
         if self._started:
             return
@@ -203,6 +218,7 @@ class RuntimeControlUI:
         self._mode = VisualizerMode(mode)
         self._has_reinforcing_trials = has_reinforcing_trials
         self._has_aversive_trials = has_aversive_trials
+        self._has_mesoscope = has_mesoscope
 
         # Creates the UI process with the mode and trial type flags as arguments. Uses partial to bind keyword
         # arguments, allowing the method signature to use keyword-only boolean parameters.
@@ -211,6 +227,7 @@ class RuntimeControlUI:
             mode=self._mode,
             has_reinforcing_trials=self._has_reinforcing_trials,
             has_aversive_trials=self._has_aversive_trials,
+            has_mesoscope=self._has_mesoscope,
         )
         ui_process = Process(target=target, daemon=True)
         self._ui_process = ui_process
@@ -289,6 +306,24 @@ class RuntimeControlUI:
         """
         self._data_array[_DataArrayIndex.SETUP_COMPLETE] = 1
 
+    def set_reference_generation_enabled(self, *, enabled: bool) -> None:
+        """Configures the GUI to enable or disable the Mesoscope reference regeneration button.
+
+        Notes:
+            The button is enabled while the mesoscope is idle before the runtime starts and is re-enabled if the
+            mesoscope stops acquiring frames. It is disabled while the mesoscope is busy, whether acquiring frames or
+            regenerating the reference, so a new regeneration cannot be scheduled while one is already running.
+
+            Any pending press is discarded on every state change, so a press that reached the shared array through
+            the GUI refresh latency, or during an in-progress regeneration, cannot trigger an unrequested
+            regeneration later.
+
+        Args:
+            enabled: Determines whether the reference regeneration button is currently enabled.
+        """
+        self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 0
+        self._data_array[_DataArrayIndex.REFERENCE_BUTTON_ENABLED] = 1 if enabled else 0
+
     @property
     def exit_signal(self) -> bool:
         """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
@@ -302,6 +337,13 @@ class RuntimeControlUI:
         reward_flag = bool(self._data_array[_DataArrayIndex.REWARD_SIGNAL])
         self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
         return reward_flag
+
+    @property
+    def generate_reference_signal(self) -> bool:
+        """Returns True if the user has requested the system to regenerate the Mesoscope reference."""
+        signal = bool(self._data_array[_DataArrayIndex.GENERATE_REFERENCE])
+        self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 0
+        return signal
 
     @property
     def speed_modifier(self) -> int:
@@ -395,6 +437,7 @@ class RuntimeControlUI:
         *,
         has_reinforcing_trials: bool,
         has_aversive_trials: bool,
+        has_mesoscope: bool,
     ) -> None:
         """Runs the UI management cycle in a parallel process.
 
@@ -402,6 +445,8 @@ class RuntimeControlUI:
             mode: The VisualizerMode that determines which UI elements are enabled.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
             has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+            has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference
+                regeneration button.
 
         Raises:
             RuntimeError: If the GUI application for the runtime control interface cannot be initialized.
@@ -423,6 +468,7 @@ class RuntimeControlUI:
                 mode=mode,
                 has_reinforcing_trials=has_reinforcing_trials,
                 has_aversive_trials=has_aversive_trials,
+                has_mesoscope=has_mesoscope,
             )
             window.show()
 
@@ -571,9 +617,13 @@ class _ControlUIWindow(QMainWindow):
         _mode: The VisualizerMode that determines which UI elements are enabled.
         _has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
         _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
+        _has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference regeneration
+            button.
         _is_paused: Tracks whether the runtime is paused.
         _setup_complete: Tracks whether the initial setup phase is complete. Once True, valve open/close buttons
             are permanently disabled.
+        _reference_generation_enabled: Tracks whether the reference regeneration button is currently enabled, so the
+            button is toggled only when the runtime-driven state changes.
         _reinforcing_guidance_enabled: Tracks whether reinforcing trial guidance is enabled.
         _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
@@ -604,6 +654,8 @@ class _ControlUIWindow(QMainWindow):
             puff controls.
         _gas_valve_status_label: The label that displays the gas valve's state, or None when the mode does not include
             gas puff controls.
+        _generate_reference_button: The button that regenerates the Mesoscope reference, or None when the runtime does
+            not use the mesoscope.
         _speed_group: The widget group containing the running speed threshold controls, or None outside run training.
         _duration_group: The widget group containing the running epoch duration threshold controls, or None outside
             run training.
@@ -621,6 +673,7 @@ class _ControlUIWindow(QMainWindow):
         *,
         has_reinforcing_trials: bool = True,
         has_aversive_trials: bool = True,
+        has_mesoscope: bool = False,
     ) -> None:
         super().__init__()
 
@@ -630,9 +683,11 @@ class _ControlUIWindow(QMainWindow):
         self._mode: VisualizerMode = VisualizerMode(mode)
         self._has_reinforcing_trials: bool = has_reinforcing_trials
         self._has_aversive_trials: bool = has_aversive_trials
+        self._has_mesoscope: bool = has_mesoscope
 
         self._is_paused: bool = True
         self._setup_complete: bool = False
+        self._reference_generation_enabled: bool = True
         self._reinforcing_guidance_enabled: bool = False
         self._aversive_guidance_enabled: bool = False
 
@@ -656,6 +711,8 @@ class _ControlUIWindow(QMainWindow):
             if has_aversive_trials:
                 base_height += 45  # Aversive guidance button.
                 base_height += 130  # Gas puff valve control group.
+        if has_mesoscope:
+            base_height += 45  # Mesoscope reference regeneration button.
         self.setFixedSize(450, base_height)
 
         self._setup_ui()
@@ -729,6 +786,22 @@ class _ControlUIWindow(QMainWindow):
             aversive_guidance_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             runtime_control_layout.addWidget(aversive_guidance_button)
             self._aversive_guidance_button = aversive_guidance_button
+
+        # Regenerate Reference button (only shown when the runtime uses the mesoscope). It stays enabled while the
+        # mesoscope is idle before the runtime starts and after the mesoscope stops acquiring frames.
+        self._generate_reference_button: QPushButton | None = None
+        if self._has_mesoscope:
+            generate_reference_button = QPushButton("🔬 Regenerate Reference")
+            generate_reference_button.setToolTip(
+                "Regenerates the mesoscope motion estimator and high-definition z-stack on the ScanImage PC. Only "
+                "available before the runtime starts and after the mesoscope stops acquiring frames."
+            )
+            generate_reference_button.clicked.connect(self._generate_reference)
+            generate_reference_button.setObjectName("generateReferenceButton")
+            generate_reference_button.setMinimumHeight(35)
+            generate_reference_button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            runtime_control_layout.addWidget(generate_reference_button)
+            self._generate_reference_button = generate_reference_button
 
         # Adds runtime status tracker to the same box.
         self._runtime_status_label = QLabel("Runtime Status: ⏸️ Paused")
@@ -1084,6 +1157,24 @@ class _ControlUIWindow(QMainWindow):
                         border-color: #21618c;
                     }
 
+                    QPushButton#generateReferenceButton {
+                        background-color: #8e44ad;
+                        color: white;
+                        border-color: #7d3c98;
+                        font-weight: bold;
+                    }
+
+                    QPushButton#generateReferenceButton:hover {
+                        background-color: #7d3c98;
+                        border-color: #6c3483;
+                    }
+
+                    QPushButton#generateReferenceButton:disabled {
+                        background-color: #ecf0f1;
+                        color: #95a5a6;
+                        border-color: #bdc3c7;
+                    }
+
                     QLabel {
                         color: #2c3e50;
                         font-size: 12pt;
@@ -1383,6 +1474,15 @@ class _ControlUIWindow(QMainWindow):
                 self._setup_complete = True
                 self._disable_valve_open_close_buttons()
 
+            # Reflects the runtime-driven enable state of the reference regeneration button. The button is enabled
+            # before acquisition starts and re-enabled if the mesoscope stops acquiring frames, and disabled while
+            # the mesoscope actively acquires frames.
+            if self._generate_reference_button is not None:
+                external_reference_enabled = bool(self._data_array[_DataArrayIndex.REFERENCE_BUTTON_ENABLED])
+                if external_reference_enabled != self._reference_generation_enabled:
+                    self._reference_generation_enabled = external_reference_enabled
+                    self._generate_reference_button.setEnabled(external_reference_enabled)
+
             # Refreshes the run training threshold spinboxes so they display the current effective thresholds as the
             # runtime-driven component progresses with the volume of water delivered to the animal.
             self._last_auto_speed = self._sync_run_training_spinbox(
@@ -1446,6 +1546,10 @@ class _ControlUIWindow(QMainWindow):
         self._reward_in_progress = True
         self._valve_status_label.setText("Valve: 💧 Delivering")
         self._valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
+
+    def _generate_reference(self) -> None:
+        """Instructs the system to regenerate the Mesoscope reference (motion estimator and high-definition z-stack)."""
+        self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 1
 
     def _open_valve(self) -> None:
         """Instructs the system to open the water delivery valve."""

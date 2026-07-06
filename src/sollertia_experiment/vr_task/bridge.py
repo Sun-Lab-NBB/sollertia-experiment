@@ -94,6 +94,37 @@ class UnityBridgeClient:
         """
         self._call(tool="open_scene", args={"scene_path": scene_path, "unsaved_changes": unsaved_changes})
 
+    def set_active_controller(self, controller_name: str) -> str:
+        """Sets the active scene actor's motion controller and returns the controller the scene reports afterward.
+
+        Notes:
+            The write only marks the scene dirty, so the caller must issue it while the editor is in Edit Mode for
+            the change to take effect on the next Play Mode entry.
+
+        Args:
+            controller_name: The GameObject name of the controller to bind to the scene's actor, matched against
+                the controllers present in the scene by the bridge.
+
+        Returns:
+            The name of the controller the scene's actor references after the write. A value that differs from the
+            requested name indicates the write did not take effect.
+
+        Raises:
+            UnityBridgeError: If the bridge is unreachable, rejects the controller name, or omits the actor
+                controller from its response.
+        """
+        payload = self._call(tool="write_task_parameters", args={"actor": {"controller": controller_name}})
+        state = payload.get("state")
+        actor = state.get("actor") if isinstance(state, dict) else None
+        controller = actor.get("controller") if isinstance(actor, dict) else None
+        if not isinstance(controller, str):
+            message = (
+                f"Unable to set the Unity scene actor's controller to '{controller_name}'. The bridge "
+                f"'write_task_parameters' response did not report an actor controller, but got {payload}."
+            )
+            raise UnityBridgeError(message)
+        return controller
+
     def enter_play_mode(self) -> str:
         """Requests the editor to enter Play Mode.
 
