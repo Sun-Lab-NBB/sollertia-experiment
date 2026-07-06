@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     from .configuration import VRTaskConfiguration
 
 
+_LINEAR_CONTROLLER_NAME: str = "Linear"
+"""The Unity scene GameObject name of the physical linear treadmill controller. The driver enforces this controller
+during scene activation so the task is driven by real treadmill motion. A freshly generated or hand-edited scene can
+leave the keyboard-driven simulated controller bound to the actor, which would silently substitute simulated motion
+for the animal's treadmill motion during the experiment."""
+
 _SETUP_POLLING_DELAY_MS: int = 10
 """The delay, in milliseconds, between consecutive Unity buffer polls during the interactive setup sequence."""
 
@@ -426,19 +432,35 @@ class VRTaskDriver:
         console.echo(message="Unity bridge: Connected.", level=LogLevel.SUCCESS)
 
     def _activate_scene(self) -> None:
-        """Opens the expected Unity scene through the bridge, persisting any unsaved editor changes.
+        """Opens the expected Unity scene through the bridge and binds the physical linear treadmill controller.
+
+        Notes:
+            Persists any unsaved editor changes when switching scenes, then forces the actor's motion controller to
+            the physical linear treadmill before Unity is armed. Enforcing the controller here prevents a scene that
+            was left with the keyboard-driven simulated controller from substituting simulated motion for the
+            animal's treadmill motion during the experiment.
 
         Raises:
-            UnityBridgeError: If the expected scene cannot be resolved to a project scene path or the bridge refuses
-                to open it.
+            UnityBridgeError: If the expected scene cannot be resolved to a project scene path, the bridge refuses
+                to open it, or the linear treadmill controller cannot be bound to the actor.
         """
         try:
             scene_path = self._bridge.resolve_scene_path(scene_name=self._expected_scene_name)
             self._bridge.open_scene(scene_path=scene_path)
+            controller = self._bridge.set_active_controller(controller_name=_LINEAR_CONTROLLER_NAME)
         except UnityBridgeError as exception:
             message = f"Unable to open the Virtual Reality scene '{self._expected_scene_name}' in Unity. {exception}"
             console.error(message=message, error=UnityBridgeError)
-        message = f"Unity scene: Opened '{self._expected_scene_name}'."
+
+        if controller != _LINEAR_CONTROLLER_NAME:
+            message = (
+                f"Unable to bind the physical linear treadmill controller to the Virtual Reality scene "
+                f"'{self._expected_scene_name}'. The scene's actor reports the '{controller}' controller instead of "
+                f"the expected '{_LINEAR_CONTROLLER_NAME}' controller."
+            )
+            console.error(message=message, error=UnityBridgeError)
+
+        message = f"Unity scene: Opened '{self._expected_scene_name}' with the '{_LINEAR_CONTROLLER_NAME}' controller."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
     def _arm_unity(self) -> None:
