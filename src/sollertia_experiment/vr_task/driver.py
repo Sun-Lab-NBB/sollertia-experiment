@@ -435,10 +435,11 @@ class VRTaskDriver:
         """Opens the expected Unity scene through the bridge and binds the physical linear treadmill controller.
 
         Notes:
-            Persists any unsaved editor changes when switching scenes, then forces the actor's motion controller to
-            the physical linear treadmill before Unity is armed. Enforcing the controller here prevents a scene that
-            was left with the keyboard-driven simulated controller from substituting simulated motion for the
-            animal's treadmill motion during the experiment.
+            Persists any unsaved editor changes when switching scenes, then queries the actor's motion controller and
+            rebinds it to the physical linear treadmill only when a different controller is bound. Skipping the write
+            when the scene already uses the linear treadmill avoids marking an otherwise clean scene dirty, while the
+            corrective write still prevents a scene left with the keyboard-driven simulated controller from
+            substituting simulated motion for the animal's treadmill motion during the experiment.
 
         Raises:
             UnityBridgeError: If the expected scene cannot be resolved to a project scene path, the bridge refuses
@@ -447,7 +448,9 @@ class VRTaskDriver:
         try:
             scene_path = self._bridge.resolve_scene_path(scene_name=self._expected_scene_name)
             self._bridge.open_scene(scene_path=scene_path)
-            controller = self._bridge.set_active_controller(controller_name=_LINEAR_CONTROLLER_NAME)
+            controller = self._bridge.get_active_controller()
+            if controller != _LINEAR_CONTROLLER_NAME:
+                controller = self._bridge.set_active_controller(controller_name=_LINEAR_CONTROLLER_NAME)
         except UnityBridgeError as exception:
             message = f"Unable to open the Virtual Reality scene '{self._expected_scene_name}' in Unity. {exception}"
             console.error(message=message, error=UnityBridgeError)

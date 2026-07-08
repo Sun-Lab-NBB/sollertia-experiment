@@ -94,6 +94,22 @@ class UnityBridgeClient:
         """
         self._call(tool="open_scene", args={"scene_path": scene_path, "unsaved_changes": unsaved_changes})
 
+    def get_active_controller(self) -> str:
+        """Returns the GameObject name of the motion controller currently bound to the active scene's actor.
+
+        Notes:
+            The read runs in Edit Mode and does not modify the scene, so the caller can probe the bound controller
+            before deciding whether a corrective write is necessary.
+
+        Returns:
+            The name of the controller the scene's actor currently references.
+
+        Raises:
+            UnityBridgeError: If the bridge is unreachable or omits the actor controller from its response.
+        """
+        payload = self._call(tool="read_task_parameters")
+        return self._extract_actor_controller(payload=payload, tool="read_task_parameters")
+
     def set_active_controller(self, controller_name: str) -> str:
         """Sets the active scene actor's motion controller and returns the controller the scene reports afterward.
 
@@ -114,16 +130,7 @@ class UnityBridgeClient:
                 controller from its response.
         """
         payload = self._call(tool="write_task_parameters", args={"actor": {"controller": controller_name}})
-        state = payload.get("state")
-        actor = state.get("actor") if isinstance(state, dict) else None
-        controller = actor.get("controller") if isinstance(actor, dict) else None
-        if not isinstance(controller, str):
-            message = (
-                f"Unable to set the Unity scene actor's controller to '{controller_name}'. The bridge "
-                f"'write_task_parameters' response did not report an actor controller, but got {payload}."
-            )
-            raise UnityBridgeError(message)
-        return controller
+        return self._extract_actor_controller(payload=payload, tool="write_task_parameters")
 
     def enter_play_mode(self) -> str:
         """Requests the editor to enter Play Mode.
@@ -213,6 +220,30 @@ class UnityBridgeClient:
     def close(self) -> None:
         """Closes the underlying httpx client and releases its connection pool."""
         self._client.close()
+
+    def _extract_actor_controller(self, payload: dict[str, object], tool: str) -> str:
+        """Extracts the active scene actor's controller name from a task-parameter bridge response.
+
+        Args:
+            payload: The parsed success payload returned by a task-parameter bridge tool call.
+            tool: The bridge tool name that produced the payload, used to contextualize the error message.
+
+        Returns:
+            The name of the controller the scene's actor references in the payload.
+
+        Raises:
+            UnityBridgeError: If the payload omits the nested actor controller field.
+        """
+        state = payload.get("state")
+        actor = state.get("actor") if isinstance(state, dict) else None
+        controller = actor.get("controller") if isinstance(actor, dict) else None
+        if not isinstance(controller, str):
+            message = (
+                f"Unable to parse the Unity bridge '{tool}' response. Expected a nested actor 'controller' string, "
+                f"but got {payload}."
+            )
+            raise UnityBridgeError(message)
+        return controller
 
     def _require_state(self, tool: str) -> str:
         """Issues a play-mode transition tool call and returns the play state it reports.
