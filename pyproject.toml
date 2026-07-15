@@ -79,7 +79,7 @@ dependencies = [
     "crc==7.1.0",
     "tabulate2==1.10.2",
     "tqdm==4.68.3",
-    "natsort-rs==0.1.22",
+    "natsort==8.4.0",
     "pyyaml==6.0.3",
 
     # MCP and HTTP

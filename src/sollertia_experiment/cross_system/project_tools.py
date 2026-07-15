@@ -6,7 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 from importlib.metadata import metadata as _metadata
 
-from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
+from natsort import natsorted
 from sollertia_shared_assets import ProjectData
 
 if TYPE_CHECKING:
