@@ -15,8 +15,8 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
+from natsort import natsorted
 import tifffile
-from natsort_rs import natsort as natsorted  # type: ignore[import-untyped]
 from ataraxis_time import TimeUnits, convert_time
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
