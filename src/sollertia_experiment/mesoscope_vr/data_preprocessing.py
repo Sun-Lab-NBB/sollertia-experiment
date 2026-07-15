@@ -135,6 +135,12 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # log to reflect the processed session.
     _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
+    # Window checking runs the face camera only as a live monitor of the animal, so it does not intentionally acquire
+    # any camera or behavior data. Removes the stub camera_data and behavior_data directories the acquisition camera
+    # stack leaves behind, before the session is checksummed and pushed, so the removal reaches long-term storage.
+    if session_data.session_type == SessionTypes.WINDOW_CHECKING:
+        _purge_window_checking_behavior_data(session_data=session_data)
+
     # Sends preprocessed data to all configured long-term storage destinations.
     push_session_data(
         session_data=session_data,
@@ -144,6 +150,27 @@ def preprocess_session_data(session_data: SessionData) -> None:
 
     message = f"Session {session_data.session_name} data preprocessing: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _purge_window_checking_behavior_data(session_data: SessionData) -> None:
+    """Removes the stub camera_data and behavior_data directories from a window checking session's raw_data.
+
+    Notes:
+        Window checking uses the face camera solely as a live monitor of the animal and does not intentionally acquire
+        any camera or behavior data. The acquisition camera stack nonetheless leaves behind a truncated video, an
+        acquisition-onset log, and a camera manifest inside the camera_data and behavior_data directories. This
+        function deletes both directories so the session retains only its metadata and mesoscope reference snapshot.
+        ``preprocess_session_data`` invokes it before ``push_session_data`` so the removal is reflected in the data
+        integrity checksum and propagated to every long-term storage destination.
+
+    Args:
+        session_data: The SessionData instance that defines the processed window checking session.
+    """
+    for directory in (session_data.raw_data.behavior_data_path, session_data.raw_data.camera_data_path):
+        if directory.exists():
+            shutil.rmtree(directory)
+            message = f"Window checking {directory.name} directory: Removed."
+            console.echo(message=message, level=LogLevel.SUCCESS)
 
 
 def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
