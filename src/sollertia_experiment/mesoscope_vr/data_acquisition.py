@@ -133,6 +133,13 @@ def window_checking_logic(
     )
     descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
 
+    # Caches the active system configuration into the session's raw_data directory. Window checking does not start the
+    # MesoscopeVRSystem, which is where every other session type writes this snapshot, so the configuration is frozen
+    # here directly. This satisfies the sollertia-shared-assets contract that every session carries a
+    # system_configuration.yaml, letting downstream processing interpret the raw data without consulting the host's
+    # mutable working-directory configuration.
+    system_configuration.save(path=session_data.raw_data.system_configuration_path)
+
     # Generates a precursor MesoscopePositions file and dumps it to the session's raw_data directory. If the animal was
     # imaged during a previous runtime, preserves the persisted snapshot so that setup_mesoscope can reveal the prior
     # coordinates as an alignment aid, mirroring the experiment runtime. Only seeds the persistent snapshot with default
