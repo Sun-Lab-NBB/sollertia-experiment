@@ -9,8 +9,11 @@ import shutil
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from datetime import UTC, datetime
+import tempfile
 from functools import partial
 from itertools import chain
+import contextlib
+import subprocess
 from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -48,7 +51,7 @@ from ..cross_system import (
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from .system import MesoscopeGoogleSheets
+    from .system import MesoscopeGoogleSheets, MesoscopeVideoTracking
     from ..cross_system import SurgeryLog
 
 _METADATA_SCHEMA: dict[str, tuple[type, type]] = {
@@ -76,6 +79,13 @@ assembly, mesoscope data pulling, and mesoscope frame compression) executed on t
 _STORAGE_TRANSFER_THREAD_COUNT: int = 15
 """The number of parallel threads used to push the preprocessed session data to the configured long-term storage
 destinations."""
+
+_FACE_CAMERA_NAME: str = "face_camera"
+"""The colloquial name of the camera whose video is analyzed by the DeepLabCut eye-tracking model. It matches the name
+assigned to the camera during acquisition, which rename_session_videos uses to build the video's final filename."""
+
+_INFERENCE_LOG_TAIL_CHARACTERS: int = 2000
+"""The number of trailing characters of the eye-tracking inference log surfaced when reporting an inference failure."""
 
 
 def preprocess_session_data(session_data: SessionData) -> None:
@@ -117,6 +127,16 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # Renames all videos to use human-friendly names.
     rename_session_videos(session_data=session_data)
 
+    # Launches asynchronous face-camera eye-tracking inference on the rig's otherwise-idle GPU so that it overlaps the
+    # CPU- and disk-bound preprocessing stages below and is done by the time the session is transferred. Only experiment
+    # sessions acquire the brain-activity data that these eye-tracking predictions accompany, so inference is limited to
+    # them. The predictions are joined and verified before the transfer step further below.
+    face_tracking_process: subprocess.Popen[bytes] | None = None
+    if session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+        face_tracking_process = _launch_face_tracking(
+            session_data=session_data, configuration=system_configuration.video_tracking
+        )
+
     # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
     _pull_mesoscope_data(
         session_data=session_data,
@@ -141,6 +161,12 @@ def preprocess_session_data(session_data: SessionData) -> None:
     if session_data.session_type == SessionTypes.WINDOW_CHECKING:
         _purge_window_checking_behavior_data(session_data=session_data)
 
+    # Waits for the asynchronous face-camera inference to finish and verifies it produced predictions before the session
+    # is checksummed and pushed. A failed or missing inference aborts the transfer and retains the local session copy
+    # for a manual retry, since the predictions must be part of the raw data shipped to long-term storage.
+    if face_tracking_process is not None:
+        _join_face_tracking(process=face_tracking_process, session_data=session_data)
+
     # Sends preprocessed data to all configured long-term storage destinations.
     push_session_data(
         session_data=session_data,
@@ -150,6 +176,135 @@ def preprocess_session_data(session_data: SessionData) -> None:
 
     message = f"Session {session_data.session_name} data preprocessing: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _launch_face_tracking(
+    session_data: SessionData, configuration: MesoscopeVideoTracking
+) -> subprocess.Popen[bytes] | None:
+    """Starts DeepLabCut face-camera eye-tracking inference as a background subprocess, or does nothing when it is not
+    configured.
+
+    Notes:
+        Inference runs asynchronously so it overlaps the CPU- and disk-bound preprocessing stages while using the rig's
+        otherwise-idle GPU. It is invoked through 'conda run' because DeepLabCut requires a separate Python environment
+        that cannot be imported into the acquisition process. Predictions are written beside the face-camera video in
+        the raw camera_data directory (the 'slvt infer' default when no output directory is passed), so they are
+        checksummed and shipped to long-term storage as part of the raw data. The subprocess output is redirected to a
+        transient log file rather than a pipe, so a long-running child cannot deadlock on a full pipe buffer.
+
+    Args:
+        session_data: The SessionData instance that defines the processed session.
+        configuration: The Mesoscope-VR video-tracking configuration that provides the conda environment, DeepLabCut
+            project, and inference parameters.
+
+    Returns:
+        The running inference subprocess to join later, or None when inference is not configured or the face-camera
+        video is missing.
+    """
+    # Face-camera inference is opt-in: it runs only when the host machine configures both the conda environment and the
+    # DeepLabCut project. An unset (empty) value disables it, matching the configuration section idiom.
+    if not configuration.conda_environment or configuration.dlc_project_path == Path():
+        return None
+
+    face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
+    if not face_video.exists():
+        message = (
+            f"Unable to start face-camera eye-tracking inference for session {session_data.session_name}: the expected "
+            f"face-camera video does not exist at {face_video}. Skipping inference."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return None
+
+    command = [
+        "conda",
+        "run",
+        "-n",
+        configuration.conda_environment,
+        "slvt",
+        "infer",
+        "--config-path",
+        str(configuration.dlc_project_path),
+        "--videos",
+        str(face_video),
+        "--shuffle",
+        str(configuration.shuffle),
+        "--device",
+        "cuda",
+        "--gpus",
+        "0",
+        "--batch-size",
+        str(configuration.batch_size),
+        "--compile-model",
+        "on" if configuration.compile_model else "off",
+        "--no-progress",
+    ]
+    if configuration.crop:
+        command.extend(("--crop", configuration.crop))
+
+    message = (
+        f"Starting asynchronous face-camera eye-tracking inference for session {session_data.session_name} on the "
+        f"acquisition rig's GPU..."
+    )
+    console.echo(message=message, level=LogLevel.INFO)
+
+    # Redirects the subprocess output to a transient log file. A file rather than a pipe avoids a deadlock when the
+    # long-running child fills an unread pipe buffer, and preserves DeepLabCut's output for diagnosing a failure.
+    log_file = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log").open("wb")
+    try:
+        return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT)
+    finally:
+        # The child process holds its own duplicated descriptor, so the parent's handle is no longer needed.
+        log_file.close()
+
+
+def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionData) -> None:
+    """Waits for the face-camera eye-tracking inference to finish and verifies it produced predictions.
+
+    Notes:
+        This runs immediately before the session is checksummed and transferred, so a failed or missing inference
+        aborts the transfer and leaves the local session copy intact for a manual retry, rather than shipping the
+        session without its eye-tracking predictions. A successful run leaves the DeepLabCut '.h5' (and its companion
+        pickle files) beside the face-camera video in raw camera_data, where the checksum and transfer then capture
+        them. The transient inference log is removed on success and retained on failure for inspection.
+
+    Args:
+        process: The running inference subprocess returned by _launch_face_tracking.
+        session_data: The SessionData instance that defines the processed session.
+
+    Raises:
+        RuntimeError: If the inference subprocess exits with a non-zero status or writes no prediction file.
+    """
+    return_code = process.wait()
+    face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
+    predictions = list(face_video.parent.glob(f"{face_video.stem}*.h5"))
+    log_path = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log")
+
+    if return_code != 0 or not predictions:
+        message = (
+            f"Face-camera eye-tracking inference failed for session {session_data.session_name} (exit code "
+            f"{return_code}, {len(predictions)} prediction file(s) written). Aborting the transfer to long-term "
+            f"storage and retaining the local session copy for a manual retry. Inference log tail:\n"
+            f"{_read_inference_log_tail(log_path=log_path)}"
+        )
+        console.error(message=message, error=RuntimeError)
+
+    log_path.unlink(missing_ok=True)
+    message = f"Face-camera eye-tracking inference for session {session_data.session_name}: Complete."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _read_inference_log_tail(log_path: Path) -> str:
+    """Returns the trailing characters of the inference log for a failure report, or a placeholder when unavailable.
+
+    Args:
+        log_path: The path to the transient inference log file.
+
+    Returns:
+        The last _INFERENCE_LOG_TAIL_CHARACTERS characters of the log, or a placeholder when the log cannot be read.
+    """
+    with contextlib.suppress(OSError):
+        return log_path.read_text(encoding="utf-8", errors="replace")[-_INFERENCE_LOG_TAIL_CHARACTERS:]
+    return "<no inference log was captured>"
 
 
 def _purge_window_checking_behavior_data(session_data: SessionData) -> None:
