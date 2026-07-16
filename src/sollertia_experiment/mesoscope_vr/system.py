@@ -339,6 +339,38 @@ class MesoscopeVRAssets:
     task."""
 
 
+@dataclass(slots=True)
+class MesoscopeVideoTracking:
+    """Stores the DeepLabCut pose-inference configuration for the Mesoscope-VR face-camera eye tracking.
+
+    Notes:
+        This configuration drives the ``slvt infer`` subprocess launched during experiment-session preprocessing to
+        analyze the face-camera video with a trained DeepLabCut model. The predictions are written beside the video in
+        the session's raw camera_data directory, so they become part of the raw data shipped to long-term storage.
+        Face-camera inference is skipped when either conda_environment or dlc_project_path is left unset (an empty value
+        is treated as not configured), matching the empty-value idiom used by the other configuration sections.
+    """
+
+    conda_environment: str = ""
+    """The name of the conda environment that provides the 'slvt' command and its DeepLabCut installation. The
+    preprocessing pipeline activates this environment with 'conda run' to analyze the face-camera video in a separate
+    process, since DeepLabCut cannot share the acquisition environment. An empty string disables face-camera
+    inference."""
+    dlc_project_path: Path = Path()
+    """The absolute path to the DeepLabCut project's config.yaml whose trained model analyzes the face-camera video. An
+    empty path disables face-camera inference."""
+    shuffle: int = 1
+    """The shuffle index of the trained DeepLabCut model to run."""
+    crop: str = ""
+    """The 'x1,x2,y1,y2' pixel rectangle to analyze instead of the full frame, matching the region the model was
+    trained on. An empty string analyzes the project's configured crop (or the full frame)."""
+    batch_size: int = 32
+    """The number of frames the pose model processes per forward pass, sized for the acquisition rig's GPU."""
+    compile_model: bool = True
+    """Determines whether the pose model is compiled with torch.compile for faster inference. Enabled by default because
+    the rig's GPU amortizes the one-time warm-up cost over the long face-camera video."""
+
+
 @dataclass
 class MesoscopeSystemConfiguration(SystemConfiguration):
     """Defines the hardware and software asset configuration for the Mesoscope-VR data acquisition system."""
@@ -357,6 +389,8 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
     """Stores the Mesoscope motion-estimation and z-stack acquisition configuration."""
     assets: MesoscopeVRAssets = field(default_factory=MesoscopeVRAssets)
     """Stores the Virtual Reality task asset configuration."""
+    video_tracking: MesoscopeVideoTracking = field(default_factory=MesoscopeVideoTracking)
+    """Stores the DeepLabCut face-camera eye-tracking inference configuration."""
 
     def __post_init__(self) -> None:
         """Normalizes the valve calibration data to a tuple representation and validates its shape."""
