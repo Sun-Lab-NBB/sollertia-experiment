@@ -234,6 +234,8 @@ def _launch_face_tracking(
         "0",
         "--batch-size",
         str(configuration.batch_size),
+        "--chunks",
+        str(configuration.chunks),
         "--compile-model",
         "on" if configuration.compile_model else "off",
         "--no-progress",
