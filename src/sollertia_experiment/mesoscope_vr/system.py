@@ -366,6 +366,10 @@ class MesoscopeVideoTracking:
     trained on. An empty string analyzes the project's configured crop (or the full frame)."""
     batch_size: int = 32
     """The number of frames the pose model processes per forward pass, sized for the acquisition rig's GPU."""
+    chunks: int = 1
+    """The number of contiguous frame-range pieces the face-camera video is split into for concurrent analysis. Because
+    preprocessing analyzes a single video, raising this above one fills the GPU's decode gaps within that video and
+    shortens inference. A value of one analyzes the video as a single unbroken frame range."""
     compile_model: bool = True
     """Determines whether the pose model is compiled with torch.compile for faster inference. Enabled by default because
     the rig's GPU amortizes the one-time warm-up cost over the long face-camera video."""
