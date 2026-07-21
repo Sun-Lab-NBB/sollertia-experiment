@@ -47,43 +47,43 @@ dependencies = [
     "ataraxis-data-structures==6.0.1",
     "ataraxis-transport-layer-pc==4.0.1",
     "ataraxis-communication-interface==6.0.1",
-    "ataraxis-video-system==4.0.1",
+    "ataraxis-video-system==4.0.3",
 
     # Sollertia Libraries
     "sollertia-shared-assets==9.0.0",
 
     # Hardware Control
-    "zaber-motion==9.3.1",
+    "zaber-motion==9.3.2",
 
     # Scientific Computing
     "numpy==2.4.6",
-    "numba==0.65.1",
+    "numba==0.66.0",
     "scipy==1.18.0",
-    "matplotlib==3.11.0",
+    "matplotlib==3.11.1",
 
     # Imaging
-    "tifffile==2026.6.1",
+    "tifffile==2026.7.14",
     # Required by tifffile to (de)compress LERC-encoded TIFFs.
-    "imagecodecs==2026.6.6",
+    "imagecodecs==2026.6.26",
 
     # GUI
     "pyside6==6.11.1",
 
     # Google Sheets API
-    "google-api-python-client==2.197.0",
-    "google-auth==2.55.0",
+    "google-api-python-client==2.198.0",
+    "google-auth==2.56.1",
 
     # CLI and Utilities
-    "click==8.4.1",
+    "click==8.4.2",
     "questionary==2.1.1",
     "crc==7.1.0",
     "tabulate2==1.10.2",
-    "tqdm==4.68.3",
+    "tqdm==4.69.0",
     "natsort==8.4.0",
     "pyyaml==6.0.3",
 
     # MCP and HTTP
-    "mcp==1.28.0",
+    "mcp==1.28.1",
     "httpx==0.28.1",
 ]
 
