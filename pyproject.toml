@@ -44,13 +44,13 @@ dependencies = [
     # Ataraxis Libraries
     "ataraxis-time==6.0.2",
     "ataraxis-base-utilities==6.0.1",
-    "ataraxis-data-structures==6.0.1",
+    "ataraxis-data-structures==6.1.1",
     "ataraxis-transport-layer-pc==4.0.1",
     "ataraxis-communication-interface==6.0.1",
     "ataraxis-video-system==4.0.3",
 
     # Sollertia Libraries
-    "sollertia-shared-assets==9.0.0",
+    "sollertia-shared-assets==9.1.0rc3",
 
     # Hardware Control
     "zaber-motion==9.3.2",

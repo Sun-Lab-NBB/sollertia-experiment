@@ -96,9 +96,25 @@ def preprocess_session_data(session_data: SessionData) -> None:
         If no long-term storage destinations are configured for the host-machine, the data transfer and the local data
         removal are skipped, and the preprocessing is limited to on-premises data conversion and aggregation steps.
 
+        A session that still carries the 'nk.bin' uninitialized-session marker never finished initialization and holds
+        no valid data. Such a session is purged from all storage locations instead of being preprocessed.
+
     Args:
         session_data: The SessionData instance that defines the processed session.
     """
+    # A session that still carries the 'nk.bin' marker never finished initialization and holds no valid data. Reaching
+    # preprocessing with the marker present means a crash skipped the runtime's cleanup path, leaving the session
+    # orphaned. Purges it instead of promoting worthless data to long-term storage. purge_session removes a marked
+    # session without requiring confirmation.
+    if session_data.raw_data.nk_path.exists():
+        message = (
+            f"Session {session_data.session_name} still carries the uninitialized-session marker, so it holds no valid "
+            f"data. Purging the session instead of preprocessing it."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        purge_session(session_data=session_data)
+        return
+
     message = f"Initializing session {session_data.session_name} data preprocessing..."
     console.echo(message=message, level=LogLevel.INFO)
 
