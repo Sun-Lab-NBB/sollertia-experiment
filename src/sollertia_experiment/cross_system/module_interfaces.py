@@ -92,10 +92,7 @@ class EncoderInterface(ModuleInterface):
         self._wheel_diameter: float = wheel_diameter
 
         # Computes the conversion factor to go from pulses to centimeters
-        self._cm_per_pulse: np.float64 = np.round(
-            a=np.float64((math.pi * self._wheel_diameter) / self._ppr),
-            decimals=8,
-        )
+        self._cm_per_pulse: np.float64 = np.float64((math.pi * self._wheel_diameter) / self._ppr)
 
         # Defaults to zero. VR-experiment runtimes call set_unity_scale() with the cm-per-Unity-unit conversion
         # loaded from the VR TaskTemplate before consuming encoder data.
@@ -231,10 +228,7 @@ class EncoderInterface(ModuleInterface):
             cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in
                 centimeters.
         """
-        self._unity_unit_per_pulse = np.round(
-            a=np.float64((math.pi * self._wheel_diameter) / (self._ppr * cm_per_unity_unit)),
-            decimals=8,
-        )
+        self._unity_unit_per_pulse = np.float64((math.pi * self._wheel_diameter) / (self._ppr * cm_per_unity_unit))
 
 
 class LickInterface(ModuleInterface):
@@ -419,11 +413,10 @@ class TorqueInterface(ModuleInterface):
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
         # Computes the conversion factor to translate the recorded raw analog readouts of the 3.3V 12-bit ADC to
-        # torque in Newton centimeter. Rounds to 8 decimal places for consistency and to ensure
-        # repeatability. Uses a hardcoded conversion factor to translate sensor capacity from g cm to N cm.
-        self._torque_per_adc_unit: np.float64 = np.round(
-            a=(np.float64(sensor_capacity) * np.float64(0.00981) / (maximum_voltage - baseline_voltage)),
-            decimals=8,
+        # torque in Newton centimeter. Uses a hardcoded conversion factor to translate sensor capacity from g cm to
+        # N cm.
+        self._torque_per_adc_unit: np.float64 = (
+            np.float64(sensor_capacity) * np.float64(0.00981) / (maximum_voltage - baseline_voltage)
         )
 
         self._check_state: np.uint8 = np.uint8(1)
@@ -650,14 +643,8 @@ class BrakeInterface(ModuleInterface):
 
         # Converts minimum and maximum brake strength into Newton centimeter. Uses the hardcoded conversion factor of
         # 0.00981 to translate g cm to N cm.
-        self._minimum_brake_strength: np.float64 = np.round(
-            a=minimum_brake_strength * 0.00981,
-            decimals=8,
-        )
-        self._maximum_brake_strength: np.float64 = np.round(
-            a=maximum_brake_strength * 0.00981,
-            decimals=8,
-        )
+        self._minimum_brake_strength: np.float64 = np.float64(minimum_brake_strength * 0.00981)
+        self._maximum_brake_strength: np.float64 = np.float64(maximum_brake_strength * 0.00981)
 
         self._engage: np.uint8 = np.uint8(1)
         self._disengage: np.uint8 = np.uint8(2)
@@ -788,8 +775,8 @@ class WaterValveInterface(ModuleInterface):
             ydata=fluid_volumes,
         )
         scale_coefficient, nonlinearity_exponent = parameters
-        self._scale_coefficient: np.float64 = np.round(a=np.float64(scale_coefficient), decimals=8)
-        self._nonlinearity_exponent: np.float64 = np.round(a=np.float64(nonlinearity_exponent), decimals=8)
+        self._scale_coefficient: np.float64 = np.float64(scale_coefficient)
+        self._nonlinearity_exponent: np.float64 = np.float64(nonlinearity_exponent)
 
         # Pre-creates a shared memory array used to track and share valve state data. Index 0 tracks the total amount of
         # water dispensed by the valve during runtime. Index 1 tracks the current valve calibration state (0 -
