@@ -928,10 +928,15 @@ def _preprocess_mesoscope_directory(
         batch_size=100,
     )
 
-    # Processes each tiff stack in parallel.
+    # Processes each tiff stack in parallel. The results are keyed by the stack's starting frame number, because
+    # completion order is arbitrary and the metadata rows must be concatenated in acquisition order to line up with
+    # the frames written to the output stacks.
+    stack_metadata: dict[int, dict[str, NDArray[Any]]] = {}
     with ProcessPoolExecutor(max_workers=processes) as executor:
-        # Submits all tasks and tracks futures.
-        futures = {executor.submit(process_func, tiff_file, frame_number) for tiff_file, frame_number in valid_stacks}
+        futures = {
+            executor.submit(process_func, tiff_file, frame_number): frame_number
+            for tiff_file, frame_number in valid_stacks
+        }
 
         # Displays a progress bar that tracks the frame processing.
         progress_path = Path(*image_directory.parts[-6:])
@@ -941,12 +946,38 @@ def _preprocess_mesoscope_directory(
             unit="stack",
         ) as progress_bar:
             for future in as_completed(futures):
-                for key, value in future.result().items():
-                    all_metadata[key].append(value)
+                stack_metadata[futures[future]] = future.result()
                 progress_bar.update(1)
 
-    # Saves concatenated metadata as an uncompressed numpy archive.
+    for starting_frame in sorted(stack_metadata):
+        for key, value in stack_metadata[starting_frame].items():
+            all_metadata[key].append(value)
+
     metadata_dict = {key: np.concatenate(value) for key, value in all_metadata.items()}
+
+    # ScanImage restarts its per-acquisition frame counter and elapsed-time clock every time acquisition is stopped
+    # and resumed, which a single session does whenever the experimenter interrupts imaging. Renumbering the frames
+    # over the concatenated sequence and making the elapsed time strictly increasing gives every frame in the
+    # session a unique identifier and a monotonic timestamp, matching the order the frames are written to disk.
+    frame_count = len(metadata_dict["frameNumberAcquisition"])
+    metadata_dict["frameNumberAcquisition"] = np.arange(1, frame_count + 1, dtype=np.int32)
+    metadata_dict["frameNumbers"] = np.arange(1, frame_count + 1, dtype=np.int32)
+
+    elapsed_seconds = metadata_dict["frameTimestamps_sec"].astype(np.float64)
+    restarts = np.flatnonzero(np.diff(elapsed_seconds) < 0)
+    if restarts.size:
+        # Each restart resumes from zero, so the elapsed time carried into it is added to every subsequent frame.
+        offsets = np.zeros(frame_count, dtype=np.float64)
+        for restart_index in restarts:
+            offsets[restart_index + 1 :] += elapsed_seconds[restart_index] - elapsed_seconds[restart_index + 1]
+        elapsed_seconds += offsets
+        # Acquisition numbers are only meaningful once each interrupted run is distinguishable from its siblings.
+        acquisition = np.zeros(frame_count, dtype=np.int32)
+        acquisition[restarts + 1] = 1
+        metadata_dict["acquisitionNumbers"] = np.cumsum(acquisition, dtype=np.int32) + 1
+    metadata_dict["frameTimestamps_sec"] = elapsed_seconds
+
+    # Saves concatenated metadata as an uncompressed numpy archive.
     np.savez(frame_variant_metadata_path, **metadata_dict)  # type: ignore[arg-type]
 
     # Removes the now-redundant directory that stores unprocessed files.
