@@ -410,15 +410,10 @@ class MesoscopeVRSystem:
         self._cameras.start_face_camera()
         self._cameras.start_body_camera()
 
-        # If necessary, carries out the Zaber motor setup and animal mounting sequence and generates a snapshot of all
-        # zaber motor positions. This serves as an early checkpoint in case the runtime has to be aborted in a
-        # non-graceful way (without running the stop() sequence). This way, the next runtime restarts with the
-        # calibrated zaber positions. The snapshot includes any adjustment to the HeadBar positions performed during
-        # the red-dot alignment.
+        # If necessary, carries out the Zaber motor setup and animal mounting sequence, which includes the red-dot
+        # alignment adjustment to the HeadBar positions. The stop() sequence snapshots the resulting motor positions,
+        # once the session carries no uninitialized-session marker.
         setup_zaber_motors(zaber_motors=self._zaber_motors)
-        generate_zaber_snapshot(
-            session_data=self._session_data, mesoscope_data=self._mesoscope_data, zaber_motors=self._zaber_motors
-        )
 
         # If the session is a mesoscope experiment, initializes the mesoscope.
         if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:

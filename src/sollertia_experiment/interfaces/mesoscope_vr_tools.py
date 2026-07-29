@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 from pathlib import Path
 from contextlib import contextmanager
@@ -146,6 +147,11 @@ def describe_system_configuration_schema_tool() -> dict[str, Any]:
 @mcp.tool()
 def check_system_mounts_tool() -> dict[str, Any]:
     """Verifies all filesystem paths declared in the active Mesoscope-VR system configuration.
+
+    Notes:
+        The report covers the platform data root, the mesoscope acquisition directory, every configured long-term
+        storage destination, the two stored camera GenICam configurations, and the DeepLabCut project that drives
+        face-camera inference. Paths belonging to a feature the host leaves switched off report as not configured.
 
     Returns:
         A dictionary with ``system_name``, ``paths`` (the per-path diagnostic report), and ``summary`` (the count
@@ -432,12 +438,39 @@ def _check_path(path: Path) -> dict[str, Any]:
     return report
 
 
+def _check_input_file(path: Path) -> dict[str, Any]:
+    """Returns a diagnostic report for a single read-only input file.
+
+    Notes:
+        Input files are consumed rather than written, so this check covers existence and read access. The mount and
+        write probes applied to the storage roots would reject a valid read-only configuration file.
+
+    Args:
+        path: The path to the input file to check.
+
+    Returns:
+        A dictionary carrying the resolved path, its existence and readability flags, an ``ok`` verdict, and an
+        ``error`` description when the check fails.
+    """
+    report: dict[str, Any] = {"path": str(path), "exists": path.is_file()}
+    if not path.is_file():
+        report["ok"] = False
+        report["error"] = "File does not exist"
+        return report
+    report["readable"] = os.access(path, os.R_OK)
+    if not report["readable"]:
+        report["error"] = "Not readable"
+    report["ok"] = report["readable"]
+    return report
+
+
 def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dict[str, Any]:
     """Builds a per-path diagnostic report for the filesystem configuration of the Mesoscope-VR system.
 
     Notes:
         Long-term storage destinations whose root is left unset are reported as not configured rather than as errors,
-        since configuring them is optional.
+        since configuring them is optional. The optional input files follow the same convention, so a host that runs
+        without stored camera configurations or without face-camera inference still reports a healthy filesystem.
 
     Args:
         configuration: The Mesoscope-VR system configuration whose filesystem paths are reported on.
@@ -464,6 +497,23 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
         report = _check_path(path=destination_root)
         report["configured"] = True
         paths[report_key] = report
+
+    # Optional read-only input files. Each one is consumed by a feature the host can leave switched off, so an unset
+    # path reports as not configured. A set path that fails to resolve surfaces here rather than at the point of use,
+    # which for the DeepLabCut project is the end of a session's preprocessing.
+    input_files: tuple[tuple[str, Path], ...] = (
+        ("face_camera_configuration", configuration.cameras.face_camera_configuration_path),
+        ("body_camera_configuration", configuration.cameras.body_camera_configuration_path),
+        ("dlc_project", configuration.video_tracking.dlc_project_path),
+    )
+    for report_key, file_path in input_files:
+        if file_path == Path():
+            paths[report_key] = {"path": str(file_path), "configured": False, "ok": True}
+            continue
+        report = _check_input_file(path=file_path)
+        report["configured"] = True
+        paths[report_key] = report
+
     return paths
 
 
