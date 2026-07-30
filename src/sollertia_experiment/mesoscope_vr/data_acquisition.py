@@ -204,7 +204,7 @@ def window_checking_logic(
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        wait_for_enter(message="Press Enter to continue.")
+        wait_for_enter(message="Press Enter to continue")
 
         # Establishes communication with Zaber motors.
         zaber_motors = ZaberMotors(zaber_positions=zaber_positions, zaber_configuration=system_configuration.assets)
@@ -1367,7 +1367,7 @@ def maintenance_logic() -> None:
                 # Delays to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                wait_for_enter(message="Press Enter to continue.")
+                wait_for_enter(message="Press Enter to continue")
                 zaber_motors.prepare_motors()
                 zaber_motors.maintenance_position()
 
@@ -1440,7 +1440,7 @@ def maintenance_logic() -> None:
                 # Delays for 500 milliseconds to ensure the user reads the message before continuing.
                 RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
 
-                wait_for_enter(message="Press Enter to continue.")
+                wait_for_enter(message="Press Enter to continue")
                 zaber_motors.park_position()
                 zaber_motors.disconnect()
 

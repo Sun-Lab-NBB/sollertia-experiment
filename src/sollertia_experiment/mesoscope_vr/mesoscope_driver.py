@@ -297,7 +297,7 @@ class MesoscopeDriver:
                 f"the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            wait_for_enter(message="Press Enter to retry.")
+            wait_for_enter(message="Press Enter to retry")
 
     def _encode_acquisition(self, *, geometry_only: bool) -> bytes:
         """Serializes the acquisition parameters a command consumes into a JSON MQTT payload.
@@ -358,7 +358,7 @@ class MesoscopeDriver:
                 f"running on the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            wait_for_enter(message="Press Enter to retry.")
+            wait_for_enter(message="Press Enter to retry")
 
         if terminal_state is not None:
             self._await_status(command=command, state=terminal_state, timeout_ms=None)

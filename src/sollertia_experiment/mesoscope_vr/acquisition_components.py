@@ -339,7 +339,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Initializes the Zaber positioning sequence. This relies heavily on user feedback to confirm that it is
     # safe to proceed with motor movements.
@@ -349,7 +349,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Homes all managed motors in parallel.
     zaber_motors.prepare_motors()
@@ -367,7 +367,7 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Restores all motors to the positions used during the previous session's runtime.
     zaber_motors.restore_position()
@@ -437,7 +437,7 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     message = "Uninstall the mesoscope objective and REMOVE the animal from the Mesoscope's enclosure."
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Moves all motors to the hardcoded parking positions.
     zaber_motors.park_position()
@@ -492,7 +492,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        wait_for_enter(message="Press Enter to continue.")
+        wait_for_enter(message="Press Enter to continue")
 
     # Waits for the ScanImage control interface to come online, then preloads the persisted reference estimator (if one
     # exists for the animal) as an alignment aid. The estimator path is local to the ScanImagePC filesystem, so the
@@ -528,7 +528,7 @@ def setup_mesoscope(
         )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Step 2: Generates the screenshot of the red-dot alignment and the cranial window.
     message = (
@@ -537,7 +537,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Ensures that the screenshot is created before proceeding further.
     while True:
@@ -553,7 +553,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        wait_for_enter(message="Press Enter to continue.")
+        wait_for_enter(message="Press Enter to continue")
 
     # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
@@ -594,7 +594,7 @@ def setup_mesoscope(
     )
     console.echo(message=message, level=LogLevel.WARNING)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-    wait_for_enter(message="Press Enter to continue.")
+    wait_for_enter(message="Press Enter to continue")
 
     # Once the operator confirms the mesoscope is configured, offers to replace the animal's persisted reference with
     # the snapshot about to be generated. The prompt only appears when a reference already exists; the first reference
@@ -658,7 +658,7 @@ def setup_mesoscope(
         )
         console.echo(message=message, level=LogLevel.ERROR)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        wait_for_enter(message="Press Enter to continue.")
+        wait_for_enter(message="Press Enter to continue")
 
     # Applies the reference-replacement decision captured before generation, copying the freshly generated files over
     # the animal's persisted reference. Both files are copied together so a previously half-written reference pair is

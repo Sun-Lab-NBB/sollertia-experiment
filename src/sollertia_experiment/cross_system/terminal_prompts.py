@@ -25,7 +25,7 @@ _NEGATIVE_RESPONSES: frozenset[str] = frozenset({"n", "no"})
 """The lowercased responses interpreted as rejection by request_required_confirmation."""
 
 
-def wait_for_enter(message: str = "Press Enter to continue.") -> None:
+def wait_for_enter(message: str = "Press Enter to continue") -> None:
     """Blocks runtime execution until the user presses the Enter key.
 
     This replaces the single-key "press any key" prompt, which advanced on any keystroke and could consume key presses

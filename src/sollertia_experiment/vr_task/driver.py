@@ -428,7 +428,7 @@ class VRTaskDriver:
                 "automatically. Run 'sle get unity' to verify the connection."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            wait_for_enter(message="Press Enter once the Unity Editor is running.")
+            wait_for_enter(message="Press Enter once the Unity Editor is running")
         console.echo(message="Unity bridge: Connected.", level=LogLevel.SUCCESS)
 
     def _activate_scene(self) -> None:
@@ -487,7 +487,7 @@ class VRTaskDriver:
             except UnityBridgeError as exception:
                 message = f"Unable to arm Unity through the bridge. {exception}"
                 console.echo(message=message, level=LogLevel.WARNING)
-                wait_for_enter(message="Press Enter to retry arming Unity.")
+                wait_for_enter(message="Press Enter to retry arming Unity")
                 continue
 
             if self._wait_for_topic_bounded(
@@ -505,7 +505,7 @@ class VRTaskDriver:
                 "scene's MQTT settings are correct."
             )
             console.echo(message=message, level=LogLevel.WARNING)
-            wait_for_enter(message="Press Enter to retry arming Unity.")
+            wait_for_enter(message="Press Enter to retry arming Unity")
 
     def _stop_unity(self) -> None:
         """Stops Unity Play Mode through the bridge and drains the resulting SessionStop message.
@@ -578,7 +578,7 @@ class VRTaskDriver:
                 f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            wait_for_enter(message="Press Enter to retry.")
+            wait_for_enter(message="Press Enter to retry")
 
     def _verify_scene_name(self) -> None:
         """Verifies that the armed Unity scene matches the expected scene name.
@@ -659,7 +659,7 @@ class VRTaskDriver:
         animation_thread = threading.Thread(target=animate, daemon=True)
         animation_thread.start()
         try:
-            wait_for_enter(message="Press Enter once you are satisfied that the display renders correctly.")
+            wait_for_enter(message="Press Enter once you are satisfied that the display renders correctly")
         finally:
             stop_animation.set()
             animation_thread.join()

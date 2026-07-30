@@ -284,7 +284,7 @@ class MesoscopeVRSystem:
         )
         console.echo(message=message, level=LogLevel.WARNING)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-        wait_for_enter(message="Press Enter to continue.")
+        wait_for_enter(message="Press Enter to continue")
 
         # If the system has a snapshot of the Zaber positions used during a previous runtime, loads it into memory and
         # restores all Zaber motors to that snapshot. Otherwise, uses predefined default positions and expects the
@@ -1127,7 +1127,7 @@ class MesoscopeVRSystem:
                     "runAcquisition function and try again."
                 )
                 console.echo(message=message, level=LogLevel.ERROR)
-                wait_for_enter(message="Press Enter to retry.")
+                wait_for_enter(message="Press Enter to retry")
                 continue
 
             # Clears any unexpected TIFF files the first time the method is called for a session. This ensures that the
@@ -1172,7 +1172,7 @@ class MesoscopeVRSystem:
                 "module is not functioning. Make sure the Mesoscope is configured for data acquisition and try again."
             )
             console.echo(message=message, level=LogLevel.ERROR)
-            wait_for_enter(message="Press Enter to retry.")
+            wait_for_enter(message="Press Enter to retry")
 
     def _stop_mesoscope(self) -> None:
         """Commands the ScanImagePC to abort frame acquisition over MQTT and waits for the frame acquisition to stop.
