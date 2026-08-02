@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from ataraxis_time import TimeUnits, convert_time
+from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_video_system import VideoSystem, VideoEncoders, CameraInterfaces, OutputPixelFormats
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MicroControllerInterface
@@ -30,6 +30,10 @@ if TYPE_CHECKING:
     from ataraxis_data_structures import DataLogger
 
     from .system import MesoscopeCameras, MesoscopeVRAssets, MesoscopeMicroControllers
+
+
+_CAMERA_DRAIN_DELAY_S: int = 2
+"""The number of seconds to wait after disabling camera frame saving before terminating the camera systems."""
 
 
 class ZaberMotors:
@@ -717,6 +721,12 @@ class VideoSystems:
 
         message = "Camera frame saving: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)
+
+        # Gives the frames that were in flight when frame saving was disabled the time to reach the saver processes.
+        # A frame that enters a saver queue after the saver process has performed its final queue check is never
+        # saved, which stalls VideoSystem.stop() for the entirety of its shutdown timeout.
+        drain_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
+        drain_timer.delay(delay=_CAMERA_DRAIN_DELAY_S, allow_sleep=True, block=False)
 
         self._face_camera.stop()
         self._body_camera.stop()
