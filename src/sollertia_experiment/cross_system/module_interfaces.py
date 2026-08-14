@@ -877,6 +877,11 @@ class WaterValveInterface(ModuleInterface):
     def deliver_reward(self, volume: float = 5.0, tone_duration: int = 300) -> None:
         """Opens the valve for the duration of time necessary to deliver the requested volume of water.
 
+        Notes:
+            The firmware silences the buzzer no earlier than the valve closes, so a non-zero tone shorter than the
+            valve pulse is extended to the pulse duration. A zero-length tone requests a silent reward and is
+            delivered as one.
+
         Args:
             volume: The volume of water to deliver, in microliters.
             tone_duration: The duration of the auditory tone, in milliseconds, to emit while delivering the water
@@ -898,12 +903,28 @@ class WaterValveInterface(ModuleInterface):
                 )
             )
             pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
+
+            # Matches the transmitted tone duration to the duration the firmware actually sounds, so the logged
+            # parameter records the delivered tone rather than the requested one.
+            if 0 < tone_duration_us < pulse_duration:
+                message = (
+                    f"The requested reward tone duration of {tone_duration} ms for ValveModule "
+                    f"{int(self._module_id)} is shorter than the {int(pulse_duration) / 1000:.1f} ms valve pulse it "
+                    f"accompanies. Extending the tone to match the pulse."
+                )
+                console.echo(message=message, level=LogLevel.WARNING)
+                tone_duration_us = pulse_duration
+
             self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration_us))
 
         self.send_command(command=self._reward, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
     def simulate_reward(self, tone_duration: int = 300) -> None:
         """Simulates delivering water reward by emitting an audible 'reward' tone without opening the valve.
+
+        Notes:
+            A zero-length tone is a no-op. A simulated reward delivers no water, so a tone of no duration leaves the
+            animal with nothing to perceive.
 
         Args:
             tone_duration: The duration of the auditory tone, in milliseconds, to emit while simulating the water
@@ -912,6 +933,9 @@ class WaterValveInterface(ModuleInterface):
         Raises:
             ValueError: If the previously delivered volume is too small to be reliably dispensed by the valve.
         """
+        if tone_duration == 0:
+            return
+
         # This ensures the valve settings are only updated when tone_duration changed compared to the previous
         # command runtime, reducing communication overhead.
         if tone_duration != self._previous_tone_duration:
