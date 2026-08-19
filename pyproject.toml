@@ -53,32 +53,34 @@ dependencies = [
     "sollertia-shared-assets==10.0.0rc3",
 
     # Hardware Control
-    "zaber-motion==9.3.2",
+    "zaber-motion==10.0.0",
 
     # Scientific Computing
-    "numpy==2.4.6",
-    "numba==0.66.0",
+    "numpy==2.5.2",
+    "numba==0.67.0",
     "scipy==1.18.0",
     "matplotlib==3.11.1",
 
     # Imaging
-    "tifffile==2026.7.14",
+    "tifffile==2026.8.16",
     # Required by tifffile to (de)compress LERC-encoded TIFFs.
-    "imagecodecs==2026.6.26",
+    "imagecodecs==2026.8.16",
 
     # GUI
-    "pyside6==6.11.1",
+    "pyside6==6.11.2",
 
     # Google Sheets API
     "google-api-python-client==2.198.0",
-    "google-auth==2.56.1",
+    "google-auth==2.56.3",
 
     # CLI and Utilities
     "click==8.4.2",
     "questionary==2.1.1",
+    # Imported directly by the terminal prompt helpers to clear the type-ahead buffer.
+    "prompt-toolkit==3.0.53",
     "crc==7.1.0",
-    "tabulate2==1.10.2",
-    "tqdm==4.69.0",
+    "tabulate==0.10.0",
+    "tqdm==4.70.0",
     "natsort==8.4.0",
     "pyyaml==6.0.3",
 
