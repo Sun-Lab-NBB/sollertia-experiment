@@ -6,7 +6,16 @@ import os
 from typing import TYPE_CHECKING
 
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions, TimestampFormats, convert_time, get_timestamp
+from ataraxis_time import (
+    Timeout,
+    TimeUnits,
+    PrecisionTimer,
+    TimerPrecisions,
+    TimestampFormats,
+    convert_time,
+    get_timestamp,
+    interval_to_rate,
+)
 from ataraxis_base_utilities import LogLevel, console, convert_scalar_to_bytes
 from sollertia_shared_assets import (
     SessionData,
@@ -31,7 +40,12 @@ from ..vr_task import (
 )
 from .runtime_ui import RuntimeControlUI
 from .visualizer import VisualizerMode, BehaviorVisualizer
-from ..cross_system import wait_for_enter, request_selection, request_confirmation
+from ..cross_system import (
+    BEHAVIOR_LOGGER_NAME,
+    wait_for_enter,
+    request_selection,
+    request_confirmation,
+)
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
 from .mesoscope_driver import MesoscopeDriver
 from .data_preprocessing import purge_session, preprocess_session_data, rename_mesoscope_directory
@@ -76,10 +90,6 @@ frame acquisition has begun."""
 _MICROLITERS_PER_MILLILITER: float = 1000.0
 """The number of microliters in a single milliliter, used to convert dispensed water volumes from microliters to
 milliliters."""
-
-_MILLISECONDS_PER_SECOND: float = 1000.0
-"""The number of milliseconds in a single second, used to convert the per-window traveled distance into a running speed
-expressed in centimeters per second."""
 
 
 class MesoscopeVRSystem:
@@ -167,6 +177,12 @@ class MesoscopeVRSystem:
     # Statically assigns mesoscope frame checking window and speed calculation window, in milliseconds.
     _mesoscope_frame_delay: int = 300
     _speed_calculation_window: int = 50
+
+    # Resolves how many speed-calculation windows fit into one second. Scaling a per-window distance by this factor
+    # normalizes it to one second, and resolving it once keeps the conversion out of the data cycle.
+    _speed_calculation_rate: float = float(
+        interval_to_rate(interval=_speed_calculation_window, from_units=TimeUnits.MILLISECOND)
+    )
 
     # Reserves logging source ID code 1 for this class.
     _source_id: np.uint8 = np.uint8(1)
@@ -259,7 +275,7 @@ class MesoscopeVRSystem:
         # class instance.
         self._logger: DataLogger = DataLogger(
             output_directory=session_data.raw_data_path,
-            instance_name="behavior",
+            instance_name=BEHAVIOR_LOGGER_NAME,
             thread_count=10,
         )
 
@@ -1147,8 +1163,8 @@ class MesoscopeVRSystem:
             console.echo(message=message, level=LogLevel.INFO)
 
             # Waits for the mesoscope to start acquiring the expected number of frames.
-            RESPONSE_DELAY_TIMER.reset()
-            while RESPONSE_DELAY_TIMER.elapsed < _MESOSCOPE_START_TIMEOUT_MS:
+            start_timeout = Timeout(duration=_MESOSCOPE_START_TIMEOUT_MS, precision=TimerPrecisions.MILLISECOND)
+            while not start_timeout.expired:
                 # Adds delay to prevent CPU spinning.
                 RESPONSE_DELAY_TIMER.delay(delay=10, block=False)
 
@@ -1400,10 +1416,9 @@ class MesoscopeVRSystem:
         # Updates running speed over the configured speed-calculation window.
         if self._speed_timer.elapsed >= self._speed_calculation_window:
             self._speed_timer.reset()
-            # Converts the centimeters traveled during the window into centimeters per second. The window is expressed
-            # in milliseconds, so the per-window distance is scaled by (1000 ms / window) to normalize to one second.
+            # Converts the centimeters traveled during the window into centimeters per second.
             distance_delta = traveled_distance - self._distance
-            running_speed = np.float64(distance_delta * _MILLISECONDS_PER_SECOND / self._speed_calculation_window)
+            running_speed = np.float64(distance_delta * self._speed_calculation_rate)
             self._distance = traveled_distance
             self._running_speed = running_speed
             self._visualizer.update_running_speed(running_speed=running_speed)

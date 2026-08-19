@@ -1,4 +1,4 @@
-"""Provides the shared FastMCP instance and helper functions for the sollertia-experiment MCP tool modules."""
+"""Provides the shared MCP server instance and helper functions for the sollertia-experiment MCP tool modules."""
 
 from __future__ import annotations
 
@@ -10,14 +10,14 @@ import contextlib
 from dataclasses import MISSING, fields, is_dataclass
 
 import yaml
-from mcp.server.fastmcp import FastMCP
+from mcp.server import MCPServer
 from ataraxis_base_utilities import ensure_directory_exists
 
 if TYPE_CHECKING:
     from ataraxis_data_structures import YamlConfig
 
-mcp = FastMCP(name="sollertia-experiment", json_response=True)
-"""The shared FastMCP server instance on which all tool modules register their tools via ``@mcp.tool()``."""
+mcp: MCPServer = MCPServer(name="sollertia-experiment")
+"""The shared MCP server instance on which all tool modules register their tools via ``@mcp.tool()``."""
 
 
 def serialize(value: Any) -> Any:

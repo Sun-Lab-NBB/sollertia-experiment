@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from pathlib import Path
-from contextlib import contextmanager
 
-from ataraxis_video_system import GenicamConfiguration
+from ataraxis_video_system import GenicamConfiguration, read_camera_configuration
 from sollertia_shared_assets import SessionData, get_data_root
-from ataraxis_video_system.video import HarvestersCamera
 
 from .mcp_instance import mcp, read_yaml, serialize, probe_writable, describe_dataclass, write_yaml_validated
 from ..mesoscope_vr import (
@@ -23,9 +21,6 @@ from ..mesoscope_vr import (
     get_system_configuration_path,
     migrate_animal_between_projects,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 _ZABER_POSITIONS_FILENAME: str = "zaber_positions.yaml"
 """Canonical filename for the per-session ZaberPositions YAML."""
@@ -577,31 +572,8 @@ def _verify_single_camera(camera_index: int, configuration_path: Path) -> dict[s
         return {"configured": True, "error": f"Failed to load stored camera configuration: {exception}"}
 
     try:  # pragma: no cover
-        with _harvester_connection(camera_index=camera_index) as camera:
-            live = camera.get_configuration()
+        live = read_camera_configuration(camera_index=camera_index)
     except Exception as exception:  # pragma: no cover
         return {"configured": True, "error": f"Failed to read live camera configuration: {exception}"}
 
     return {"configured": True, **_diff_genicam_configurations(stored=stored, live=live)}  # pragma: no cover
-
-
-@contextmanager
-def _harvester_connection(camera_index: int) -> Generator[HarvestersCamera]:  # pragma: no cover
-    """Opens a temporary connection to a Harvesters camera and guarantees disconnection on exit.
-
-    Mirrors the connection helper used by ataraxis-video-system: a HarvestersCamera is created with a placeholder
-    system_id (only GenICam node-map access is needed) and is always disconnected on exit to release the GenTL handle
-    for other processes.
-
-    Args:
-        camera_index: The index of the Harvesters camera to connect to.
-
-    Yields:
-        The connected HarvestersCamera instance.
-    """
-    camera = HarvestersCamera(system_id=0, camera_index=camera_index)
-    try:
-        camera.connect()
-        yield camera
-    finally:
-        camera.disconnect()

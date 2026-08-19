@@ -5,6 +5,7 @@ dependencies are suppressed during the import phase.
 """
 
 import os
+from typing import Literal
 import warnings
 
 warnings.warn_explicit = warnings.warn = lambda *_, **__: None
@@ -16,6 +17,7 @@ warnings.warn_explicit = warnings.warn = lambda *_, **__: None
 os.environ.setdefault("QT_LOGGING_RULES", "default.warning=false")
 
 import click  # noqa: E402
+from ataraxis_base_utilities import LogLevel, console  # noqa: E402
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
@@ -35,16 +37,27 @@ def sle_cli() -> None:  # pragma: no cover
 @click.option(
     "-t",
     "--transport",
-    type=str,
+    type=click.Choice(["stdio", "streamable-http"], case_sensitive=False),
     default="stdio",
     show_default=True,
-    help="The MCP transport type ('stdio', 'sse', or 'streamable-http').",
+    help="The MCP transport type to use.",
 )
-def mcp(transport: str) -> None:  # pragma: no cover
+def mcp(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no cover
     """Starts the MCP server for agentic access to the 'sle get' and 'sle mesoscope' tools."""
     from .mcp_server import run_server  # noqa: PLC0415
 
-    run_server(transport=transport)  # type: ignore[arg-type]
+    # The stdio transport carries the JSON-RPC message stream over stdout, which is also where the console writes
+    # every message up to the WARNING level. Silencing the console keeps library output out of that stream, as a
+    # single logged line renders the message it interleaves with unparsable for the connected client.
+    if transport == "stdio":
+        console.disable()
+    else:
+        console.echo(
+            message=f"Starting the sollertia-experiment MCP server with the {transport} transport.",
+            level=LogLevel.INFO,
+        )
+
+    run_server(transport=transport)
 
 
 def _register_subcommands() -> None:

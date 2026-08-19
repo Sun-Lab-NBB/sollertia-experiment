@@ -9,6 +9,7 @@ from dataclasses import field, dataclass
 from ataraxis_video_system import EncoderSpeedPresets
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
 from sollertia_shared_assets import (
+    SYSTEM_SESSION_TYPES,
     CONFIGURATION_DIRECTORY,
     AnimalData,
     SessionData,
@@ -31,13 +32,9 @@ from ..cross_system import (
     create_system_configuration_file as _create_system_configuration_file,
 )
 
-MESOSCOPE_VR_SESSIONS: tuple[str, str, str, str] = (
-    SessionTypes.LICK_TRAINING,
-    SessionTypes.RUN_TRAINING,
-    SessionTypes.MESOSCOPE_EXPERIMENT,
-    SessionTypes.WINDOW_CHECKING,
-)
-"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system."""
+MESOSCOPE_VR_SESSIONS: tuple[SessionTypes, ...] = tuple(sorted(SYSTEM_SESSION_TYPES[AcquisitionSystems.MESOSCOPE_VR]))
+"""Defines the data acquisition session types supported by the Mesoscope-VR data acquisition system. The members are
+sorted so that the messages listing them keep a stable order across runtimes."""
 
 
 class MesoscopeStorageDestination(StrEnum):

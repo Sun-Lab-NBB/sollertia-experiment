@@ -238,10 +238,8 @@ class RuntimeControlUI:
         # buffer before propagating the error. The _started flag that normally gates shutdown() is not set until the
         # bring-up fully succeeds, so without this cleanup a partial failure would leak the process and the buffer.
         try:
-            # Connects to the shared memory array from the central runtime process and configures it to destroy the
-            # shared memory buffer in case of an emergency (error) shutdown.
+            # Connects to the shared memory array from the central runtime process.
             self._data_array.connect()
-            self._data_array.enable_buffer_destruction()
 
             # Connects to trackers to monitor valve and gas puff states.
             self._valve_tracker.connect()

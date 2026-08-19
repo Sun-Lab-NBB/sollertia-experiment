@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import shutil
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from pathlib import Path
 from datetime import UTC, datetime
 import tempfile
@@ -21,21 +21,20 @@ import numpy as np
 from natsort import natsorted
 import tifffile
 from ataraxis_time import TimeUnits, convert_time
-from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
+from ataraxis_base_utilities import LogLevel, console, chunk_iterable, resolve_worker_count, ensure_directory_exists
 from sollertia_shared_assets import (
+    RAW_DATA_DIRECTORY,
+    DESCRIPTOR_REGISTRY,
     AnimalData,
     SessionData,
+    RawDataFiles,
     SessionTypes,
     CredentialsTypes,
-    RunTrainingDescriptor,
-    LickTrainingDescriptor,
-    WindowCheckingDescriptor,
-    MesoscopeExperimentDescriptor,
     get_data_root,
     get_credentials,
     iter_animal_sessions,
 )
-from ataraxis_data_structures import delete_directory, transfer_directory
+from ataraxis_data_structures import direct_write, delete_directory, transfer_directory
 
 from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
 from ..cross_system import (
@@ -50,6 +49,12 @@ from ..cross_system import (
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+    from sollertia_shared_assets import (
+        RunTrainingDescriptor,
+        LickTrainingDescriptor,
+        WindowCheckingDescriptor,
+        MesoscopeExperimentDescriptor,
+    )
 
     from .system import MesoscopeGoogleSheets, MesoscopeVideoTracking
     from ..cross_system import SurgeryLog
@@ -72,9 +77,10 @@ used by the Mesoscope-VR system."""
 _IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
 """Stores the frame-variant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
 
-_PREPROCESSING_WORKER_COUNT: int = 31
+_PREPROCESSING_WORKER_COUNT: int = resolve_worker_count(reserved_cores=1)
 """The number of parallel processes and threads used for the compute- and disk-bound preprocessing steps (log
-assembly, mesoscope data pulling, and mesoscope frame compression) executed on the VRPC."""
+assembly, mesoscope data pulling, and mesoscope frame compression). Reserves one logical core for the host system, so
+the count tracks the acquisition machine the preprocessing runs on."""
 
 _STORAGE_TRANSFER_THREAD_COUNT: int = 15
 """The number of parallel threads used to push the preprocessed session data to the configured long-term storage
@@ -341,7 +347,7 @@ def _purge_window_checking_behavior_data(session_data: SessionData) -> None:
     """
     for directory in (session_data.raw_data.behavior_data_path, session_data.raw_data.camera_data_path):
         if directory.exists():
-            shutil.rmtree(directory)
+            delete_directory(directory_path=directory)
             message = f"Window checking {directory.name} directory: Removed."
             console.echo(message=message, level=LogLevel.SUCCESS)
 
@@ -647,20 +653,11 @@ def _process_stack(
         # Creates the output path for the compressed stack, using fixed 6-digit zero-padding for frame numbering.
         output_path = output_directory.joinpath(f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff")
 
-        # Calculates the total number of batches required to fully process the stack.
-        batch_count = int(np.ceil(stack_size / batch_size))
-
         # Creates a TiffWriter to iteratively process and append each batch to the output file. Note, if the file
         # already exists, it will be overwritten.
         with tifffile.TiffWriter(output_path, bigtiff=False) as writer:
-            for batch_index in range(batch_count):
-                # Calculates the start and end indices for this batch.
-                start_index = batch_index * batch_size
-                end_index = min((batch_index + 1) * batch_size, stack_size)
-
-                original_batch = np.array(
-                    [stack.pages[page_index].asarray() for page_index in range(start_index, end_index)]
-                )
+            for page_indices in chunk_iterable(iterable=list(range(stack_size)), chunk_size=batch_size):
+                original_batch = np.array([stack.pages[page_index].asarray() for page_index in page_indices])
 
                 # Writes the entire batch to the output file using LERC compression.
                 writer.write(
@@ -689,7 +686,7 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         # Loads the data for the first frame in the stack to generate cindra_parameters.json.
         frame_data = tiff.asarray(key=0)
 
-    with metadata_path.open(mode="w") as json_file:
+    with direct_write(file_path=metadata_path) as json_file:
         json.dump(obj=metadata, fp=json_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
     # Extracts the mesoscope frame_rate from metadata.
@@ -747,7 +744,7 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         ],
     }
 
-    with cindra_parameters_path.open(mode="w") as parameters_file:
+    with direct_write(file_path=cindra_parameters_path) as parameters_file:
         json.dump(obj=data, fp=parameters_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
@@ -1026,15 +1023,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
     session_type = session_data.session_type
     is_window_checking = session_type == SessionTypes.WINDOW_CHECKING
 
-    # Defines the dispatch pattern for loading the descriptors.
-    descriptor_loaders = {
-        SessionTypes.LICK_TRAINING: LickTrainingDescriptor,
-        SessionTypes.RUN_TRAINING: RunTrainingDescriptor,
-        SessionTypes.MESOSCOPE_EXPERIMENT: MesoscopeExperimentDescriptor,
-        SessionTypes.WINDOW_CHECKING: WindowCheckingDescriptor,
-    }
-
-    if session_type not in descriptor_loaders:
+    if session_type not in MESOSCOPE_VR_SESSIONS:
         message = (
             f"Unable to extract the water restriction data from the {session_data.session_name} session's descriptor "
             f"file, as the session's type {session_type} is not one of the valid Mesoscope-VR sessions: "
@@ -1042,9 +1031,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         )
         console.error(message=message, error=ValueError)
 
-    # Loads the session's descriptor data.
-    descriptor_class = descriptor_loaders[session_type]  # type: ignore[index]
-    descriptor = descriptor_class.from_yaml(file_path=descriptor_path)  # type: ignore[attr-defined]
+    # Loads the session's descriptor data through the registry that maps each session type to its descriptor class.
+    descriptor_class = DESCRIPTOR_REGISTRY[SessionTypes(session_type)]
+    descriptor = descriptor_class.from_yaml(file_path=descriptor_path)
 
     # Caches a copy of the animal's surgery log entry to the session's directory as a surgery_metadata.yaml file, if
     # the surgery log Google Sheet is configured. The returned handle reuses the established Google Sheets connection
@@ -1081,8 +1070,12 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
                 console.echo(message=message, level=LogLevel.WARNING)
                 return
 
+            # The session type resolved the descriptor class through DESCRIPTOR_REGISTRY, so this branch only ever
+            # sees the window checking descriptor. The cast restores the concrete type the registry erases.
+            window_descriptor = cast("WindowCheckingDescriptor", descriptor)
+
             # Ensures that the quality is always between 0 and 3 inclusive.
-            quality = max(0, min(3, int(descriptor.surgery_quality)))
+            quality = max(0, min(3, int(window_descriptor.surgery_quality)))
             surgery_log.update_surgery_quality(quality=quality)
             message = "Surgery quality: Updated."
             console.echo(message=message, level=LogLevel.SUCCESS)
@@ -1098,9 +1091,15 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             console.echo(message=message, level=LogLevel.WARNING)
             return
 
+        # Every remaining Mesoscope-VR session type maps to a descriptor that records the animal's weight and water
+        # intake. The cast restores the concrete types DESCRIPTOR_REGISTRY erases.
+        water_descriptor = cast(
+            "LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor", descriptor
+        )
+
         # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
-        training_water = round(descriptor.dispensed_water_volume_ml, ndigits=3)
-        experimenter_water = round(descriptor.experimenter_given_water_volume_ml, ndigits=3)
+        training_water = round(water_descriptor.dispensed_water_volume_ml, ndigits=3)
+        experimenter_water = round(water_descriptor.experimenter_given_water_volume_ml, ndigits=3)
         total_water = training_water + experimenter_water
 
         # Updates the Water Restriction log to reflect the processed session's data.
@@ -1111,9 +1110,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             sheet_id=sheets_data.water_log_sheet_id,
         )
         water_log_sheet.update_water_log(
-            weight=descriptor.animal_weight_g,
+            weight=water_descriptor.animal_weight_g,
             water_ml=total_water,
-            experimenter_id=descriptor.experimenter,
+            experimenter_id=water_descriptor.experimenter,
             session_type=session_data.session_type,
         )
         message = "Water restriction log entry: Written."
@@ -1173,7 +1172,7 @@ def _migrate_sessions_via_destination(
         console.echo(message=f"Migrating session {session.name}...")
         local_session_path = destination_animal.session_path(session_name=session.name)
         old_session_data_path = source_animal.session_path(session_name=session.name).joinpath(
-            "raw_data", "session_data.yaml"
+            RAW_DATA_DIRECTORY, RawDataFiles.SESSION_DATA
         )
 
         migrated = False

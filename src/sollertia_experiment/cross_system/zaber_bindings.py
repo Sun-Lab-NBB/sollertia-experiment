@@ -8,7 +8,7 @@ from dataclasses import field, dataclass
 from crc import Calculator, Configuration
 from tabulate import tabulate
 from zaber_motion import Tools
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import Timeout, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
 
@@ -487,8 +487,8 @@ class ZaberAxis:
         _minimum_limit: The minimum absolute position relative to the home sensor position, in native motor units,
             the motor hardware can reach.
         _shutdown_flag: Tracks whether the motor has been shut down.
-        _timer: A PrecisionTimer class instance that is used to ensure that communication with the motor is carried out
-            at a pace that does not overwhelm the connection interface with too many successive calls.
+        _pacing_guard: A Timeout class instance that is used to ensure that communication with the motor is carried
+            out at a pace that does not overwhelm the connection interface with too many successive calls.
 
     Raises:
         ValueError: If any parameter read from the motor's non-volatile memory is outside the expected range of
@@ -535,9 +535,11 @@ class ZaberAxis:
             )
             console.error(message=message, error=ValueError)
 
-        # Initializes a timer to ensure the class cannot issue commands fast enough to overwhelm the motor communication
-        # interface.
-        self._timer: PrecisionTimer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+        # Initializes a timeout guard to ensure the class cannot issue commands fast enough to overwhelm the motor
+        # communication interface.
+        self._pacing_guard: Timeout = Timeout(
+            duration=self._COMMUNICATION_DELAY_MS, precision=TimerPrecisions.MILLISECOND
+        )
 
     def __repr__(self) -> str:
         """Returns a string representation of the ZaberAxis instance."""
@@ -561,12 +563,12 @@ class ZaberAxis:
         # Ensures that at least 5 milliseconds have elapsed since the previous interaction with the motor's hardware.
         # This design is chosen over delay() to allow instantaneous escapes if this method is called when the delay
         # has already expired.
-        while self._timer.elapsed < self._COMMUNICATION_DELAY_MS:
+        while not self._pacing_guard.expired:
             pass
 
         result = method(*args, **kwargs)
 
-        self._timer.reset()
+        self._pacing_guard.kick()
         return result
 
     def get_position(self) -> float:
@@ -664,7 +666,8 @@ class ZaberAxis:
         # This is the only command that does not have a padding timer check. This design pattern is to allow calling
         # this method in the case of an emergency to shut down the managed motor.
         self._motor.stop(wait_until_idle=False)
-        self._timer.reset()  # Manually resets the timer, since stop commands are not routed through the padding method.
+        # Manually restarts the guard, since stop commands are not routed through the padding method.
+        self._pacing_guard.kick()
 
     def park(self) -> None:
         """Parks the motor, making it unresponsive to motor commands, and stores the current absolute position of the

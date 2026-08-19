@@ -1060,7 +1060,7 @@ Start the MCP server using the CLI:
 sle mcp
 ```
 
-The `-t/--transport` option selects the transport (`stdio` by default; also `sse` and `streamable-http`).
+The `-t/--transport` option selects the transport, either `stdio` (the default) or `streamable-http`.
 
 #### Available Tools
 
