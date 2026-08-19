@@ -78,12 +78,15 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
         return
 
     archives = discover_log_archives(log_directory=log_directory)
-    unarchived_entries = list(log_directory.glob("*.npy"))
 
-    if not unarchived_entries:
+    # Probes for a single unprocessed entry rather than listing every one. The DataLogger writes one .npy file per
+    # logged message, so a full listing holds one path per acquisition message of the entire session.
+    unarchived_entry = next(log_directory.glob("*.npy"), None)
+
+    if unarchived_entry is None:
         return
 
-    if archives and unarchived_entries:
+    if archives:
         message = (
             f"The temporary log directory for the session {session_data.session_name} contains both unprocessed .npy "
             f"log files and processed .npz archives. Since log archiving overwrites existing .npz archives, it is "

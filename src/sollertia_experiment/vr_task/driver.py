@@ -110,6 +110,11 @@ class VRTaskEvent:
     STIMULUS_TRIGGERED event."""
 
 
+_NO_EVENT: VRTaskEvent = VRTaskEvent(kind=VRTaskEventKind.NONE)
+"""The shared event returned by every cycle that produces no dispatchable Unity event. The type is frozen, so the
+runtime cycle reuses this instance instead of building an identical one on each of its many iterations."""
+
+
 @dataclass(slots=True)
 class VRTaskState:
     """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
@@ -364,7 +369,7 @@ class VRTaskDriver:
         """
         data = self._mqtt.get_data()
         if data is None:
-            return VRTaskEvent(kind=VRTaskEventKind.NONE)
+            return _NO_EVENT
 
         topic, payload = data
 
@@ -399,7 +404,7 @@ class VRTaskDriver:
             self._state.terminated = True
             return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
 
-        return VRTaskEvent(kind=VRTaskEventKind.NONE)
+        return _NO_EVENT
 
     def resume_after_unity_restart(self) -> None:
         """Re-arms Unity through the bridge after an emergency pause and re-fetches the wall cue sequence.

@@ -54,6 +54,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from .system import MesoscopeSystemConfiguration
+    from ..cross_system import LickInterface, EncoderInterface, WaterValveInterface
 
 from .system import MesoscopeVRStates
 from .acquisition_components import (
@@ -129,6 +130,8 @@ class MesoscopeVRSystem:
             acquisition system.
         _session_data: The SessionData instance that defines the session whose data is acquired by the system during
             runtime.
+        _is_mesoscope_experiment: Determines whether the acquired session images the brain with the mesoscope and
+            drives the Unity Virtual Reality task.
         _mesoscope_data: The MesoscopeData instance that defines the filesystem layout of the data acquisition system.
         _system_state: The code that communicates the current Mesoscope-VR system's state.
         _runtime_state: The code that communicates the current data acquisition session's task state (stage).
@@ -156,6 +159,9 @@ class MesoscopeVRSystem:
         _logger: The DataLogger instance that logs the data from all sources managed by the Mesoscope-VR instance.
         _microcontrollers: The MicroControllerInterfaces instance that interfaces with the Actor, Sensor, and Encoder
             microcontrollers used during runtime.
+        _wheel_encoder: The wheel encoder interface, resolved once because the data cycle reads it on every iteration.
+        _lick: The lick sensor interface, resolved once because the data cycle reads it on every iteration.
+        _valve: The water valve interface, resolved once because the data cycle reads it on every iteration.
         _cameras: The VideoSystems instance that interfaces with the face and body cameras used during runtime.
         _zaber_motors: The ZaberMotors instance that interfaces with the HeadBar, LickPort, and Wheel motor groups.
         _task_template: The VR TaskTemplate loaded from the task templates directory for the experiment's Unity
@@ -226,11 +232,14 @@ class MesoscopeVRSystem:
             session_data=session_data, system_configuration=self._system_configuration
         )
 
+        # Resolves the session-type predicate once, as the runtime cycle consults it on every iteration.
+        self._is_mesoscope_experiment: bool = session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
+
         # Generates a precursor MesoscopePositions file and dumps it to the session's raw_data directory. Only
         # mesoscope experiment sessions image the brain, so the precursor is created exclusively for them. Training
         # sessions do not use the mesoscope and must not emit mesoscope position snapshots, and window checking
         # sessions manage their own snapshot through a separate runtime.
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+        if self._is_mesoscope_experiment:
             # If a previous set of mesoscope position coordinates is available, overwrites the 'default' mesoscope
             # coordinates with the positions loaded from the snapshot stored inside the persistent_data directory of
             # the animal.
@@ -284,6 +293,12 @@ class MesoscopeVRSystem:
             data_logger=self._logger, microcontroller_configuration=self._system_configuration.microcontrollers
         )
 
+        # Binds the three module interfaces the data cycle reads on every iteration, so each read resolves one
+        # attribute rather than walking the interface container.
+        self._wheel_encoder: EncoderInterface = self._microcontrollers.wheel_encoder
+        self._lick: LickInterface = self._microcontrollers.lick
+        self._valve: WaterValveInterface = self._microcontrollers.valve
+
         # Initializes the binding class for all VideoSystems.
         self._cameras: VideoSystems = VideoSystems(
             data_logger=self._logger,
@@ -319,10 +334,7 @@ class MesoscopeVRSystem:
         # sessions. Other session types do not drive Unity.
         self._task_template: TaskTemplate | None = None
         self._vr_task: VRTaskDriver | None = None
-        if (
-            self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
-            and self._experiment_configuration is not None
-        ):
+        if self._is_mesoscope_experiment and self._experiment_configuration is not None:
             task_template = load_vr_task_template(unity_scene_name=self._experiment_configuration.unity_scene_name)
             self._task_template = task_template
             self._vr_task = VRTaskDriver(
@@ -432,7 +444,7 @@ class MesoscopeVRSystem:
         setup_zaber_motors(zaber_motors=self._zaber_motors)
 
         # If the session is a mesoscope experiment, initializes the mesoscope.
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+        if self._is_mesoscope_experiment:
             # Connects to the ScanImagePC over MQTT, then instructs the user to prepare the mesoscope for acquisition.
             self._mesoscope.connect()
             setup_mesoscope(
@@ -461,7 +473,7 @@ class MesoscopeVRSystem:
 
         # Only mesoscope experiment sessions connect to and drive the mesoscope, so the reference regeneration button
         # is exposed exclusively for them.
-        has_mesoscope = self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
+        has_mesoscope = self._is_mesoscope_experiment
 
         # Initializes the runtime control GUI with the appropriate mode and trial type configuration.
         self._ui.start(
@@ -505,7 +517,7 @@ class MesoscopeVRSystem:
         self._cameras.save_body_camera_frames()
 
         # Starts mesoscope frame acquisition if the runtime is a mesoscope experiment.
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+        if self._is_mesoscope_experiment:
             # Enables mesoscope frame monitoring.
             self._microcontrollers.mesoscope_frame.set_monitoring_state(state=True)
 
@@ -554,7 +566,7 @@ class MesoscopeVRSystem:
         self._cameras.stop()
 
         # Stops mesoscope frame acquisition and monitoring if the runtime uses Mesoscope.
-        if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT and self._mesoscope_started:
+        if self._is_mesoscope_experiment and self._mesoscope_started:
             self._stop_mesoscope()
             self._microcontrollers.mesoscope_frame.set_monitoring_state(state=False)
 
@@ -577,7 +589,7 @@ class MesoscopeVRSystem:
         # runs after frame acquisition is stopped (when it was started) but while the mesoscope control driver is still
         # connected, so the mesoscope is sitting at the acquisition position with the laser still configured.
         try:
-            if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+            if self._is_mesoscope_experiment:
                 generate_mesoscope_position_snapshot(
                     session_data=self._session_data,
                     mesoscope_data=self._mesoscope_data,
@@ -903,7 +915,7 @@ class MesoscopeVRSystem:
                 return
 
             # For experiment runtime, also executes the dedicated Unity and Mesoscope cycles.
-            if self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
+            if self._is_mesoscope_experiment:
                 self._unity_cycle()
                 self._mesoscope_cycle()
 
@@ -991,10 +1003,7 @@ class MesoscopeVRSystem:
         """Resolves and caches the snapshot of the system's hardware configuration parameters to the acquired session's
         raw_data directory as a hardware_state.yaml file.
         """
-        if (
-            self._session_data.session_type == SessionTypes.MESOSCOPE_EXPERIMENT
-            and self._experiment_configuration is not None
-        ):
+        if self._is_mesoscope_experiment and self._experiment_configuration is not None:
             hardware_state = MesoscopeHardwareState(
                 cm_per_pulse=float(self._microcontrollers.wheel_encoder.cm_per_pulse),
                 maximum_brake_strength=float(self._microcontrollers.brake.maximum_brake_strength),
@@ -1409,9 +1418,8 @@ class MesoscopeVRSystem:
         support runtime logic, data visualization, and Unity VR task. If necessary, it directly communicates the updates
         to Unity via MQTT and to the visualizer through appropriate methods.
         """
-        # Reads the total distance traveled by the animal and the current position of the animal in Unity units.
-        traveled_distance = self._microcontrollers.wheel_encoder.traveled_distance
-        current_position = self._microcontrollers.wheel_encoder.absolute_position
+        # Reads the total distance traveled by the animal.
+        traveled_distance = self._wheel_encoder.traveled_distance
 
         # Updates running speed over the configured speed-calculation window.
         if self._speed_timer.elapsed >= self._speed_calculation_window:
@@ -1426,8 +1434,9 @@ class MesoscopeVRSystem:
         # Handles Unity-based virtual reality task execution for experiment sessions.
         if self._vr_task is not None:
             # Forwards the latest animal position to Unity. The driver internally tracks the previous position and
-            # only sends an MQTT message when the position has changed.
-            self._vr_task.push_position(absolute_position=current_position)
+            # only sends an MQTT message when the position has changed. The position is read here rather than above,
+            # because only Virtual Reality sessions consume it and each read takes the shared array's lock.
+            self._vr_task.push_position(absolute_position=self._wheel_encoder.absolute_position)
 
             # Checks if the animal has completed the current trial. The trial's outcome was already resolved and
             # reported to the visualizer at the stimulus point (in _unity_cycle); this block only advances the
@@ -1454,7 +1463,7 @@ class MesoscopeVRSystem:
                         self._ui.set_reinforcing_guidance_state(enabled=True)
 
         # Handles incoming lick data.
-        lick_count = self._microcontrollers.lick.lick_count
+        lick_count = self._lick.lick_count
         if lick_count > self._lick_count:
             self._lick_count = lick_count
             self._unconsumed_reward_count = 0
@@ -1464,9 +1473,7 @@ class MesoscopeVRSystem:
                 self._vr_task.push_lick_event()
 
         # Handles water delivery tracking.
-        dispensed_water = self._microcontrollers.valve.delivered_volume - (
-            self._paused_water_volume + self._delivered_water_volume
-        )
+        dispensed_water = self._valve.delivered_volume - (self._paused_water_volume + self._delivered_water_volume)
         if dispensed_water > 0:
             if self._paused:
                 self._paused_water_volume += dispensed_water
@@ -1554,9 +1561,12 @@ class MesoscopeVRSystem:
 
     def _ui_cycle(self) -> None:
         """Queries the state of various GUI components and adjusts the runtime behavior accordingly."""
-        if self._ui.pause_runtime and not self._paused:
+        # Reads the pause flag once. Each read takes the shared array's cross-process lock, and binding the value also
+        # keeps both branches below deciding on the same sample.
+        pause_requested = self._ui.pause_runtime
+        if pause_requested and not self._paused:
             self._pause_runtime()
-        elif not self._ui.pause_runtime and self._paused:
+        elif not pause_requested and self._paused:
             self._resume_runtime()
 
         if self._ui.exit_signal:

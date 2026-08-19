@@ -326,21 +326,26 @@ class RuntimeControlUI:
     def exit_signal(self) -> bool:
         """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
         exit_flag = bool(self._data_array[_DataArrayIndex.EXIT_SIGNAL])
-        self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 0
+        # Clears the slot only when it carried a request. The runtime reads this property on every cycle, and each
+        # write takes the shared array's cross-process lock, so an unconditional clear pays that lock for nothing.
+        if exit_flag:
+            self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 0
         return exit_flag
 
     @property
     def reward_signal(self) -> bool:
         """Returns True if the user has requested the system to deliver a water reward."""
         reward_flag = bool(self._data_array[_DataArrayIndex.REWARD_SIGNAL])
-        self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
+        if reward_flag:
+            self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
         return reward_flag
 
     @property
     def generate_reference_signal(self) -> bool:
         """Returns True if the user has requested the system to regenerate the Mesoscope reference."""
         signal = bool(self._data_array[_DataArrayIndex.GENERATE_REFERENCE])
-        self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 0
+        if signal:
+            self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 0
         return signal
 
     @property
@@ -421,7 +426,8 @@ class RuntimeControlUI:
     def gas_valve_puff_signal(self) -> bool:
         """Returns True if the user has requested to deliver a gas puff."""
         signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PUFF])
-        self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 0
+        if signal:
+            self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 0
         return signal
 
     @property
