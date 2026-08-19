@@ -1,0 +1,62 @@
+name: Bug report
+description: Report incorrect, unexpected, or broken behavior.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release version or the commit SHA of the project that exhibits the bug.
+      placeholder: 1.2.3
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        The host operating system and the versions of the language runtime, tools, and hardware used to run the
+        project.
+      placeholder: |-
+        OS: Ubuntu 24.04
+        Python: 3.14
+        Hardware: Mesoscope-VR (Teensy 4.1)
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed and expected behavior
+      description: What the project does and what you expected it to do instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: >-
+        The minimal sequence of commands or code that reproduces the bug, starting from a clean project state.
+      placeholder: |-
+        1. Install the project into a clean environment.
+        2. Call the failing command or function with the arguments that trigger the bug.
+        3. Observe the error reported in the Output section.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: The complete terminal output, traceback, or device log produced by the failing command.
+      render: text
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched the existing issues and this bug has not been reported.
+          required: true

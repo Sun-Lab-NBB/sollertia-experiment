@@ -206,8 +206,10 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
         result = validate_zaber_device_configuration(port=port, device_index=device_index)
         status = "VALID" if result.is_valid else "INVALID"
         parts = [
-            f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
-            f"Positions: {'OK' if result.positions_valid else 'FAIL'}"
+            (
+                f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
+                f"Positions: {'OK' if result.positions_valid else 'FAIL'}"
+            )
         ]
 
         if result.errors:
