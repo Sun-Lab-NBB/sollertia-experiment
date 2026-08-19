@@ -653,15 +653,22 @@ def _process_stack(
         # Creates the output path for the compressed stack, using fixed 6-digit zero-padding for frame numbering.
         output_path = output_directory.joinpath(f"mesoscope_{str(start_frame).zfill(6)}_{str(end_frame).zfill(6)}.tiff")
 
+        # Reuses one batch buffer across every chunk and decodes each page directly into its slot. Building the batch
+        # from a list of per-page arrays instead would allocate the batch twice and hold both copies at once.
+        first_page = stack.pages[0]
+        batch_buffer: NDArray[Any] = np.empty(shape=(batch_size, *first_page.shape), dtype=first_page.dtype)
+
         # Creates a TiffWriter to iteratively process and append each batch to the output file. Note, if the file
         # already exists, it will be overwritten.
         with tifffile.TiffWriter(output_path, bigtiff=False) as writer:
             for page_indices in chunk_iterable(iterable=list(range(stack_size)), chunk_size=batch_size):
-                original_batch = np.array([stack.pages[page_index].asarray() for page_index in page_indices])
+                for slot, page_index in enumerate(page_indices):
+                    stack.pages[page_index].asarray(out=batch_buffer[slot])
 
-                # Writes the entire batch to the output file using LERC compression.
+                # Writes the entire batch to the output file using LERC compression. The last chunk carries fewer
+                # pages than the batch size, so the buffer is sliced to the number of pages it received.
                 writer.write(
-                    data=original_batch,
+                    data=batch_buffer[: len(page_indices)],
                     compression="lerc",
                     compressionargs={"level": 0.0},  # Lossless compression
                     predictor=True,

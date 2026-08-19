@@ -781,10 +781,12 @@ def run_training_logic(
     # Converts all arguments used to determine the speed and duration threshold over time into numpy variables to
     # optimize the main session's runtime loop:
     initial_speed = np.float64(descriptor.initial_run_speed_threshold_cm_s)  # In centimeters per second
+    minimum_speed = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.minimum_speed_cm_s)  # In centimeters per second
     maximum_speed = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_speed_cm_s)  # In centimeters per second
     speed_step = np.float64(descriptor.run_speed_increase_step_cm_s)  # In centimeters per second
 
     initial_duration = np.float64(descriptor.initial_run_duration_threshold_s * 1000)  # In milliseconds
+    minimum_duration = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.minimum_duration_s * 1000)  # In milliseconds
     maximum_duration = np.float64(RUN_TRAINING_THRESHOLD_LIMITS.maximum_duration_s * 1000)  # In milliseconds
     duration_step = np.float64(descriptor.run_duration_increase_step_s * 1000)  # In milliseconds
 
@@ -804,6 +806,11 @@ def run_training_logic(
     # the visualizer plot.
     previous_speed_threshold = copy.copy(initial_speed)
     previous_duration_threshold = copy.copy(initial_duration)
+
+    # Tracks the runtime-driven threshold components most recently published to the control GUI. Both start as NaN,
+    # which never compares equal, so the first loop iteration always publishes.
+    previous_auto_speed = np.float64(np.nan)
+    previous_auto_duration = np.float64(np.nan)
 
     # This one-time tracker is used to initialize the speed and duration threshold visualization.
     once = True
@@ -887,20 +894,22 @@ def run_training_logic(
             # match user-requested absolute values.
             auto_speed: np.float64 = initial_speed + (increase_steps * speed_step)
             auto_duration: np.float64 = initial_duration + (increase_steps * duration_step)
-            system.publish_runtime_thresholds(speed_threshold=auto_speed, duration_threshold=auto_duration)
+
+            # Publishes only when the runtime-driven component changes, which happens when the delivered water volume
+            # crosses an increase step. Each publish writes two elements of the GUI's shared array, and every write
+            # takes a cross-process lock.
+            if auto_speed != previous_auto_speed or auto_duration != previous_auto_duration:
+                system.publish_runtime_thresholds(speed_threshold=auto_speed, duration_threshold=auto_duration)
+                previous_auto_speed = auto_speed
+                previous_auto_duration = auto_duration
 
             # Determines the effective speed and duration thresholds for each cycle by adding the user input from the
             # session control GUI on top of the automatic component. User input has a static resolution of 0.01 cm/s
-            # and 0.01 s (10 ms) per step.
-            speed_threshold = np.clip(
-                a=auto_speed + (system.speed_modifier * 0.01),
-                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_speed_cm_s,  # Minimum value
-                a_max=maximum_speed,  # Maximum value
-            )
-            duration_threshold = np.clip(
-                a=auto_duration + (system.duration_modifier * 10),
-                a_min=RUN_TRAINING_THRESHOLD_LIMITS.minimum_duration_s * 1000,  # Minimum value, converted to ms
-                a_max=maximum_duration,  # Maximum value
+            # and 0.01 s (10 ms) per step. Both values are clamped to the configured limits with builtins, because
+            # np.clip pays a full ufunc dispatch on these scalar operands and yields the same result.
+            speed_threshold = min(max(auto_speed + (system.speed_modifier * 0.01), minimum_speed), maximum_speed)
+            duration_threshold = min(
+                max(auto_duration + (system.duration_modifier * 10), minimum_duration), maximum_duration
             )
 
             # If any of the threshold changed relative to the previous loop iteration, updates the visualizer and

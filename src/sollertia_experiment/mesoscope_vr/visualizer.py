@@ -513,13 +513,15 @@ class BehaviorVisualizer:
         # Replaces the oldest timestamp data with the current data.
         self._sample_data()
 
-        # Updates the artists with new data.
-        self._lick_line.set_data(self._timestamps, self._lick_data)  # type: ignore[union-attr]
-        self._valve_line.set_data(self._timestamps, self._valve_data)  # type: ignore[union-attr]
+        # Updates the artists with new data. Only the Y data changes between updates, and the shared timestamp window
+        # is installed once by the plot() calls in open(). Reinstalling it would mark the X data invalid and make
+        # matplotlib re-run its unit conversion and rebuild the float64 X array on every cycle.
+        self._lick_line.set_ydata(self._lick_data)  # type: ignore[union-attr]
+        self._valve_line.set_ydata(self._valve_data)  # type: ignore[union-attr]
         if self._puff_line is not None:
-            self._puff_line.set_data(self._timestamps, self._puff_data)
+            self._puff_line.set_ydata(self._puff_data)
         if self._speed_line is not None:
-            self._speed_line.set_data(self._timestamps, self._speed_data)
+            self._speed_line.set_ydata(self._speed_data)
 
         # Re-renders only the data lines over the cached background instead of redrawing the figure.
         self._blit_manager.update()  # type: ignore[union-attr]

@@ -6,7 +6,7 @@ https://github.com/Sun-Lab-NBB/sollertia-micro-controllers.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
@@ -203,12 +203,14 @@ class EncoderInterface(ModuleInterface):
             Unity conversion factor. The scaling is applied here, on the main process, because set_unity_scale()
             updates the factor after the communication process that fills the buffer has already started.
         """
-        return np.float64(self._distance_tracker[1] * self._unity_unit_per_pulse)
+        # The tracker is created with a pinned float64 dtype, so the product is already float64 and needs no
+        # conversion. The cast only restores the width the shared array's Any-typed element access erases.
+        return cast("np.float64", self._distance_tracker[1] * self._unity_unit_per_pulse)
 
     @property
     def traveled_distance(self) -> np.float64:
         """Returns the total distance, in centimeters, traveled by the animal since the runtime onset."""
-        return np.float64(self._distance_tracker[0])
+        return cast("np.float64", self._distance_tracker[0])
 
     def reset_distance_tracker(self) -> None:
         """Resets the traveled distance trackers to zero."""
@@ -361,7 +363,7 @@ class LickInterface(ModuleInterface):
     @property
     def lick_count(self) -> np.uint64:
         """Returns the total number of licks detected by the module since the runtime onset."""
-        return np.uint64(self._lick_tracker[0])
+        return cast("np.uint64", self._lick_tracker[0])
 
     @property
     def lick_threshold(self) -> np.uint16:
@@ -602,7 +604,7 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
     @property
     def pulse_count(self) -> np.uint64:
         """Returns the number of received TTL pulses recorded by the module since runtime onset."""
-        return np.uint64(self._pulse_tracker[0])
+        return cast("np.uint64", self._pulse_tracker[0])
 
     def reset_pulse_count(self) -> None:
         """Resets the TTL pulse tracker to zero."""
@@ -1057,7 +1059,7 @@ class WaterValveInterface(ModuleInterface):
     @property
     def delivered_volume(self) -> np.float64:
         """Returns the total volume of water, in microliters, delivered by the valve since the runtime onset."""
-        return np.float64(self._valve_tracker[0])
+        return cast("np.float64", self._valve_tracker[0])
 
     @property
     def calibrating(self) -> bool:
