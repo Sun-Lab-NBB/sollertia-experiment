@@ -8,7 +8,7 @@ from enum import StrEnum
 import json
 from typing import TYPE_CHECKING
 
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import Timeout, PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
@@ -416,8 +416,8 @@ class MesoscopeDriver:
         Returns:
             The State topic payload if it arrived in time, or None if the timeout elapsed first.
         """
-        self._polling_timer.reset()
-        while self._polling_timer.elapsed < timeout_ms:
+        timeout = Timeout(duration=timeout_ms, precision=TimerPrecisions.MILLISECOND)
+        while not timeout.expired:
             self._polling_timer.delay(delay=_BROKER_POLL_DELAY_MS, block=False)
             data = self._mqtt.get_data()
             if data is None:

@@ -31,6 +31,7 @@ from .module_interfaces import (
     MesoscopeFrameTTLInterface,
 )
 from .data_preprocessing import (
+    BEHAVIOR_LOGGER_NAME,
     StorageDestination,
     StorageDestinations,
     push_session_data,
@@ -50,6 +51,7 @@ from .system_configuration import (
 )
 
 __all__ = [
+    "BEHAVIOR_LOGGER_NAME",
     "BrakeInterface",
     "CRCCalculator",
     "EncoderInterface",

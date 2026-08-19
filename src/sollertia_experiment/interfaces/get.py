@@ -6,7 +6,7 @@ import click
 from ataraxis_video_system import CameraInterfaces, discover_camera_ids
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
-from ataraxis_communication_interface.interfaces.cli import identify as _identify_microcontrollers
+from ataraxis_communication_interface import discover_microcontrollers
 
 from ..vr_task import UnityBridgeClient
 from ..cross_system import CRCCalculator, discover_zaber_devices
@@ -81,7 +81,26 @@ def get_cameras() -> None:
 @get.command("controllers")
 def get_microcontrollers() -> None:
     """Identifies the microcontrollers accessible to the data acquisition system."""
-    _identify_microcontrollers.callback(baudrate=_MICROCONTROLLER_BAUDRATE)  # type: ignore[misc]
+    # Announces the scan before it runs, because probing every port takes seconds and the operator would otherwise
+    # face a silent terminal for the whole scan.
+    console.echo(
+        message=f"Evaluating serial ports at baudrate {_MICROCONTROLLER_BAUDRATE}, this may take a moment...",
+        level=LogLevel.INFO,
+    )
+    controllers = discover_microcontrollers(baudrate=_MICROCONTROLLER_BAUDRATE)
+
+    if not controllers:
+        console.echo(message="No valid serial ports detected.", level=LogLevel.WARNING)
+        return
+
+    for number, controller in enumerate(controllers, start=1):
+        if controller.error_message is not None:
+            status = f"Connection Failed: {controller.error_message}"
+        elif controller.controller_id is None:
+            status = "No microcontroller"
+        else:
+            status = f"Microcontroller ID: {controller.controller_id}"
+        console.echo(message=f"{number}: {controller.port} -> {controller.description} [{status}]")
 
 
 @get.command("ports")

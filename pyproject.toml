@@ -42,15 +42,15 @@ classifiers = [
 # Runtime project dependencies.
 dependencies = [
     # Ataraxis Libraries
-    "ataraxis-time==6.0.2",
-    "ataraxis-base-utilities==6.0.1",
-    "ataraxis-data-structures==6.1.2",
-    "ataraxis-transport-layer-pc==4.0.1",
-    "ataraxis-communication-interface==6.0.1",
-    "ataraxis-video-system==4.0.4rc1",
+    "ataraxis-time==7.0.0",
+    "ataraxis-base-utilities==7.0.0",
+    "ataraxis-data-structures==7.1.0",
+    "ataraxis-transport-layer-pc==5.1.0",
+    "ataraxis-communication-interface==7.1.1",
+    "ataraxis-video-system==5.1.1",
 
     # Sollertia Libraries
-    "sollertia-shared-assets==9.1.0rc3",
+    "sollertia-shared-assets==10.0.0rc3",
 
     # Hardware Control
     "zaber-motion==9.3.2",
@@ -83,8 +83,10 @@ dependencies = [
     "pyyaml==6.0.3",
 
     # MCP and HTTP
-    "mcp==1.28.1",
-    "httpx==0.28.1",
+    "mcp==2.0.0",
+    # Pinned directly, rather than left to the mcp requirement, because the Unity bridge client uses it to
+    # communicate with the Unity Editor.
+    "httpx2==2.12.0",
 ]
 
 [project.urls]

@@ -39,6 +39,7 @@ from .system import (
     get_system_configuration,
 )
 from ..cross_system import (
+    BEHAVIOR_LOGGER_NAME,
     BrakeInterface,
     WaterValveInterface,
     GasPuffValveInterface,
@@ -176,8 +177,7 @@ def window_checking_logic(
         # Initializes the data logger. This initialization follows the same procedure as the MesoscopeVRSystem class.
         logger = DataLogger(
             output_directory=session_data.raw_data_path,
-            # Creates the behavior_data_log subdirectory under raw_data.
-            instance_name="behavior",
+            instance_name=BEHAVIOR_LOGGER_NAME,
             thread_count=10,
         )
         logger.start()

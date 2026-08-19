@@ -121,9 +121,8 @@ class EncoderInterface(ModuleInterface):
         self._distance_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        """Connects to the instance's shared memory buffer in the main runtime process."""
         self._distance_tracker.connect()
-        self._distance_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer."""
@@ -291,9 +290,8 @@ class LickInterface(ModuleInterface):
         self._lick_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        """Connects to the instance's shared memory buffer in the main runtime process."""
         self._lick_tracker.connect()
-        self._lick_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer."""
@@ -510,7 +508,12 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
     """
 
     def __init__(self, polling_frequency: int) -> None:
-        error_codes: set[np.uint8] = {np.uint8(53)}  # kInvalidPinMode
+        error_codes: dict[np.uint8, str] = {
+            np.uint8(53): (  # kInvalidPinMode
+                "The TTL module aborted the command because its pin mode does not support it, which happens when "
+                "CheckState reaches an output instance or a pulse or toggle command reaches an input instance."
+            ),
+        }
         data_codes: set[np.uint8] = {np.uint8(51)}  # kInputOn
 
         super().__init__(
@@ -544,9 +547,8 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
         self._pulse_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        """Connects to the instance's shared memory buffer in the main runtime process."""
         self._pulse_tracker.connect()
-        self._pulse_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer."""
@@ -746,7 +748,12 @@ class WaterValveInterface(ModuleInterface):
     """
 
     def __init__(self, valve_calibration_data: tuple[tuple[int | float, int | float], ...]) -> None:
-        error_codes: set[np.uint8] = {np.uint8(56)}  # kInvalidToneConfiguration
+        error_codes: dict[np.uint8, str] = {
+            np.uint8(56): (  # kInvalidToneConfiguration
+                "The valve module aborted the tone command because its tone duration parameter is zero, which "
+                "happens when the instance manages no tone buzzer or the PC set the duration to zero."
+            ),
+        }
         data_codes: set[np.uint8] = {np.uint8(51), np.uint8(52), np.uint8(53)}  # kOpen, kClosed, kCalibrated
 
         super().__init__(
@@ -810,9 +817,8 @@ class WaterValveInterface(ModuleInterface):
         self._valve_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        """Connects to the instance's shared memory buffer in the main runtime process."""
         self._valve_tracker.connect()
-        self._valve_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer and initializes the cycle PrecisionTimer."""
@@ -1182,9 +1188,8 @@ class GasPuffValveInterface(ModuleInterface):
         self._puff_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
-        """Connects to the instance's shared memory buffer and enables buffer cleanup at shutdown."""
+        """Connects to the instance's shared memory buffer in the main runtime process."""
         self._puff_tracker.connect()
-        self._puff_tracker.enable_buffer_destruction()
 
     def initialize_remote_assets(self) -> None:
         """Connects to the instance's shared memory buffer."""

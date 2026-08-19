@@ -9,11 +9,11 @@ from typing import Literal
 import logging
 from pathlib import Path
 
-import httpx
+import httpx2
 
-# Silences httpx's per-request INFO logging so the bridge's frequent localhost HTTP calls do not flood the runtime
+# Silences httpx2's per-request INFO logging so the bridge's frequent localhost HTTP calls do not flood the runtime
 # console with redundant request records.
-logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpx2").setLevel(logging.WARNING)
 
 _BRIDGE_HOST: str = "127.0.0.1"
 """The loopback host the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener to. The bridge only accepts
@@ -49,12 +49,12 @@ class UnityBridgeClient:
 
     Attributes:
         _url: The fully-formed bridge endpoint every tool call is POSTed to.
-        _client: The httpx client that issues bridge requests.
+        _client: The httpx2 client that issues bridge requests.
     """
 
     def __init__(self, host: str = _BRIDGE_HOST, port: int = _BRIDGE_PORT) -> None:
         self._url: str = f"http://{host}:{port}/"
-        self._client: httpx.Client = httpx.Client(timeout=_BRIDGE_REQUEST_TIMEOUT_S)
+        self._client: httpx2.Client = httpx2.Client(timeout=_BRIDGE_REQUEST_TIMEOUT_S)
 
     def __repr__(self) -> str:
         """Returns a string representation of the UnityBridgeClient instance."""
@@ -218,7 +218,7 @@ class UnityBridgeClient:
         return f"Unity bridge: reachable | scene={active_scene} | state={state}"
 
     def close(self) -> None:
-        """Closes the underlying httpx client and releases its connection pool."""
+        """Closes the underlying httpx2 client and releases its connection pool."""
         self._client.close()
 
     def _extract_actor_controller(self, payload: dict[str, object], tool: str) -> str:
@@ -285,7 +285,7 @@ class UnityBridgeClient:
             response = self._client.post(url=self._url, json=request_body)
             response.raise_for_status()
             payload = response.json()
-        except httpx.HTTPError as exception:
+        except httpx2.HTTPError as exception:
             message = (
                 f"Unable to reach the Unity Editor MCP Bridge at {self._url} for the '{tool}' tool call: {exception}."
             )

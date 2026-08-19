@@ -157,7 +157,6 @@ class MaintenanceControlUI:
 
         self._ui_process.start()
         self._data_array.connect()
-        self._data_array.enable_buffer_destruction()
 
         # Connects to trackers to monitor valve and gas puff states.
         self._valve_tracker.connect()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from dataclasses import dataclass
 
-from numba import njit  # type: ignore[import-untyped]
+from numba import njit
 import numpy as np
 from ataraxis_base_utilities import console
 
@@ -180,7 +180,7 @@ def decompose_cue_sequence(
     )
 
 
-@njit(cache=True)  # type: ignore[untyped-decorator]
+@njit(cache=True)
 def _decompose_sequence_numba_flat(
     cue_sequence: NDArray[np.uint8],
     motifs_flat: NDArray[np.uint8],

@@ -11,7 +11,7 @@ import threading
 from dataclasses import field, dataclass
 
 import numpy as np
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import Timeout, PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
@@ -540,10 +540,10 @@ class VRTaskDriver:
 
         while True:
             self._mqtt.send_data(topic=_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER)
-            self._polling_timer.reset()
+            timeout = Timeout(duration=_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS, precision=TimerPrecisions.MILLISECOND)
 
             received = False
-            while self._polling_timer.elapsed < _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS:
+            while not timeout.expired:
                 self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
                 data = self._mqtt.get_data()
                 if data is None:
@@ -684,8 +684,8 @@ class VRTaskDriver:
         Returns:
             True if a message on the expected topic arrived within the timeout, False otherwise.
         """
-        self._polling_timer.reset()
-        while self._polling_timer.elapsed < timeout_ms:
+        timeout = Timeout(duration=timeout_ms, precision=TimerPrecisions.MILLISECOND)
+        while not timeout.expired:
             self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
             data = self._mqtt.get_data()
             if data is not None:

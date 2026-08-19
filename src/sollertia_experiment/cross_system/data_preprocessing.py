@@ -9,13 +9,15 @@ from typing import TYPE_CHECKING
 from dataclasses import dataclass
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest
+from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest, resolve_camera_video_path
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from sollertia_shared_assets import SessionData
+from sollertia_shared_assets import RAW_DATA_DIRECTORY, SessionData, RawDataFiles
 from ataraxis_data_structures import (
+    LOG_DIRECTORY_SUFFIX,
     delete_directory,
     transfer_directory,
     assemble_log_archives,
+    discover_log_archives,
     calculate_directory_checksum,
 )
 
@@ -27,7 +29,10 @@ if TYPE_CHECKING:
 
     from sollertia_shared_assets import SurgeryData
 
-_LOG_DIRECTORY_NAME: str = "behavior_data_log"
+BEHAVIOR_LOGGER_NAME: str = "behavior"
+"""The instance name assigned to the DataLogger that records the behavior data of every acquisition system."""
+
+_LOG_DIRECTORY_NAME: str = f"{BEHAVIOR_LOGGER_NAME}{LOG_DIRECTORY_SUFFIX}"
 """The name of the directory generated during runtime to store the unprocessed .npy log entries and the camera
 manifest (camera_manifest.yaml). During preprocessing, this directory is archived in place into .npz archives and then
 renamed to behavior_data."""
@@ -72,7 +77,7 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
     if not log_directory.exists():
         return
 
-    archives = list(log_directory.glob("*.npz"))
+    archives = discover_log_archives(log_directory=log_directory)
     unarchived_entries = list(log_directory.glob("*.npy"))
 
     if not unarchived_entries:
@@ -143,7 +148,7 @@ def rename_session_videos(session_data: SessionData) -> None:
     # Renames each acquired video file from its numeric source ID to a human-friendly name. Skips sources whose video
     # file is missing to support sessions where some configured cameras did not save frames to disk.
     for source in manifest.sources:
-        video_path = camera_directory.joinpath(f"{source.id:03d}.mp4")
+        video_path = resolve_camera_video_path(output_directory=camera_directory, system_id=source.id)
         if not video_path.exists():
             continue
         video_path.rename(target=camera_directory.joinpath(f"{session_name}_{source.name}.mp4"))
@@ -313,7 +318,7 @@ def migrate_session_directory(
 
     # Copies the session_data.yaml file from the pulled directory to the old project's session-specific host-machine
     # directory. This is then used to remove the old session data from all destinations.
-    new_session_data_path = local_session_path.joinpath("raw_data", "session_data.yaml")
+    new_session_data_path = local_session_path.joinpath(RAW_DATA_DIRECTORY, RawDataFiles.SESSION_DATA)
     # Since preprocessing removes the raw_data directory, recreates it.
     ensure_directory_exists(old_session_data_path)
     shutil.copy2(src=new_session_data_path, dst=old_session_data_path)
