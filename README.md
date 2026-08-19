@@ -1117,13 +1117,13 @@ The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five
 of the library it targets. Installing a plugin registers its MCP server with compatible clients and makes its skills
 available:
 
-| Plugin       | Targets                  | MCP server | Role                                                                        |
-|--------------|--------------------------|------------|-----------------------------------------------------------------------------|
-| `assets`     | sollertia-shared-assets  | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
-| `unity`      | sollertia-virtual-reality    | (relay)    | Unity task authoring, VR scenes, and the MQTT contract; uses the slsa relay |
-| `experiment` | sollertia-experiment     | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
-| `mesoscope`  | sollertia-experiment     | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
-| `forging`    | sollertia-forgery        | `sl-mcp`   | Downstream behavior processing and analysis                                 |
+| Plugin       | Targets                   | MCP server | Role                                                                        |
+|--------------|---------------------------|------------|-----------------------------------------------------------------------------|
+| `assets`     | sollertia-shared-assets   | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
+| `unity`      | sollertia-virtual-reality | (relay)    | Unity task authoring, VR scenes, and the MQTT contract; uses the slsa relay |
+| `experiment` | sollertia-experiment      | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
+| `mesoscope`  | sollertia-experiment      | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
+| `forging`    | sollertia-forgery         | `sl-mcp`   | Downstream behavior processing and analysis                                 |
 
 The **unity** plugin uses the Unity relay served by the assets plugin's `slsa` MCP server and the McpBridge editor
 plugin; it requires the assets plugin. The **mesoscope** plugin requires both the experiment plugin's `sle mcp` server
@@ -1190,35 +1190,36 @@ require that mamba is installed through the [miniforge3](https://github.com/cond
 3. `cd` to the root directory of the prepared project distribution.
 4. Install the core development dependencies into the ***base*** mamba environment via the `mamba install tox uv tox-uv`
    command.
-5. Use the `tox -e create` command to create the project-specific development environment followed by the `tox -e
-   install` command to install the project into that environment as a library.
+5. Use the `tox -e create` command to create the project-specific development environment followed by `tox -e install`
+   command to install the project into that environment as a library.
 
 ### Additional Dependencies
 
 In addition to installing the project and all user dependencies, install the following dependencies:
 
 1. [Python](https://www.python.org/downloads/) version 3.14. This library currently supports a single Python version
-   (`requires-python >=3.14,<3.15`). It is recommended to use a tool like
-   [pyenv](https://github.com/pyenv/pyenv) to install and manage the required version.
+   (`requires-python >=3.14,<3.15`). It is recommended to use a tool like [pyenv](https://github.com/pyenv/pyenv) to
+   install and manage the required version.
 
 ### Development Automation
 
 This project uses `tox` for development automation. The following tox environments are available:
 
-| Environment | Description                                                                                  |
-|-------------|----------------------------------------------------------------------------------------------|
-| `lint`      | Runs ruff formatting, ruff linting, and mypy type checking                                   |
-| `stubs`     | Generates the py.typed marker and .pyi stub files using the project's wheel distribution     |
-| `docs`      | Builds the API documentation via Sphinx                                                      |
-| `build`     | Builds sdist and wheel distributions                                                         |
-| `upload`    | Uploads distributions to PyPI via twine                                                      |
-| `install`   | Builds and installs the project into its `sle_dev` mamba environment                         |
-| `uninstall` | Uninstalls the project from its `sle_dev` mamba environment                                  |
-| `create`    | Creates the project's `sle_dev` mamba development environment (Python 3.14)                  |
-| `remove`    | Removes the project's `sle_dev` mamba development environment                                |
-| `provision` | Removes and recreates the `sle_dev` mamba environment                                        |
-| `export`    | Exports the mamba environment as a .yml file and a spec.txt with revision history            |
-| `import`    | Creates or updates the mamba environment from the stored .yml file                           |
+| Environment | Description                                                                              |
+|-------------|------------------------------------------------------------------------------------------|
+| `lint`      | Runs ruff formatting, ruff linting, and mypy type checking                               |
+| `stubs`     | Generates the py.typed marker and .pyi stub files using the project's sdist distribution |
+| `docs`      | Builds the API documentation via Sphinx                                                  |
+| `build`     | Builds sdist and wheel distributions                                                     |
+| `upload`    | Uploads distributions to PyPI via twine                                                  |
+| `deploy`    | Uploads the built documentation to the Netlify site                                      |
+| `install`   | Builds and installs the project into its `sle_dev` mamba environment                     |
+| `uninstall` | Uninstalls the project from its `sle_dev` mamba environment                              |
+| `create`    | Creates the project's `sle_dev` mamba development environment (Python 3.14)              |
+| `remove`    | Removes the project's `sle_dev` mamba development environment                            |
+| `provision` | Removes and recreates the `sle_dev` mamba environment                                    |
+| `export`    | Exports the mamba environment as a .yml file                                             |
+| `import`    | Creates or updates the mamba environment from the stored .yml file                       |
 
 Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
 

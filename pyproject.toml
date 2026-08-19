@@ -89,6 +89,7 @@ dependencies = [
     "httpx2==2.12.0",
 ]
 
+# Project repository and hosted documentation URLs.
 [project.urls]
 Homepage = "https://github.com/Sun-Lab-NBB/sollertia-experiment"
 Documentation = "https://sollertia-experiment-api-docs.netlify.app/"
@@ -106,9 +107,9 @@ dev = [
     "tox-uv>=1,<2",
 
     # Development Automation
-    "ataraxis-automation>=8,<9",
+    "ataraxis-automation>=9,<10",
 
-    # Type stubs
+    # Types
     "google-api-python-client-stubs>=1,<2",
     "scipy-stubs>=1,<2",
     "types-pyyaml>=6,<7",
@@ -116,7 +117,7 @@ dev = [
     "types-tqdm>=4,<5",
 ]
 
-# Specifies files that should not be included in the source-code distribution but are also not part of gitignore.
+# Specifies files that should not be included in the source-code distribution.
 [tool.hatch.build.targets.sdist]
 exclude = [".github", "recipe"]
 
@@ -126,10 +127,10 @@ packages = ["src/sollertia_experiment"]
 
 # Ruff Configuration.
 [tool.ruff]
-line-length = 120         # The maximum column length is set to 120 for this project.
-indent-width = 4          # Same as black, indents are 4 spaces
+line-length = 120
+indent-width = 4
 target-version = "py314"  # Targets the lowest supported version of python
-src = ["src"]             # The name of the source directory
+src = ["src"]
 
 # Excludes 'service' .py files, such as the sphinx configuration file, from linting.
 extend-exclude = ["conf.py"]
@@ -139,31 +140,35 @@ lint.select = ["ALL"]
 
 # General ignore directives
 lint.ignore = [
+    # Universal lint.ignore corpus. Present in every Ataraxis framework and Sollertia platform project.
     "W291",    # Conflicts with docstring formatting
-    "W293",    # Conflicts with UI style formatting
-    "BLE001",  # Catching blind exceptions is necessary for the functioning of this library
-    "T201",    # Print is necessary to work with some external formatters used in this library
     "ANN401",  # While suboptimal, ANY is a helpful type when used with caution
+    "BLE001",  # Broad exception handling is necessary at library boundaries
     "C901",    # Sometimes complex functions are necessary
-    "PLR0913", # Sometimes complex functions are necessary
-    "PLR0912", # Sometimes complex functions are necessary
-    "PLR0915", # Sometimes complex type definitions are necessary
     "PLR0911", # Sometimes complex return graphs are necessary
-    "TID252",  # Conflicts with the project's import management strategy
+    "PLR0912", # Sometimes complex functions are necessary
+    "PLR0913", # Sometimes complex functions are necessary
+    "PLR0915", # Sometimes functions with many statements are necessary
+    "PLR0917", # PLR0913 already covers argument counts, and call sites pass keyword arguments
     "COM812",  # Conflicts with the formatter
     "ISC001",  # Conflicts with the formatter
-    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-182590771
+    "PT001",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "PT023",   # https://github.com/astral-sh/ruff/issues/8796#issuecomment-1825907715
     "D107",    # __init__ is documented inside the main class docstring where applicable
     "D205",    # Bugs out for file descriptions
     "PLW0603", # While global statement usage is not ideal, it streamlines certain development patterns
+    "TID252",  # Conflicts with the library import management strategy, which requires parent-relative imports
+    "CPY001",  # The license is declared in the LICENSE file and the license and license-files metadata fields
+
+    # Project-specific
+    "S603",    # Every subprocess call passes a fixed argument vector, with no shell and no user input
 ]
 
 # Additional formatting configurations
 [tool.ruff.format]
-quote-style = "double"             # Uses double quotes for strings
-indent-style = "space"             # Uses space for indents
-skip-magic-trailing-comma = false  # Like black, ignores trailing commas
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false  # Like black, honors magic trailing commas
 line-ending = "auto"               # Automatically detects and standardizes line-ending character
 
 # Docstrings and comments' line length
@@ -181,16 +186,17 @@ convention = "google"
     "F403", # Wildcard imports
 ]
 
+# Import sorting and grouping configurations
 [tool.ruff.lint.isort]
-case-sensitive = true              # Takes case into account when sorting imports
+case-sensitive = true
 combine-as-imports = true          # Combines multiple "as" imports for the same package
-force-wrap-aliases = true          # Wraps "as" imports so that each uses a separate line (after combining for package)
+force-wrap-aliases = true          # Wraps "as" imports so that each uses a separate line
 force-sort-within-sections = true  # Forces "as" and "from" imports for the same package to be close
 length-sort = true                 # Places shorter imports first
 
 # MyPy configuration section.
 [tool.mypy]
-# Strict mode settings (equivalent to --strict)
+# Strict mode settings (--strict), plus the unused-config warning that --strict does not enable
 warn_unused_configs = true
 disallow_any_generics = true
 disallow_subclassing_any = true
@@ -205,19 +211,17 @@ warn_return_any = true
 no_implicit_reexport = true
 strict_equality = true
 
-# Extra checks (equivalent to --extra-checks)
 extra_checks = true
 
-# Pretty output (equivalent to --pretty)
 pretty = true
 
 exclude = [
-    "sollertia-experiment-\\d+", # Ignores the temporary directory created by setuptools when building the sdist
-    "venv.*/",                   # Ignores virtual environments
-    "build/",                    # Ignores the sdist directory
-    "dist/",                     # Ignores the wheel directory
-    "docs/",                     # Ignores the sphinx / doxygen directory
-    "stubs/",                    # Ignores stubs directory (stubgen output target)
-    "recipe/",                   # Ignores recipe directory (grayskull output target)
-    "tests/",                    # Ignores the test directory
+    "sollertia-experiment-\\d+",  # The temporary folder created when building the sdist
+    "venv.*/",
+    "build/",
+    "dist/",
+    "docs/",
+    "stubs/",                     # stubgen output target
+    "recipe/",                    # grayskull output target
+    "tests/",
 ]

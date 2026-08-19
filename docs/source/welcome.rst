@@ -10,7 +10,8 @@ acquisition and preprocessing runtime of the platform, pairing with the shared d
 provided by `sollertia-shared-assets <https://github.com/Sun-Lab-NBB/sollertia-shared-assets>`_ and feeding the
 downstream data processing pipeline exposed by `sollertia-forgery <https://github.com/Sun-Lab-NBB/sollertia-forgery>`_.
 
-This website only contains the API documentation for the classes and methods offered by this library. See the project
+This website contains the API documentation for the classes and methods offered by this library, together with the
+reference for every command exposed by its command-line interface where the project declares one. See the project
 GitHub repository for installation instructions and library usage examples:
 `sollertia-experiment GitHub repository <https://github.com/Sun-Lab-NBB/sollertia-experiment>`_.
 

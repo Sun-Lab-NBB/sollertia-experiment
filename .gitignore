@@ -1,4 +1,3 @@
-
 # This version of gitignore is designed to work for python projects using C++ computational core. It has been
 # configured, it to exclude certain jetbrains files, but additional configuration may be needed for contributors
 # seeking to use VSCode or other IDE / code editor.
@@ -200,14 +199,15 @@ cython_debug/
 # OSx
 .DS_Store
 
-# Project files that are part of the general Sollertia platform C-Python project architecture that should not be uploaded to and
-# from Github
+# Project files that are part of the general Sollertia platform C-Python project architecture that should not be
+# uploaded to and from Github
 /cmake-build-debug/
 /reports/
 /docs/source/doxygen/
 /docs/build/
 /stubs/
 /.pypirc
+/.netlifyrc
 
 # Project: Add any project-specific exclusions here
 /temp
