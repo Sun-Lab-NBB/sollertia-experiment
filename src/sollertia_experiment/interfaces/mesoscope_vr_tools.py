@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Literal
 from pathlib import Path
 
 from ataraxis_video_system import GenicamConfiguration, read_camera_configuration
-from sollertia_shared_assets import SessionData, get_data_root
+from sollertia_shared_assets import (
+    CONFIGURATION_DIRECTORY,
+    SessionData,
+    AcquisitionSystems,
+    get_data_root,
+    get_working_directory,
+)
 
 from .mcp_instance import mcp, read_yaml, serialize, probe_writable, describe_dataclass, write_yaml_validated
 from ..mesoscope_vr import (
@@ -34,6 +40,14 @@ _SESSION_SYSTEM_CONFIG_FILENAME: str = "system_configuration.yaml"
 _RAW_DATA_DIR: str = "raw_data"
 """Subdirectory under each session root that holds the raw data and metadata files."""
 
+_SYSTEM_CONFIGURATION_GLOB: str = "*_system_configuration.yaml"
+"""Glob pattern that matches the system configuration file of any acquisition system under the working directory's
+configuration directory."""
+
+_MESOSCOPE_SYSTEM_CONFIGURATION_FILENAME: str = f"{AcquisitionSystems.MESOSCOPE_VR}_system_configuration.yaml"
+"""Canonical filename of the Mesoscope-VR system configuration file under the working directory's configuration
+directory."""
+
 
 @mcp.tool()
 def read_system_configuration_tool() -> dict[str, Any]:
@@ -45,7 +59,7 @@ def read_system_configuration_tool() -> dict[str, Any]:
     """
     try:
         instance = get_system_configuration()
-    except (FileNotFoundError, OSError, ValueError) as exception:
+    except Exception as exception:
         return {"error": str(exception)}
     return {"file_path": str(get_system_configuration_path()), "data": serialize(value=instance)}
 
@@ -67,8 +81,16 @@ def write_system_configuration_tool(
         ``{"error": ...}`` on failure.
     """
     try:
-        file_path = get_system_configuration_path()
-    except FileNotFoundError as exception:
+        directory = get_working_directory().joinpath(CONFIGURATION_DIRECTORY)
+        # A host-machine that has not been bound to an acquisition system yet holds no configuration file for the shared
+        # resolver to find, so the destination is built the way the 'sle mesoscope configure system' command builds it.
+        # A directory holding several configuration files goes through the resolver instead, which rejects the ambiguity
+        # and names the files it found.
+        if not tuple(directory.glob(_SYSTEM_CONFIGURATION_GLOB)):
+            file_path = directory.joinpath(_MESOSCOPE_SYSTEM_CONFIGURATION_FILENAME)
+        else:
+            file_path = get_system_configuration_path()
+    except Exception as exception:
         return {"error": str(exception)}
     return write_yaml_validated(
         file_path=file_path,
@@ -89,7 +111,7 @@ def validate_system_configuration_tool() -> dict[str, Any]:
     """
     try:
         configuration = get_system_configuration()
-    except (FileNotFoundError, OSError, ValueError) as exception:
+    except Exception as exception:
         return {"error": str(exception)}
 
     paths = _filesystem_paths_report(configuration=configuration)
@@ -113,7 +135,7 @@ def verify_camera_configuration_tool() -> dict[str, Any]:
     """
     try:
         configuration = get_system_configuration()
-    except (FileNotFoundError, OSError, ValueError) as exception:
+    except Exception as exception:
         return {"error": str(exception)}
 
     cameras = configuration.cameras
@@ -154,7 +176,7 @@ def check_system_mounts_tool() -> dict[str, Any]:
     """
     try:
         configuration = get_system_configuration()
-    except (FileNotFoundError, OSError, ValueError) as exception:
+    except Exception as exception:
         return {"error": str(exception)}
 
     paths = _filesystem_paths_report(configuration=configuration)
@@ -334,31 +356,36 @@ def preprocess_session_tool(session_path: str) -> str:
 
 
 @mcp.tool()
-def delete_session_tool(session_path: str, *, confirm_deletion: bool = False) -> str:
+def delete_session_tool(session_path: str, confirm_deletion: Literal["yes", "no"] | None = None) -> str:
     """Removes a session's data from all storage locations accessible to the data acquisition system.
 
     Important:
-        This operation is irreversible and removes data from all machines and long-term storage destinations.
-        The AI agent MUST warn the user about the consequences of this action before calling this tool with
-        confirm_deletion=True.
+        This operation is irreversible and removes the session's data from every acquisition machine and every
+        long-term storage destination. When ``confirm_deletion`` is omitted, the tool returns an error instead of
+        deleting anything. Agentic callers should warn the user about the consequences and ask whether to proceed,
+        then retry with the chosen value. A ``yes`` value performs the deletion. A ``no`` value abandons it.
 
     Args:
         session_path: The absolute path to the session directory to delete. The session must be located
             inside the data root of the data acquisition system.
-        confirm_deletion: Safety parameter that must be explicitly set to True to proceed with deletion.
-            When False (the default), the tool returns a warning message instead of deleting data.
+        confirm_deletion: The policy applied to the deletion request. ``yes`` performs the deletion, ``no`` abandons
+            it, and ``None`` returns an error so the caller can prompt the user.
 
     Returns:
-        A success message upon completion, a safety warning if 'confirm_deletion' is False, or an error description
-        if deletion fails.
+        A success message upon completion, a refusal naming the accepted values when the policy is unspecified, an
+        abandonment notice when the policy declines the deletion, or an error description when the deletion fails.
     """
-    # Enforces explicit confirmation before proceeding with deletion.
-    if not confirm_deletion:
+    # Resolves the deletion policy before any storage location is touched, so an unspecified policy cannot reach the
+    # purge through a falsy default.
+    if confirm_deletion is None:
         return (
-            "Error: Session deletion requires explicit confirmation. Set confirm_deletion=True to proceed. "
-            "WARNING: This operation permanently removes the session's data from all machines and long-term "
-            "storage destinations accessible to the data acquisition system. This action cannot be undone."
+            f"Error: Deleting session '{session_path}' permanently removes its data from every acquisition machine "
+            f"and every long-term storage destination, and cannot be undone. Specify confirm_deletion='yes' to "
+            f"perform the deletion, or confirm_deletion='no' to abandon it. Ask the user which behavior they prefer "
+            f"before retrying."
         )
+    if confirm_deletion == "no":
+        return f"Session deletion abandoned: {session_path}"
 
     try:
         path = Path(session_path)
@@ -465,7 +492,9 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
     Notes:
         Long-term storage destinations whose root is left unset are reported as not configured rather than as errors,
         since configuring them is optional. The optional input files follow the same convention, so a host that runs
-        without stored camera configurations or without face-camera inference still reports a healthy filesystem.
+        without stored camera configurations or without face-camera inference still reports a healthy filesystem. The
+        mesoscope acquisition directory is required by this acquisition system, so an unset value there is reported as
+        both not configured and not ok.
 
     Args:
         configuration: The Mesoscope-VR system configuration whose filesystem paths are reported on.
@@ -480,9 +509,26 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
         data_root_report = _check_path(path=get_data_root())
     except FileNotFoundError as exception:
         data_root_report = {"path": "", "exists": False, "ok": False, "error": str(exception)}
+
+    # An unset path resolves to the current directory, which exists and is usually writable, so it is rejected here
+    # instead of reaching the write probe and passing it.
+    if filesystem.mesoscope_directory == Path():
+        mesoscope_report: dict[str, Any] = {
+            "path": str(filesystem.mesoscope_directory),
+            "configured": False,
+            "ok": False,
+            "error": (
+                "The filesystem.mesoscope_directory field is unset. Set it to the Mesoscope acquisition mount inside "
+                "the configuration file written by the 'sle mesoscope configure system' command."
+            ),
+        }
+    else:
+        mesoscope_report = _check_path(path=filesystem.mesoscope_directory)
+        mesoscope_report["configured"] = True
+
     paths: dict[str, Any] = {
         "data_root": data_root_report,
-        "mesoscope_directory": _check_path(path=filesystem.mesoscope_directory),
+        "mesoscope_directory": mesoscope_report,
     }
     for destination_name, destination_root in filesystem.storage_directories.items():
         report_key = f"storage_directory:{destination_name}"

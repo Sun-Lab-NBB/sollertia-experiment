@@ -618,6 +618,8 @@ def create_experiment_configuration_file(
     reward_size: float,
     reward_tone_duration: int,
     puff_duration: int,
+    *,
+    overwrite: bool = False,
 ) -> None:
     """Creates a Mesoscope-VR experiment configuration file from a task template under the configured data root.
 
@@ -635,10 +637,12 @@ def create_experiment_configuration_file(
         reward_size: The default water reward volume, in microliters, for lick-type trials.
         reward_tone_duration: The default reward tone duration, in milliseconds, for lick-type trials.
         puff_duration: The default gas puff duration, in milliseconds, for occupancy-type trials.
+        overwrite: Determines whether to replace an existing experiment configuration file at the destination.
 
     Raises:
         ValueError: If the target project does not exist under the data root.
         FileNotFoundError: If the named task template does not exist in the configured task templates directory.
+        FileExistsError: If the destination configuration file exists and overwrite is False.
     """
     root_directory = get_data_root()
     project_path = root_directory.joinpath(project)
@@ -650,6 +654,13 @@ def create_experiment_configuration_file(
         console.error(message=message, error=ValueError)
 
     file_path = project_path.joinpath(CONFIGURATION_DIRECTORY, f"{experiment}.yaml")
+    if file_path.exists() and not overwrite:
+        message = (
+            f"Unable to generate the '{experiment}' experiment configuration. The configuration file {file_path} "
+            f"already exists, and replacing it with the template defaults would discard every hand-edited runtime "
+            f"state and trial parameter it stores. Re-run the command with the '--force' flag to replace the file."
+        )
+        console.error(message=message, error=FileExistsError)
 
     templates_directory = get_task_templates_directory()
     template_path = templates_directory.joinpath(f"{template}.yaml")
@@ -720,17 +731,31 @@ class MesoscopeData:
             destinations whose storage root is configured in the system configuration are included.
         unconfigured_destinations: Stores the names of the long-term storage destinations whose storage root is not
             configured for the host-machine, used to warn about skipped data backups during preprocessing.
+
+    Raises:
+        ValueError: If the system configuration leaves the mesoscope_directory field unset. Every Mesoscope-VR session
+            type resolves part of its layout under the Mesoscope acquisition mount, so all of them require it.
     """
 
     def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None:
         session = session_data.session_name
+        mesoscope_directory = system_configuration.filesystem.mesoscope_directory
+        if mesoscope_directory == Path():
+            message = (
+                f"Unable to resolve the Mesoscope-VR filesystem layout for the '{session}' session. The "
+                f"mesoscope_directory field of the acquisition system configuration file must point to the "
+                f"local-filesystem-mounted Mesoscope acquisition directory, which every Mesoscope-VR session requires, "
+                f"but got the unset default path '{mesoscope_directory}'. Use the 'sle mesoscope configure system' CLI "
+                f"command to generate the configuration file and set the field to the mount path."
+            )
+            console.error(message=message, error=ValueError)
 
         # Anchors the animal on the platform data root, then rebinds it onto the Mesoscope acquisition mount and each
         # long-term storage destination to resolve the per-root copies of the same logical session.
         local_animal = AnimalData(
             root=get_data_root(), project_name=session_data.project_name, animal_id=session_data.animal_id
         )
-        mesoscope_animal = local_animal.for_root(root=system_configuration.filesystem.mesoscope_directory)
+        mesoscope_animal = local_animal.for_root(root=mesoscope_directory)
 
         self.vrpc_data: _VRPCPersistentData = _VRPCPersistentData(
             session_type=session_data.session_type,
@@ -739,7 +764,7 @@ class MesoscopeData:
 
         self.scanimagepc_data: _ScanImagePCData = _ScanImagePCData(
             session=session,
-            mesoscope_root_path=system_configuration.filesystem.mesoscope_directory,
+            mesoscope_root_path=mesoscope_directory,
             persistent_data_path=mesoscope_animal.persistent_data_path,
         )
 

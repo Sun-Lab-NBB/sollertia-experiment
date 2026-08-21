@@ -16,7 +16,7 @@ from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
 from .bridge import UnityBridgeError, UnityBridgeClient
-from ..cross_system import wait_for_enter
+from ..cross_system import wait_for_enter, run_shutdown_step
 from .trial_decomposition import DecomposedTrials, CachedMotifDecomposer, decompose_cue_sequence
 
 if TYPE_CHECKING:
@@ -48,6 +48,9 @@ caller-enabled VR screens to settle before they are required to render."""
 
 _CUE_SEQUENCE_RESPONSE_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for Unity to respond to a cue sequence request before retrying."""
+
+_SCENE_NAME_RESPONSE_TIMEOUT_MS: int = 5000
+"""The maximum time, in milliseconds, to wait for Unity to respond to a scene name request before retrying."""
 
 _PLAY_MODE_READINESS_TIMEOUT_MS: int = 60000
 """The maximum time, in milliseconds, to wait for Unity to publish the SessionStart message after the driver requests
@@ -277,12 +280,12 @@ class VRTaskDriver:
 
         Notes:
             Exits Play Mode through the bridge before tearing down the connections so the Unity scene does not keep
-            running after the session ends. Stopping the scene is a best-effort step: if the bridge is unreachable
-            because the editor was closed, the driver logs a warning and proceeds with the teardown.
+            running after the session ends. Every step is isolated, so an unreachable editor or broker still leaves
+            the remaining connections closed.
         """
-        self._stop_unity()
-        self._mqtt.disconnect()
-        self._bridge.close()
+        run_shutdown_step(description="stopping the Unity scene", step=self._stop_unity)
+        run_shutdown_step(description="disconnecting from the MQTT broker", step=self._mqtt.disconnect)
+        run_shutdown_step(description="closing the Unity bridge", step=self._bridge.close)
 
     def setup(self) -> None:
         """Carries out the Unity setup sequence used at the start of a session.
@@ -600,19 +603,38 @@ class VRTaskDriver:
         message = "Verifying that the Unity game engine is configured to display the correct scene..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        self._mqtt.send_data(topic=_VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
-        payload = self._wait_for_topic(expected_topic=_VRTaskMQTTTopics.SCENE_NAME)
-        scene_name: str = json.loads(payload.decode("utf-8"))["name"]
+        while True:
+            self._mqtt.send_data(topic=_VRTaskMQTTTopics.SCENE_NAME_TRIGGER)
+            timeout = Timeout(duration=_SCENE_NAME_RESPONSE_TIMEOUT_MS, precision=TimerPrecisions.MILLISECOND)
 
-        if scene_name != self._expected_scene_name:
+            while not timeout.expired:
+                self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
+                data = self._mqtt.get_data()
+                if data is None:
+                    continue
+                topic, payload = data
+                if topic != _VRTaskMQTTTopics.SCENE_NAME:
+                    continue
+
+                scene_name: str = json.loads(payload.decode("utf-8"))["name"]
+                if scene_name != self._expected_scene_name:
+                    message = (
+                        f"The name of the Virtual Reality scene (task) running in Unity ({scene_name}) does not "
+                        f"match the scene name expected based on the session's experiment configuration "
+                        f"({self._expected_scene_name})."
+                    )
+                    console.error(message=message, error=RuntimeError)
+
+                console.echo(message="Unity scene configuration: Confirmed.", level=LogLevel.SUCCESS)
+                return
+
             message = (
-                f"The name of the Virtual Reality scene (task) running in Unity ({scene_name}) does not match the "
-                f"scene name expected based on the session's experiment configuration ({self._expected_scene_name})."
+                f"The Virtual Reality task driver sent a scene name request to Unity via the "
+                f"'{_VRTaskMQTTTopics.SCENE_NAME_TRIGGER}' topic but received no response within "
+                f"{_SCENE_NAME_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
             )
-            console.error(message=message, error=RuntimeError)
-
-        message = "Unity scene configuration: Confirmed."
-        console.echo(message=message, level=LogLevel.SUCCESS)
+            console.echo(message=message, level=LogLevel.ERROR)
+            wait_for_enter(message="Press Enter to retry")
 
     def _verify_vr_display(self) -> None:
         """Animates the VR scene while the operator verifies the display, then cycles Unity into a fresh armed state.
@@ -637,9 +659,15 @@ class VRTaskDriver:
 
         # Regardless of the play state the operator left Unity in, cycles the scene off and back on so the session
         # starts from a fresh, armed Virtual Reality origin.
-        state, _ = self._bridge.get_play_state()
-        if state == "playing":
-            self._stop_unity()
+        try:
+            state, _ = self._bridge.get_play_state()
+            if state == "playing":
+                self._stop_unity()
+        except UnityBridgeError as exception:
+            # The arming step below recovers the bridge through its own prompt loop, so an editor closed while the
+            # operator resolved a display issue does not abort the session.
+            message = f"Unable to read the Unity play state through the bridge. {exception}"
+            console.echo(message=message, level=LogLevel.WARNING)
         self._arm_unity()
 
     def _animate_until_satisfied(self) -> None:
@@ -668,16 +696,6 @@ class VRTaskDriver:
         finally:
             stop_animation.set()
             animation_thread.join()
-
-    def _wait_for_topic(self, expected_topic: str) -> bytes | bytearray:
-        """Blocks until Unity sends a message on the specified topic and returns the payload."""
-        while True:
-            self._polling_timer.delay(delay=_SETUP_POLLING_DELAY_MS, block=False)
-            data = self._mqtt.get_data()
-            if data is not None:
-                topic, payload = data
-                if topic == expected_topic:
-                    return payload
 
     def _wait_for_topic_bounded(self, expected_topic: str, timeout_ms: int) -> bool:
         """Polls the Unity MQTT buffer for a message on the given topic until the timeout elapses.

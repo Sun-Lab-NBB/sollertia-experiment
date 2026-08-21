@@ -1,6 +1,7 @@
 """Provides the assets shared by multiple data acquisition systems."""
 
 from .project_tools import get_version_data, get_project_experiments
+from .shutdown_tools import run_shutdown_step
 from .zaber_bindings import (
     ZaberAxis,
     CRCCalculator,
@@ -88,6 +89,7 @@ __all__ = [
     "request_required_confirmation",
     "request_selection",
     "request_text",
+    "run_shutdown_step",
     "set_zaber_device_setting",
     "snapshot_surgery_data",
     "validate_zaber_device_configuration",

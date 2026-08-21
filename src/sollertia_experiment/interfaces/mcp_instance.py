@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from enum import Enum
 import uuid
-from typing import TYPE_CHECKING, Any, get_type_hints
+from types import UnionType
+from typing import TYPE_CHECKING, Any, get_args, get_origin, get_type_hints
 from pathlib import Path
 import contextlib
 from dataclasses import MISSING, fields, is_dataclass
@@ -15,6 +16,9 @@ from ataraxis_base_utilities import ensure_directory_exists
 
 if TYPE_CHECKING:
     from ataraxis_data_structures import YamlConfig
+
+_MAPPING_ARGUMENT_COUNT: int = 2
+"""The number of type arguments a mapping annotation carries, which is its key type followed by its value type."""
 
 mcp: MCPServer = MCPServer(name="sollertia-experiment")
 """The shared MCP server instance on which all tool modules register their tools via ``@mcp.tool()``."""
@@ -102,6 +106,11 @@ def write_yaml_validated(
 ) -> dict[str, Any]:
     """Writes a payload as YAML and validates it by round-tripping through ``validator_cls``.
 
+    Notes:
+        Validation rejects a payload key that names no field of ``validator_cls`` and a built field whose value
+        violates its declared annotation, since the deserializer drops the unknown key and keeps the mismatched value
+        as written.
+
     Args:
         file_path: The path to the YAML file to write.
         payload: The data to serialize into the YAML file.
@@ -114,6 +123,15 @@ def write_yaml_validated(
     """
     if file_path.exists() and not overwrite:
         return {"error": f"File already exists: {file_path}. Pass overwrite=True to replace."}
+
+    unknown_keys = _unknown_payload_keys(payload=payload, cls=validator_cls)
+    if unknown_keys:
+        return {
+            "error": (
+                f"Validation failed for {validator_cls.__name__}: the payload carries the unknown key(s) "
+                f"{', '.join(unknown_keys)}."
+            )
+        }
 
     ensure_directory_exists(path=file_path.parent)
     temp_path = file_path.with_name(f".{file_path.stem}.{uuid.uuid4().hex[:8]}.tmp.yaml")
@@ -130,6 +148,10 @@ def write_yaml_validated(
     finally:
         with contextlib.suppress(FileNotFoundError):
             temp_path.unlink()
+
+    mismatches = _field_type_mismatches(instance=instance, prefix="")
+    if mismatches:
+        return {"error": f"Validation failed for {validator_cls.__name__}: {', '.join(mismatches)}."}
 
     try:
         if use_save_method and hasattr(instance, "save"):
@@ -177,3 +199,141 @@ def probe_writable(path: Path) -> str | None:
     except OSError as exception:
         return str(exception)
     return None
+
+
+def _unknown_payload_keys(payload: dict[str, Any], cls: type) -> list[str]:
+    """Returns the dotted names of the payload keys that name no field of the target dataclass.
+
+    Notes:
+        The walk descends into a nested mapping whenever the field it fills is annotated with a dataclass type, so a
+        key misspelled inside a nested section is reported with the full path that locates it in the payload.
+
+    Args:
+        payload: The mapping intended to build an instance of the target dataclass.
+        cls: The dataclass type the payload is checked against.
+
+    Returns:
+        The dotted name of every payload key the dataclass does not declare, in payload order.
+    """
+    if not is_dataclass(cls):
+        return []
+
+    # An annotation naming a type this module cannot resolve leaves the field without a nested walk rather than
+    # failing the whole check.
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        hints = {}
+
+    field_names = {field_definition.name for field_definition in fields(cls)}
+    unknown_keys: list[str] = []
+    for key, item in payload.items():
+        if key not in field_names:
+            unknown_keys.append(key)
+            continue
+        annotation = hints.get(key)
+        nested_class = next(
+            (
+                candidate
+                for candidate in (annotation, *get_args(annotation))
+                if isinstance(candidate, type) and is_dataclass(candidate)
+            ),
+            None,
+        )
+        if nested_class is not None and isinstance(item, dict):
+            unknown_keys.extend(f"{key}.{name}" for name in _unknown_payload_keys(payload=item, cls=nested_class))
+    return unknown_keys
+
+
+def _field_type_mismatches(instance: Any, prefix: str) -> list[str]:
+    """Returns a description of every field of the dataclass instance whose value violates its declared annotation.
+
+    Args:
+        instance: The dataclass instance whose field values are checked.
+        prefix: The dotted path that locates the instance inside the payload it was built from, empty for the root.
+
+    Returns:
+        One description per violating field, naming the dotted field path, the type of the stored value, and the
+        declared annotation.
+    """
+    try:
+        hints = get_type_hints(type(instance))
+    except Exception:
+        hints = {}
+
+    mismatches: list[str] = []
+    for field_definition in fields(instance):
+        value = getattr(instance, field_definition.name)
+        name = f"{prefix}{field_definition.name}"
+        annotation = hints.get(field_definition.name)
+        if annotation is not None and not _annotation_matches(value=value, annotation=annotation):
+            expected = annotation.__name__ if isinstance(annotation, type) else str(annotation).replace("typing.", "")
+            mismatches.append(f"{name} is {type(value).__name__}, expected {expected}")
+            continue
+        if is_dataclass(value) and not isinstance(value, type):
+            mismatches.extend(_field_type_mismatches(instance=value, prefix=f"{name}."))
+    return mismatches
+
+
+def _annotation_matches(value: Any, annotation: Any) -> bool:
+    """Determines whether the value satisfies the declared type annotation.
+
+    Notes:
+        A parameterized tuple, list, or mapping annotation is checked against its origin type and its element types,
+        and every other parameterized annotation is checked against its origin type alone. An integer satisfies a float
+        annotation, following the numeric tower the typing specification defines. An annotation the runtime cannot
+        reduce to a type is treated as satisfied, since rejecting it would refuse a value the dataclass itself accepts.
+
+    Args:
+        value: The value to check.
+        annotation: The declared annotation the value is checked against.
+
+    Returns:
+        True when the value satisfies the annotation.
+    """
+    if annotation is Any or annotation is object:
+        return True
+
+    origin = get_origin(annotation)
+    arguments = get_args(annotation)
+
+    if origin is UnionType:
+        return any(_annotation_matches(value=value, annotation=argument) for argument in arguments)
+
+    if origin is None:
+        if annotation is float:
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+        return isinstance(value, annotation) if isinstance(annotation, type) else True
+
+    # A special form such as Literal reduces to an origin that isinstance() cannot take, so a value annotated that way
+    # is accepted without a container check.
+    if not isinstance(origin, type):
+        return True
+
+    if origin is tuple:
+        if not isinstance(value, tuple):
+            return False
+        if not arguments:
+            return True
+        if arguments[-1] is Ellipsis:
+            return all(_annotation_matches(value=item, annotation=arguments[0]) for item in value)
+        return len(arguments) == len(value) and all(
+            _annotation_matches(value=item, annotation=argument)
+            for item, argument in zip(value, arguments, strict=True)
+        )
+
+    if origin is list:
+        if not isinstance(value, list):
+            return False
+        return not arguments or all(_annotation_matches(value=item, annotation=arguments[0]) for item in value)
+
+    if origin is dict:
+        if not isinstance(value, dict):
+            return False
+        return len(arguments) != _MAPPING_ARGUMENT_COUNT or all(
+            _annotation_matches(value=key, annotation=arguments[0])
+            and _annotation_matches(value=item, annotation=arguments[1])
+            for key, item in value.items()
+        )
+
+    return isinstance(value, origin)

@@ -67,8 +67,8 @@ def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
     """Creates the default .yaml configuration file for the specified data acquisition system and configures the local
     machine (PC) to use it for all future acquisition-system-related calls.
 
-    The file is written into the local working directory's configuration folder. Any pre-existing system configuration
-    file is removed first, so the machine always belongs to exactly one acquisition system.
+    The file is written into the local working directory's configuration folder, and any other system configuration
+    file in that folder is removed once the write succeeds, so the machine belongs to exactly one acquisition system.
 
     Args:
         system: The acquisition system to create the configuration file for.
@@ -88,13 +88,19 @@ def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
     directory = get_working_directory().joinpath(CONFIGURATION_DIRECTORY)
     ensure_directory_exists(path=directory)
 
-    # Removes any existing system configuration file(s) so that exactly one remains after this call.
-    for existing in tuple(directory.glob("*_system_configuration.yaml")):
-        console.echo(message=f"Removing the existing configuration file {existing.name}...", level=LogLevel.INFO)
-        existing.unlink()
-
     configuration_path = directory.joinpath(_system_configuration_filename(resolved))
     _SYSTEM_CONFIGURATION_CLASSES[resolved]().save(path=configuration_path)
+
+    # Removes the configuration files of all other acquisition systems only after the replacement is written, so that
+    # a failed write leaves the host-machine with its previous acquisition system identity instead of none.
+    for existing in tuple(directory.glob("*_system_configuration.yaml")):
+        # Identifies the file the save above wrote by its inode rather than by its name, because a case-insensitive
+        # filesystem keeps a differently-cased directory entry for it and neither a name comparison nor a resolved
+        # path comparison recognizes that entry, which would delete the configuration this call just created.
+        if existing.samefile(configuration_path):
+            continue
+        console.echo(message=f"Removing the existing configuration file {existing.name}...", level=LogLevel.INFO)
+        existing.unlink()
 
     message = (
         f"{resolved} data acquisition system configuration file: Saved to {configuration_path}. Edit the default "

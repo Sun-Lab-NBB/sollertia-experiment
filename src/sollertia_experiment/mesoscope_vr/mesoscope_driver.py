@@ -8,7 +8,7 @@ from enum import StrEnum
 import json
 from typing import TYPE_CHECKING
 
-from ataraxis_time import Timeout, PrecisionTimer, TimerPrecisions
+from ataraxis_time import Timeout, TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
@@ -27,6 +27,22 @@ queries."""
 _ACK_TIMEOUT_MS: int = 5000
 """The maximum time, in milliseconds, to wait for the ScanImagePC to acknowledge a command before resending it. The
 estimator and z-stack acquisitions take far longer than this, but a command's reception is acknowledged immediately."""
+
+_PRELOAD_TIMEOUT_MS: int = 120000
+"""The maximum time, in milliseconds, to wait for the ScanImagePC to report that the persisted reference estimator is
+loaded. Preloading reads an existing estimator from the ScanImagePC's local Mesoscope data root instead of acquiring
+data, so the window only has to cover a large file read over a storage mount."""
+
+_REFERENCE_GENERATION_TIMEOUT_MS: int = 1800000
+"""The maximum time, in milliseconds, to wait for the ScanImagePC to report that the Mesoscope is armed after a
+reference-generation request. The window is generous because the sequence acquires and averages many frames at every
+target plane of the configured z-range and then acquires the high-definition z-stack, which takes tens of minutes for a
+dense range."""
+
+_RECOVERY_TIMEOUT_MS: int = 300000
+"""The maximum time, in milliseconds, to wait for the ScanImagePC to report that the Mesoscope is re-armed after a
+recovery request. Recovery reloads the session estimator and reuses the existing z-stack, so it completes in a small
+fraction of the reference-generation window."""
 
 
 class _MesoscopeMQTTTopics(StrEnum):
@@ -209,6 +225,7 @@ class MesoscopeDriver:
             command=_MesoscopeMQTTTopics.PRELOAD,
             payload=payload,
             terminal_state=_MesoscopeStatusState.PRELOAD_COMPLETE,
+            terminal_timeout_ms=_PRELOAD_TIMEOUT_MS,
         )
         console.echo(message="Mesoscope reference estimator: Preloaded.", level=LogLevel.SUCCESS)
 
@@ -225,6 +242,7 @@ class MesoscopeDriver:
             command=_MesoscopeMQTTTopics.GENERATE_REFERENCE,
             payload=self._encode_acquisition(geometry_only=False),
             terminal_state=_MesoscopeStatusState.ARMED,
+            terminal_timeout_ms=_REFERENCE_GENERATION_TIMEOUT_MS,
         )
         console.echo(message="Mesoscope reference: Generated. Mesoscope armed.", level=LogLevel.SUCCESS)
 
@@ -258,6 +276,7 @@ class MesoscopeDriver:
             command=_MesoscopeMQTTTopics.RECOVER,
             payload=self._encode_acquisition(geometry_only=True),
             terminal_state=_MesoscopeStatusState.ARMED,
+            terminal_timeout_ms=_RECOVERY_TIMEOUT_MS,
         )
         console.echo(message="Mesoscope acquisition: Recovered. Mesoscope re-armed.", level=LogLevel.SUCCESS)
 
@@ -275,8 +294,10 @@ class MesoscopeDriver:
             A MesoscopePositions instance populated from the ScanImagePC reply, with red_dot_alignment_z left at its
             default placeholder value.
         """
+        # Drains the buffer once, ahead of the first request, so a reply or a MesoscopeError that arrives after a
+        # timeout is consumed by the next attempt instead of being discarded with the stale messages.
+        self._clear_buffer()
         while True:
-            self._clear_buffer()
             self._mqtt.send_data(topic=_MesoscopeMQTTTopics.QUERY_STATE)
             payload = self._await_state(timeout_ms=_ACK_TIMEOUT_MS)
             if payload is not None:
@@ -333,22 +354,28 @@ class MesoscopeDriver:
         command: _MesoscopeMQTTTopics,
         payload: bytes | None = None,
         terminal_state: _MesoscopeStatusState | None = None,
+        terminal_timeout_ms: int = _ACK_TIMEOUT_MS,
     ) -> None:
         """Publishes a command to the ScanImagePC and resolves its acknowledgement and optional terminal state.
 
         Notes:
             The command is resent on each acknowledgement timeout because MQTT messages are published without delivery
             guarantees. Once the ScanImagePC acknowledges reception, the method optionally blocks for the terminal
-            state, surfacing the intermediate progress states to the operator.
+            state, surfacing the intermediate progress states to the operator and prompting the operator whenever
+            the terminal state fails to arrive within its bound.
 
         Args:
             command: The command topic to publish to the ScanImagePC.
             payload: The encoded command payload, or None to send an empty command.
             terminal_state: The status state that marks the command complete, or None when only the reception
                 acknowledgement is required.
+            terminal_timeout_ms: The maximum time, in milliseconds, to wait for the terminal state before prompting
+                the operator. Applies only to commands that await a terminal state.
         """
+        # Drains the buffer once, ahead of the first attempt, so a reply or a MesoscopeError that arrives after a
+        # timeout is consumed by the next attempt instead of being discarded with the stale messages.
+        self._clear_buffer()
         while True:
-            self._clear_buffer()
             self._mqtt.send_data(topic=command, payload=payload)
             if self._await_status(command=command, state=_MesoscopeStatusState.RECEIVED, timeout_ms=_ACK_TIMEOUT_MS):
                 break
@@ -360,13 +387,26 @@ class MesoscopeDriver:
             console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter to retry")
 
-        if terminal_state is not None:
-            self._await_status(command=command, state=terminal_state, timeout_ms=None)
+        if terminal_state is None:
+            return
 
-    def _await_status(
-        self, command: _MesoscopeMQTTTopics, state: _MesoscopeStatusState, timeout_ms: int | None
-    ) -> bool:
-        """Polls the ScanImagePC status buffer for a matching status message, optionally bounded by a timeout.
+        # A ScanImagePC that dies after acknowledging the command would otherwise stall the single-threaded runtime
+        # cycle indefinitely, leaving the operator without a way to terminate the runtime. The bound hands control
+        # back at a point where the mesoscope may still be working, so the operator decides whether to keep waiting.
+        while not self._await_status(command=command, state=terminal_state, timeout_ms=terminal_timeout_ms):
+            bound_minutes = convert_time(
+                time=terminal_timeout_ms, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MINUTE, as_float=True
+            )
+            message = (
+                f"The mesoscope control driver sent the '{command}' command to the ScanImagePC but the ScanImagePC "
+                f"did not report the '{terminal_state}' state within {bound_minutes:.1f} minutes. Verify that the "
+                f"ScanImagePC is still processing the command."
+            )
+            console.echo(message=message, level=LogLevel.ERROR)
+            wait_for_enter(message="Press Enter to keep waiting")
+
+    def _await_status(self, command: _MesoscopeMQTTTopics, state: _MesoscopeStatusState, timeout_ms: int) -> bool:
+        """Polls the ScanImagePC status buffer for a matching status message, bounded by a timeout.
 
         Notes:
             Status messages that report a different state for the same command are surfaced to the operator as
@@ -375,13 +415,13 @@ class MesoscopeDriver:
         Args:
             command: The command topic whose status messages are awaited.
             state: The status state that resolves the wait.
-            timeout_ms: The maximum time, in milliseconds, to wait, or None to wait indefinitely.
+            timeout_ms: The maximum time, in milliseconds, to wait for the awaited state.
 
         Returns:
             True if a status message with the awaited state arrived in time, False if the timeout elapsed first.
         """
         self._polling_timer.reset()
-        while timeout_ms is None or self._polling_timer.elapsed < timeout_ms:
+        while self._polling_timer.elapsed < timeout_ms:
             self._polling_timer.delay(delay=_BROKER_POLL_DELAY_MS, block=False)
             data = self._mqtt.get_data()
             if data is None:

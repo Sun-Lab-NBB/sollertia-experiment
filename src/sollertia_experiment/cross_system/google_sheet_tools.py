@@ -331,7 +331,7 @@ class SurgeryLog:
             .get(
                 spreadsheetId=sheet_id,
                 # Reads row 2 onward in column-major order, since row 1 stores the headers.
-                range=f"{self._project_name}!{id_column}2:{id_column}",
+                range=f"'{self._project_name}'!{id_column}2:{id_column}",
                 majorDimension="COLUMNS",
             )
             .execute(num_retries=_GOOGLE_API_MAX_RETRIES)
@@ -384,9 +384,9 @@ class SurgeryLog:
             A SurgeryData instance that stores the extracted data.
 
         Raises:
-            ValueError: If the animal's date, time, weight, or cage cells contain malformed or empty values. Date and
-                time cells are parsed via _convert_date_time_to_timestamp, while weight and cage cells are parsed via
-                float() and int() respectively.
+            ValueError: If the animal's date or time cells are empty, or if the date, time, identifier, weight, cage,
+                or surgery quality cells contain malformed values. Date and time cells are parsed via
+                _convert_date_time_to_timestamp, while the remaining cells are parsed via int() and float().
         """
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
@@ -408,19 +408,20 @@ class SurgeryLog:
         # Replaces empty cells and value placeholders ('n/a', '--', or '---') with None.
         row_values = _replace_empty_values(row_values)
 
-        # Creates a dictionary mapping headers (column names) to the animal-specific extracted values for these
-        # headers. This procedure assumes that the headers are contiguous, start from column A, and the animal has data
-        # for all or most present headers in the same sequential order as headers are encountered.
-        animal_data: dict[str, Any] = {}
-        for index, header in enumerate(self._headers):
-            # Handles unlikely scenario of animal having more data than headers
-            animal_data[header.lower()] = row_values[index] if index < len(row_values) else None
+        # Keys the row values by their Excel-style column letters. Both the header row and the animal row are read as
+        # full-row ranges that start at column A, so the same index-to-letter conversion applies to both.
+        column_values = {_convert_index_to_column_letter(index=index): value for index, value in enumerate(row_values)}
+
+        # Maps each header to the value in the column it occupies, resolving a header with no cell in this row to None.
+        animal_data: dict[str, Any] = {
+            header: column_values.get(column_letter) for header, column_letter in self._headers.items()
+        }
 
         # Parses the animal data and packages it into the SurgeryData instance:
 
         # Subject Data. All subject data headers are expected to be present in every surgery sheet.
         subject_data = SubjectData(
-            id=animal_data["id"],
+            id=int(animal_data["id"]),
             ear_punch=animal_data["ear punch"],
             sex=animal_data["sex"],
             genotype=animal_data["genotype"],
@@ -432,6 +433,7 @@ class SurgeryLog:
         )
 
         # Procedure Data. As with subject data, all required headers are expected to be present for every procedure.
+        # An ungraded surgery leaves the quality cell blank, which resolves to the ProcedureData default grade of 0.
         procedure_data = ProcedureData(
             surgery_start_us=_convert_date_time_to_timestamp(date=animal_data["date"], time=animal_data["start"]),
             surgery_end_us=_convert_date_time_to_timestamp(date=animal_data["date"], time=animal_data["end"]),
@@ -439,7 +441,7 @@ class SurgeryLog:
             protocol=animal_data["protocol"],
             surgery_notes=animal_data["surgery notes"],
             post_op_notes=animal_data["post-op notes"],
-            surgery_quality=animal_data["surgery quality"],
+            surgery_quality=int(animal_data["surgery quality"] or 0),
         )
 
         # Drug Data. The surgery log tracks each drug in a dedicated pair of volume and code columns. Drugs without a

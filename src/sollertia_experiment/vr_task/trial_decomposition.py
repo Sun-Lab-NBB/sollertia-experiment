@@ -133,6 +133,8 @@ def decompose_cue_sequence(
         The DecomposedTrials instance with two aligned per-trial sequences: cumulative distances and trial names.
 
     Raises:
+        ValueError: If the task template defines no trial structures, or if the cue sequence of one trial is a prefix
+            of the cue sequence of another trial.
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
     """
     cue_name_to_code = {cue.name: int(cue.code) for cue in task_template.cues}
@@ -146,6 +148,26 @@ def decompose_cue_sequence(
         trial_motifs.append(np.array([cue_name_to_code[name] for name in spatial_trial.cue_sequence], dtype=np.uint8))
         trial_distances.append(sum(cue_name_to_length[name] for name in spatial_trial.cue_sequence))
         trial_names_by_type.append(trial_name)
+
+    if not trial_motifs:
+        message = (
+            f"Unable to decompose the acquired session's Virtual Reality environment's cue sequence into a sequence "
+            f"of trials. The task template must define at least one trial structure to decompose a cue sequence, "
+            f"but its trial_structures mapping defines {len(task_template.trial_structures)} of them."
+        )
+        console.error(message=message, error=ValueError)
+
+    ambiguous_index = _find_ambiguous_motif(trial_motifs=trial_motifs)
+    if ambiguous_index is not None:
+        message = (
+            f"Unable to decompose the acquired session's Virtual Reality environment's cue sequence into a sequence "
+            f"of trials. The cue sequence of trial '{trial_names_by_type[ambiguous_index]}' can also be read as a "
+            f"run of other trials from the same task template, so the same stretch of cues decomposes two different "
+            f"ways and the decomposer cannot tell which trials the animal actually ran. Give trial "
+            f"'{trial_names_by_type[ambiguous_index]}' a cue sequence that no combination of the other trials "
+            f"reproduces, which currently reads {trial_motifs[ambiguous_index].tolist()}."
+        )
+        console.error(message=message, error=ValueError)
 
     motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
         trial_motifs=trial_motifs, trial_distances=trial_distances
@@ -178,6 +200,50 @@ def decompose_cue_sequence(
         cumulative_distances=cumulative_distances,
         trial_names=trial_names,
     )
+
+
+def _find_ambiguous_motif(trial_motifs: list[NDArray[np.uint8]]) -> int | None:
+    """Finds a trial motif that a run of two or more other motifs reproduces exactly.
+
+    Notes:
+        Such a motif makes the cue sequence genuinely ambiguous, because the same stretch of cues reads either as that
+        one trial or as the run that reproduces it, and the greedy longest-match decomposer resolves the ambiguity by
+        always taking the single longer trial. A motif that merely extends another one is left alone, since the
+        decomposer still reads it correctly whenever the extension itself is unambiguous.
+
+        The search is a word-break over the motif set, so it costs the squared motif count times the longest motif
+        length, which stays negligible for the handful of trials a task template defines.
+
+    Args:
+        trial_motifs: The per-trial cue code sequences to check.
+
+    Returns:
+        The index of the first motif a run of other motifs reproduces, or None when every motif is unambiguous.
+    """
+    for candidate_index, candidate in enumerate(trial_motifs):
+        candidate_length = len(candidate)
+
+        # Marks every offset into the candidate that a run of other motifs reaches exactly, starting from its onset.
+        reachable = [False] * (candidate_length + 1)
+        reachable[0] = True
+        for offset in range(candidate_length):
+            if not reachable[offset]:
+                continue
+            for motif_index, motif in enumerate(trial_motifs):
+                motif_length = len(motif)
+
+                # Excludes the candidate matching itself from its own onset, which every motif trivially does, while
+                # still allowing it to appear as one component of a longer run.
+                if motif_index == candidate_index and offset == 0 and motif_length == candidate_length:
+                    continue
+                if offset + motif_length > candidate_length:
+                    continue
+                if np.array_equal(motif, candidate[offset : offset + motif_length]):
+                    reachable[offset + motif_length] = True
+
+        if reachable[candidate_length]:
+            return candidate_index
+    return None
 
 
 @njit(cache=True)

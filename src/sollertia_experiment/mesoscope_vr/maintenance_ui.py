@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -83,8 +84,6 @@ class _ValveTrackerIndex(IntEnum):
     """Stores the cumulative volume of water dispensed by the valve during runtime."""
     CALIBRATION_STATE = 1
     """Tracks the valve calibration state, where 0 indicates calibrating and 1 indicates calibrated."""
-    OPEN_STATE = 2
-    """Tracks the valve open/close state, where 0 indicates closed and 1 indicates open."""
 
 
 class _GasPuffTrackerIndex(IntEnum):
@@ -92,8 +91,6 @@ class _GasPuffTrackerIndex(IntEnum):
 
     TOTAL_PUFFS = 0
     """Stores the cumulative number of gas puffs delivered by the valve during runtime."""
-    OPEN_STATE = 1
-    """Tracks the gas puff valve open/close state, where 0 indicates closed and 1 indicates open."""
 
 
 class MaintenanceControlUI:
@@ -183,6 +180,11 @@ class MaintenanceControlUI:
         self._started = False
 
     @property
+    def is_alive(self) -> bool:
+        """Returns True if the remote UI process is currently running."""
+        return self._ui_process.is_alive()
+
+    @property
     def exit_signal(self) -> bool:
         """Returns True if the user has requested to terminate the maintenance runtime."""
         return bool(self._data_array[_DataArrayIndex.TERMINATION])
@@ -190,50 +192,59 @@ class MaintenanceControlUI:
     @property
     def valve_open_signal(self) -> bool:
         """Returns True if the user has requested to open the valve and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.VALVE_OPEN])
-        self._data_array[_DataArrayIndex.VALVE_OPEN] = 0
+        # Holds the array's lock across the read and the clear, so the clear cannot discard a request the GUI writes
+        # after the read. Each subscript operation takes and releases the lock on its own.
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.VALVE_OPEN])
+            data[_DataArrayIndex.VALVE_OPEN] = 0
         return signal
 
     @property
     def valve_close_signal(self) -> bool:
         """Returns True if the user has requested to close the valve and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.VALVE_CLOSE])
-        self._data_array[_DataArrayIndex.VALVE_CLOSE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.VALVE_CLOSE])
+            data[_DataArrayIndex.VALVE_CLOSE] = 0
         return signal
 
     @property
     def valve_reward_signal(self) -> bool:
         """Returns True if the user has requested to deliver a reward and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.VALVE_REWARD])
-        self._data_array[_DataArrayIndex.VALVE_REWARD] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.VALVE_REWARD])
+            data[_DataArrayIndex.VALVE_REWARD] = 0
         return signal
 
     @property
     def valve_reference_signal(self) -> bool:
         """Returns True if the user has requested valve reference calibration and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.VALVE_REFERENCE])
-        self._data_array[_DataArrayIndex.VALVE_REFERENCE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.VALVE_REFERENCE])
+            data[_DataArrayIndex.VALVE_REFERENCE] = 0
         return signal
 
     @property
     def valve_calibrate_signal(self) -> bool:
         """Returns True if the user has requested valve calibration and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.VALVE_CALIBRATE])
-        self._data_array[_DataArrayIndex.VALVE_CALIBRATE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.VALVE_CALIBRATE])
+            data[_DataArrayIndex.VALVE_CALIBRATE] = 0
         return signal
 
     @property
     def brake_lock_signal(self) -> bool:
         """Returns True if the user has requested to lock the brake and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.BRAKE_LOCK])
-        self._data_array[_DataArrayIndex.BRAKE_LOCK] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.BRAKE_LOCK])
+            data[_DataArrayIndex.BRAKE_LOCK] = 0
         return signal
 
     @property
     def brake_unlock_signal(self) -> bool:
         """Returns True if the user has requested to unlock the brake and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.BRAKE_UNLOCK])
-        self._data_array[_DataArrayIndex.BRAKE_UNLOCK] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.BRAKE_UNLOCK])
+            data[_DataArrayIndex.BRAKE_UNLOCK] = 0
         return signal
 
     @property
@@ -249,22 +260,25 @@ class MaintenanceControlUI:
     @property
     def gas_valve_open_signal(self) -> bool:
         """Returns True if the user has requested to open the gas puff valve and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_OPEN])
-        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_OPEN])
+            data[_DataArrayIndex.GAS_VALVE_OPEN] = 0
         return signal
 
     @property
     def gas_valve_close_signal(self) -> bool:
         """Returns True if the user has requested to close the gas puff valve and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE])
-        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_CLOSE])
+            data[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
         return signal
 
     @property
     def gas_valve_pulse_signal(self) -> bool:
         """Returns True if the user has requested to pulse the gas puff valve and clears the request when read."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PULSE])
-        self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_PULSE])
+            data[_DataArrayIndex.GAS_VALVE_PULSE] = 0
         return signal
 
     @property
@@ -310,13 +324,19 @@ class _MaintenanceUIWindow(QMainWindow):
             other processes during runtime.
         _gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff
             data to other processes during runtime.
+        _close_confirmed: Tracks whether the pending window close was decided by the runtime or by the monitoring
+            cycle, which bypasses the operator confirmation prompt.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
+        _reward_baseline_volume: The cumulative dispensed water volume recorded when the current reward delivery was
+            requested, against which its completion is detected.
         _calibration_in_progress: Tracks whether a calibration procedure is in progress.
         _referencing_in_progress: Tracks whether a referencing procedure is in progress.
         _calibration_seen_active: Tracks whether the valve has reported the active (calibrating) state since the
             current calibration or referencing procedure was requested, used to prevent a stale completion signal from
             prematurely resetting the status label.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
+        _puff_baseline_count: The cumulative delivered gas puff count recorded when the current gas puff delivery was
+            requested, against which its completion is detected.
         _valve_open_button: The button that opens the water valve.
         _valve_close_button: The button that closes the water valve.
         _volume_spinbox: The spinbox that sets the water reward volume.
@@ -347,11 +367,15 @@ class _MaintenanceUIWindow(QMainWindow):
         self._valve_tracker: SharedMemoryArray = valve_tracker
         self._gas_puff_tracker: SharedMemoryArray = gas_puff_tracker
 
+        self._close_confirmed: bool = False
+
         self._reward_in_progress: bool = False
+        self._reward_baseline_volume: float = 0.0
         self._calibration_in_progress: bool = False
         self._referencing_in_progress: bool = False
         self._calibration_seen_active: bool = False
         self._puff_in_progress: bool = False
+        self._puff_baseline_count: int = 0
 
         self.setWindowTitle("Mesoscope-VR Maintenance Panel")
         self.setFixedSize(550, 750)
@@ -366,6 +390,22 @@ class _MaintenanceUIWindow(QMainWindow):
         Args:
             event: The Qt-generated window shutdown event instance.
         """
+        # Closing the window terminates the maintenance runtime, so an operator-initiated close is confirmed first.
+        # An accidental click on the window close control, or an Escape keypress, would otherwise end the runtime
+        # outright. A close the runtime itself drives carries no prompt, as the decision is already made.
+        if not self._close_confirmed:
+            confirmation = QMessageBox.question(
+                self,
+                "Terminate Maintenance Runtime",
+                "Closing this window terminates the maintenance runtime. Terminate the runtime?",
+                buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                defaultButton=QMessageBox.StandardButton.No,
+            )
+            if confirmation != QMessageBox.StandardButton.Yes:
+                if event is not None:
+                    event.ignore()
+                return
+
         with contextlib.suppress(Exception):
             self._data_array[_DataArrayIndex.TERMINATION] = 1
         if event is not None:
@@ -854,17 +894,19 @@ class _MaintenanceUIWindow(QMainWindow):
         try:
             # Checks for termination.
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
+                self._close_confirmed = True
                 self.close()
 
-            # Reads the valve tracker calibration and open/close states.
+            # Reads the valve tracker calibration state and the monotonic totals the completion checks below compare
+            # against their pre-request baselines.
             is_calibrating = float(self._valve_tracker[_ValveTrackerIndex.CALIBRATION_STATE]) == 0.0
-            water_valve_state = int(self._valve_tracker[_ValveTrackerIndex.OPEN_STATE])
+            dispensed_volume = float(self._valve_tracker[_ValveTrackerIndex.TOTAL_VOLUME])
+            delivered_puffs = int(self._gas_puff_tracker[_GasPuffTrackerIndex.TOTAL_PUFFS])
 
-            # Reads the gas puff tracker open/close state.
-            gas_valve_state = int(self._gas_puff_tracker[_GasPuffTrackerIndex.OPEN_STATE])
-
-            # Detects when water valve closes (state transitions to closed while reward was in progress).
-            if self._reward_in_progress and water_valve_state == 0:
+            # Detects when the water valve closes after a reward delivery by watching the cumulative dispensed volume
+            # rather than the live open state. The interface increments that total once per completed reward, so a
+            # reward pulse shorter than the polling interval cannot slip between two polls the way the open state can.
+            if self._reward_in_progress and dispensed_volume > self._reward_baseline_volume:
                 self._reward_in_progress = False
                 self._valve_status_label.setText("Valve: Closed")
                 self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
@@ -882,13 +924,15 @@ class _MaintenanceUIWindow(QMainWindow):
                     self._calibration_status_label.setText("Calibration: Idle")
                     self._calibration_status_label.setStyleSheet("QLabel { color: #7f8c8d; font-weight: bold; }")
 
-            # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
-            if self._puff_in_progress and gas_valve_state == 0:
+            # Detects when the gas puff valve closes after a puff delivery, using the cumulative puff count for the
+            # same reason the reward uses the cumulative volume.
+            if self._puff_in_progress and delivered_puffs > self._puff_baseline_count:
                 self._puff_in_progress = False
                 self._gas_valve_status_label.setText("Valve: Closed")
                 self._gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
         except Exception:
+            self._close_confirmed = True
             self.close()
 
     def _update_reward_volume(self) -> None:
@@ -914,6 +958,7 @@ class _MaintenanceUIWindow(QMainWindow):
     def _valve_reward(self) -> None:
         """Signals to deliver a water reward."""
         self._data_array[_DataArrayIndex.VALVE_REWARD] = 1
+        self._reward_baseline_volume = float(self._valve_tracker[_ValveTrackerIndex.TOTAL_VOLUME])
         self._reward_in_progress = True
         self._valve_status_label.setText("Valve: Delivering Reward")
         self._valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
@@ -965,6 +1010,7 @@ class _MaintenanceUIWindow(QMainWindow):
     def _gas_valve_puff(self) -> None:
         """Signals to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PULSE] = 1
+        self._puff_baseline_count = int(self._gas_puff_tracker[_GasPuffTrackerIndex.TOTAL_PUFFS])
         self._puff_in_progress = True
         self._gas_valve_status_label.setText("Valve: Puffing")
         self._gas_valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
