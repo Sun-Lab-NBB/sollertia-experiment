@@ -12,10 +12,18 @@ from ataraxis_time import Timeout, TimerPrecisions
 from zaber_motion.ascii import Axis, Device, Connection, SettingConstants
 from ataraxis_base_utilities import LogLevel, console
 
+from .shutdown_tools import run_shutdown_step
 from .terminal_prompts import request_required_confirmation
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+_PARK_POSITION_TOLERANCE: float = 100.0
+"""The largest deviation, in native motor units, between the resting position of a parked motor and the park position
+stored in its non-volatile memory that still counts as the motor resting where it should. The window absorbs the
+microstep-scale settling error left behind by the final move command, while staying far below the deviation that would
+carry an unsafe motor outside the range from which it can be homed.
+"""
 
 
 @dataclass(frozen=True)
@@ -291,7 +299,28 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
                 # Calculates and updates the checksum to match the new label.
                 calculator = CRCCalculator()
                 new_checksum = calculator.string_checksum(string=value)
-                device.settings.set(setting=SettingConstants.USER_DATA_0, value=new_checksum)
+                try:
+                    device.settings.set(setting=SettingConstants.USER_DATA_0, value=new_checksum)
+                except (Exception, KeyboardInterrupt) as exception:
+                    # The label and its checksum live in separate non-volatile variables written by separate device
+                    # transactions, and every binding class refuses to open a device whose two variables disagree.
+                    # Restoring the previous label brings the pair back into agreement, and the restore is itself
+                    # best-effort so the checksum write failure remains the error the caller sees.
+                    try:
+                        device.set_label(label=old_value)
+                    except (Exception, KeyboardInterrupt) as restore_exception:
+                        restore_report = (
+                            f"Restoring the previous label '{old_value}' also failed with: {restore_exception}, so "
+                            f"the device now holds the label '{value}' with the checksum of '{old_value}'."
+                        )
+                    else:
+                        restore_report = f"The previous label '{old_value}' was restored."
+                    message = (
+                        f"Unable to set device_label to '{value}'. The label was written to the device, but the "
+                        f"matching USER_DATA_0 checksum write failed with: {exception}. {restore_report} Re-run the "
+                        f"same device_label write to bring the label and the checksum back into agreement."
+                    )
+                    console.error(message=message, error=ValueError)
 
                 return f"device_label: '{old_value}' -> '{value}' (checksum updated to {new_checksum})"
 
@@ -381,16 +410,18 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
     errors: list[str] = []
     warnings: list[str] = []
 
-    # Validates checksum against device label.
-    calculator = CRCCalculator()
-    expected_checksum = calculator.string_checksum(string=settings.device_label) if settings.device_label else 0
-    stored_checksum = settings.checksum
-    checksum_valid = expected_checksum == stored_checksum
+    # Validates checksum against device label. An unlabeled device is rejected before any checksum comparison, since
+    # the checksum of an empty label matches the factory USER_DATA_0 value of 0 and would otherwise pass.
+    if not settings.device_label:
+        errors.append("Device label is not set. Set device_label before using with binding library.")
+        checksum_valid = False
+    else:
+        calculator = CRCCalculator()
+        expected_checksum = calculator.string_checksum(string=settings.device_label)
+        stored_checksum = settings.checksum
+        checksum_valid = expected_checksum == stored_checksum
 
-    if not checksum_valid:
-        if not settings.device_label:
-            errors.append("Device label is not set. Set device_label before using with binding library.")
-        else:
+        if not checksum_valid:
             errors.append(
                 f"Checksum mismatch: stored {stored_checksum}, expected {expected_checksum} for label "
                 f"'{settings.device_label}'. Update device_label to recalculate checksum."
@@ -799,11 +830,33 @@ class ZaberDevice:
         )
 
     def shutdown(self) -> None:
-        """Gracefully shuts down the motor (axis) managed by this controller."""
+        """Gracefully shuts down the motor (axis) managed by this controller.
+
+        Notes:
+            The shutdown tracker written to the device's non-volatile memory doubles as the marker that tells the next
+            runtime whether the motor rests where the homing procedure expects it. It is therefore set to 1 only for a
+            motor that is parked at the park position stored in the same memory, and to 0 for a motor resting anywhere
+            else.
+        """
         self._axis.shutdown()
 
-        # Sets the shutdown flag to 1 to indicate that the shutdown procedure has been performed.
-        self._controller.settings.set(setting=_ZaberSettings.shutdown_flag, value=1)
+        motor_parked = self._axis.is_parked
+        current_position = self._axis.get_position()
+        parked_at_park_position = (
+            motor_parked and abs(current_position - self._axis.park_position) <= _PARK_POSITION_TOLERANCE
+        )
+
+        if not parked_at_park_position:
+            message = (
+                f"The {self._controller.label} ({self._controller.name}) device did not come to rest at its park "
+                f"position during the shutdown sequence. The motor reports the position {current_position} and the "
+                f"parked state of {motor_parked}, while the park position stored in its non-volatile memory is "
+                f"{self._axis.park_position}. The device is recorded as improperly shut down, so the next runtime "
+                f"asks for manual confirmation before initializing it if the device is marked as unsafe to home."
+            )
+            console.echo(message=message, level=LogLevel.WARNING)
+
+        self._controller.settings.set(setting=_ZaberSettings.shutdown_flag, value=int(parked_at_park_position))
         self._shutdown_flag = True
 
     @property
@@ -861,11 +914,7 @@ class ZaberConnection:
         garbage-collected.
         """
         if self._connection is not None and self.is_connected:
-            # If the connection is still active, ensures all managed devices are properly shut down.
-            for device in self._devices:
-                device.shutdown()
-
-            self._connection.close()
+            self._release_runtime_assets()
 
     def connect(self) -> None:
         """Opens the serial port and detects and connects to any available Zaber devices (controllers).
@@ -886,8 +935,21 @@ class ZaberConnection:
         devices: list[Device] = connection.detect_devices()
 
         # Packages each discovered Device into a ZaberDevice class instance and builds the internal device interface
-        # tuple.
-        self._devices = tuple(ZaberDevice(device=device) for device in devices)
+        # tuple. The tuple is rebuilt after every successful construction, so a failure partway through the daisy chain
+        # leaves the already-constructed devices reachable for the release below.
+        initialized_devices: list[ZaberDevice] = []
+        try:
+            for device in devices:
+                initialized_devices.append(ZaberDevice(device=device))
+                self._devices = tuple(initialized_devices)
+        except Exception, KeyboardInterrupt:
+            # Releases the port without shutting the constructed devices down. The shutdown sequence parks the motor,
+            # which commits its current position to non-volatile memory and blocks every motion command until it is
+            # unparked, so a failed connect must not reach it: the operator may need the Zaber Launcher to move the
+            # HeadBar and free a head-fixed animal. The devices keep their zeroed shutdown tracker, which honestly
+            # records that this runtime aborted before it could shut them down.
+            self._release_runtime_assets(shutdown_devices=False)
+            raise
 
     def disconnect(self) -> None:
         """Shuts down all managed Zaber devices and closes the connection."""
@@ -895,14 +957,7 @@ class ZaberConnection:
         if not self.is_connected:
             return
 
-        for device in self._devices:
-            device.shutdown()
-
-        # Releases all runtime assets.
-        self._devices = ()
-        self._is_connected = False
-        if self._connection is not None:
-            self._connection.close()
+        self._release_runtime_assets()
 
     @property
     def is_connected(self) -> bool:
@@ -943,6 +998,32 @@ class ZaberConnection:
             console.error(message=message, error=ConnectionError)
 
         return self._devices[index]
+
+    def _release_runtime_assets(self, *, shutdown_devices: bool = True) -> None:
+        """Shuts down every managed Zaber device and closes the managed serial port.
+
+        Notes:
+            Each device shutdown is isolated and the port is released from a finally block, so the remaining devices
+            and the serial port are still released when one controller stops responding.
+
+        Args:
+            shutdown_devices: Determines whether to run each managed device's shutdown sequence before releasing the
+                port. An aborted connection attempt releases the port alone, because the shutdown sequence parks the
+                motor and a motor parked at an arbitrary position refuses every motion command until it is unparked.
+        """
+        try:
+            if shutdown_devices:
+                for number, device in enumerate(self._devices):
+                    run_shutdown_step(
+                        description=f"shutting down the Zaber device at index {number}", step=device.shutdown
+                    )
+        finally:
+            self._devices = ()
+            self._is_connected = False
+            if self._connection is not None:
+                # An error raised while closing the port would replace the error that triggered the release, so the
+                # close is isolated as well.
+                run_shutdown_step(description="closing the managed serial port", step=self._connection.close)
 
 
 def _attempt_connection(port: str) -> list[_ZaberDeviceData]:

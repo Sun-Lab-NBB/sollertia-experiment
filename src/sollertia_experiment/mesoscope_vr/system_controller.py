@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
+from functools import partial
 
 import numpy as np
 from ataraxis_time import (
     Timeout,
-    TimeUnits,
     PrecisionTimer,
     TimerPrecisions,
     TimestampFormats,
     convert_time,
     get_timestamp,
-    interval_to_rate,
 )
 from ataraxis_base_utilities import LogLevel, console, convert_scalar_to_bytes
 from sollertia_shared_assets import (
@@ -44,6 +43,7 @@ from ..cross_system import (
     BEHAVIOR_LOGGER_NAME,
     wait_for_enter,
     request_selection,
+    run_shutdown_step,
     request_confirmation,
 )
 from .binding_classes import ZaberMotors, VideoSystems, MicroControllerInterfaces
@@ -63,7 +63,6 @@ from .acquisition_components import (
     TrialState,
     MesoscopeVRLogMessageCodes,
     setup_mesoscope,
-    run_shutdown_step,
     reset_zaber_motors,
     setup_zaber_motors,
     generate_zaber_snapshot,
@@ -80,6 +79,10 @@ _GUIDED_RUNTIME_STATE_CODE: int = 255
 """The runtime (task) state code used to mark active training stages. This is an arbitrary uint8 experiment code
 distinct from the MesoscopeVRStates system-state enum, which only spans codes 0 through 4."""
 
+_MAXIMUM_RUNTIME_STATE_CODE: int = 255
+"""The largest runtime (task) state code the system accepts. Runtime state codes are serialized into the data log as
+unsigned 8-bit values, so a code above this bound cannot be logged."""
+
 _MESOSCOPE_START_TIMEOUT_MS: int = 15000
 """The maximum time, in milliseconds, to wait for the mesoscope to begin acquiring frames after the acquisition
 trigger is sent before treating the start attempt as failed."""
@@ -91,6 +94,10 @@ frame acquisition has begun."""
 _MICROLITERS_PER_MILLILITER: float = 1000.0
 """The number of microliters in a single milliliter, used to convert dispensed water volumes from microliters to
 milliliters."""
+
+_MILLISECONDS_PER_SECOND: float = 1000.0
+"""The number of milliseconds in a single second, used to scale the distance traveled over the measured
+speed-calculation window into centimeters per second."""
 
 
 class MesoscopeVRSystem:
@@ -150,6 +157,8 @@ class MesoscopeVRSystem:
             acquisition onset.
         _mesoscope_terminated: Tracks whether the system has detected that the Mesoscope has unexpectedly
             terminated its runtime.
+        _mesoscope_acquiring: Tracks whether the system currently expects the Mesoscope to acquire the session's
+            frames, which gates the acquisition state log entries to state transitions.
         _running_speed: The animal's running speed, in centimeters per second, computed over the configured
             speed-calculation window.
         _speed_timer: The PrecisionTimer instance used to time the speed-calculation window when computing the
@@ -175,6 +184,8 @@ class MesoscopeVRSystem:
         _mesoscope_timer: The PrecisionTimer instance used to track the delay between receiving consecutive
             mesoscope frame acquisition pulses.
         _trial_state: The TrialState instance that tracks the progression of trials during experiment runtimes.
+        _resolved_stimulus_count: The number of Unity stimulus events resolved since the last cue sequence reset,
+            which is the position of the trial the next stimulus event belongs to.
 
     Raises:
         RuntimeError: If the host-machine does not have enough logical CPU cores to support the runtime.
@@ -183,12 +194,6 @@ class MesoscopeVRSystem:
     # Statically assigns mesoscope frame checking window and speed calculation window, in milliseconds.
     _mesoscope_frame_delay: int = 300
     _speed_calculation_window: int = 50
-
-    # Resolves how many speed-calculation windows fit into one second. Scaling a per-window distance by this factor
-    # normalizes it to one second, and resolving it once keeps the conversion out of the data cycle.
-    _speed_calculation_rate: float = float(
-        interval_to_rate(interval=_speed_calculation_window, from_units=TimeUnits.MILLISECOND)
-    )
 
     # Reserves logging source ID code 1 for this class.
     _source_id: np.uint8 = np.uint8(1)
@@ -254,10 +259,12 @@ class MesoscopeVRSystem:
             # If previous position data is not available, creates a new MesoscopePositions instance with default
             # position values.
             else:
-                # Caches the precursor file to the raw_data session directory and to the persistent data directory.
+                # Caches the precursor file to the raw_data session directory alone. The animal's persistent snapshot
+                # holds the coordinates of an established imaging plane, and the teardown sequence writes it from the
+                # positions queried off the ScanImagePC, so default coordinates must not be presented there as a plane
+                # the animal was previously imaged at.
                 precursor = MesoscopePositions()
                 precursor.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
-                precursor.to_yaml(file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path)
 
         # Defines the asset used to set and maintain combinations of system and runtime (task) states.
         self._system_state: int = 0
@@ -273,12 +280,19 @@ class MesoscopeVRSystem:
         self._delivered_water_volume: np.float64 = np.float64(0.0)
         self._mesoscope_frame_count: np.uint64 = np.uint64(0)
         self._mesoscope_terminated: bool = False
+        self._mesoscope_acquiring: bool = False
         self._running_speed: np.float64 = np.float64(0.0)
         self._speed_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
         self._paused_water_volume: np.float64 = np.float64(0.0)
 
         # Initializes the trial state tracking dataclass.
         self._trial_state: TrialState = TrialState()
+
+        # Initializes the Unity stimulus attribution trackers. The data cycle advances the trial position before the
+        # Unity publishes exactly one stimulus event per trial, in trial order, so counting the resolved events gives
+        # the position of the trial each event belongs to. The distance-driven counter cannot serve that role, because
+        # the runtime cycle advances it before the Unity cycle dequeues the event the finished trial produced.
+        self._resolved_stimulus_count: int = 0
 
         # Initializes the DataLogger instance used to log data from all microcontrollers, camera frame savers, and this
         # class instance.
@@ -433,6 +447,7 @@ class MesoscopeVRSystem:
             self._microcontrollers.wheel_encoder.reset_distance_tracker()
             self._distance = np.float64(0.0)
             self._trial_state.completed = 0
+            self._resolved_stimulus_count = 0
 
         # Begins acquiring and displaying frames with the all available cameras.
         self._cameras.start_face_camera()
@@ -549,67 +564,88 @@ class MesoscopeVRSystem:
         message = "Terminating Mesoscope-VR system runtime..."
         console.echo(message=message, level=LogLevel.INFO)
 
+        # Runs every teardown step in isolation. The steps that persist the session's artifacts, which are the Zaber
+        # snapshot, the session descriptor, and the mesoscope position snapshot, follow the hardware steps and have to
+        # run even when one of those hardware steps fails.
+
         # Switches the system into the IDLE state. Since IDLE state has most modules set to stop-friendly states,
         # this is used as a shortcut to prepare the VR system for shutdown. Also, this clearly marks the end of the
         # main runtime period.
-        self.idle()
+        run_shutdown_step(description="switching the system into the idle state", step=self.idle)
 
         # Shuts down the UI and the visualizer.
-        self._ui.shutdown()
-        self._visualizer.close()
+        run_shutdown_step(description="shutting down the runtime control UI", step=self._ui.shutdown)
+        run_shutdown_step(description="closing the behavior visualizer", step=self._visualizer.close)
 
         # Disconnects from the MQTT broker that facilitates communication with Unity.
         if self._vr_task is not None:
-            self._vr_task.disconnect()
+            run_shutdown_step(description="disconnecting from the VR task", step=self._vr_task.disconnect)
 
         # Stops all cameras.
-        self._cameras.stop()
+        run_shutdown_step(description="stopping the cameras", step=self._cameras.stop)
 
         # Stops mesoscope frame acquisition and monitoring if the runtime uses Mesoscope.
         if self._is_mesoscope_experiment and self._mesoscope_started:
-            self._stop_mesoscope()
-            self._microcontrollers.mesoscope_frame.set_monitoring_state(state=False)
+            run_shutdown_step(description="stopping the mesoscope frame acquisition", step=self._stop_mesoscope)
+            run_shutdown_step(
+                description="disabling the mesoscope frame monitoring",
+                step=partial(self._microcontrollers.mesoscope_frame.set_monitoring_state, state=False),
+            )
 
             # Renames the mesoscope data directory to include the session name. This both clears the shared directory
             # for the next acquisition and ensures that the mesoscope data collected during runtime will be preserved
             # unless it is preprocessed or the user removes it manually.
-            rename_mesoscope_directory(mesoscope_data=self._mesoscope_data)
+            run_shutdown_step(
+                description="renaming the mesoscope data directory",
+                step=partial(rename_mesoscope_directory, mesoscope_data=self._mesoscope_data),
+            )
 
         # Generates the snapshot of the current Zaber motor positions and saves them as a .yaml file. This has
         # to be done before Zaber motors are potentially reset back to parking position.
-        generate_zaber_snapshot(
-            session_data=self._session_data, mesoscope_data=self._mesoscope_data, zaber_motors=self._zaber_motors
+        run_shutdown_step(
+            description="generating the Zaber position snapshot",
+            step=partial(
+                generate_zaber_snapshot,
+                session_data=self._session_data,
+                mesoscope_data=self._mesoscope_data,
+                zaber_motors=self._zaber_motors,
+            ),
         )
 
         # Updates the internally stored SessionDescriptor instance with runtime data, collects the experimenter notes
         # through a GUI window, and saves the completed descriptor to disk.
-        self._generate_session_descriptor()
+        run_shutdown_step(description="finalizing the session descriptor", step=self._generate_session_descriptor)
 
         # Generates the snapshot of the positions used by all mesoscope's imaging axes by querying the ScanImagePC. This
         # runs after frame acquisition is stopped (when it was started) but while the mesoscope control driver is still
         # connected, so the mesoscope is sitting at the acquisition position with the laser still configured.
-        try:
-            if self._is_mesoscope_experiment:
-                generate_mesoscope_position_snapshot(
+        if self._is_mesoscope_experiment:
+            run_shutdown_step(
+                description="generating the mesoscope position snapshot",
+                step=partial(
+                    generate_mesoscope_position_snapshot,
                     session_data=self._session_data,
                     mesoscope_data=self._mesoscope_data,
                     mesoscope_driver=self._mesoscope,
-                )
-        finally:
-            # Disconnects from the ScanImagePC MQTT broker. Runs from a finally so it still executes if the position
-            # query raises; it is a no-op when the driver was never connected (non-mesoscope sessions).
-            self._mesoscope.disconnect()
+                ),
+            )
+
+        # Disconnects from the ScanImagePC MQTT broker. Isolating the position query above keeps this step reachable
+        # when that query fails, and the call is a no-op when the driver was never connected.
+        run_shutdown_step(description="disconnecting from the ScanImagePC", step=self._mesoscope.disconnect)
 
         # Optionally resets Zaber motors by moving them to the dedicated parking position before shutting down Zaber
         # connection. Regardless of whether the motors are moved, disconnects from the motors at the end of the method's
         # runtime.
-        reset_zaber_motors(zaber_motors=self._zaber_motors)
+        run_shutdown_step(
+            description="resetting the Zaber motors", step=partial(reset_zaber_motors, zaber_motors=self._zaber_motors)
+        )
 
         # Stops all microcontroller interfaces.
-        self._microcontrollers.stop()
+        run_shutdown_step(description="stopping the microcontrollers", step=self._microcontrollers.stop)
 
         # Stops the data logger instance.
-        self._logger.stop()
+        run_shutdown_step(description="stopping the data logger", step=self._logger.stop)
 
         message = "Data Logger: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -687,7 +723,19 @@ class MesoscopeVRSystem:
 
         Args:
             new_state: The unique code for the new session's runtime state.
+
+        Raises:
+            ValueError: If the new state code falls outside the unsigned 8-bit range used to serialize it.
         """
+        # The state code is serialized as an unsigned 8-bit value, so an out-of-range code is rejected at this public
+        # entry point instead of failing inside the serialization step after the session has been initialized.
+        if not 0 <= new_state <= _MAXIMUM_RUNTIME_STATE_CODE:
+            message = (
+                f"Unable to update the acquired session's runtime state. The runtime state code must be in the range "
+                f"of 0 to {_MAXIMUM_RUNTIME_STATE_CODE} inclusive, but got {new_state}."
+            )
+            console.error(message=message, error=ValueError)
+
         # Ensures that the _runtime_state attribute is set to a non-zero value after runtime initialization. This is
         # used to restore the runtime back to the pre-pause state if the runtime enters the paused state (idle), but the
         # user then chooses to resume the runtime.
@@ -875,6 +923,9 @@ class MesoscopeVRSystem:
         """Delivers or simulates the requested volume of water reward, depending on the current number of unconsumed
         rewards and the runtime configuration.
 
+        Notes:
+            A configured maximum of 0 unconsumed rewards removes the limit, so every request delivers water.
+
         Args:
             reward_size: The volume of water to deliver, in microliters.
             tone_duration: The time, in milliseconds, for which to sound the auditory tone while delivering the reward.
@@ -883,7 +934,8 @@ class MesoscopeVRSystem:
             True if the method delivers the water reward, False if it simulates it.
         """
         # Only delivers water rewards if the current unconsumed count value is below the user-defined threshold.
-        if self._unconsumed_reward_count < self.descriptor.maximum_unconsumed_rewards:
+        maximum_unconsumed_rewards = self.descriptor.maximum_unconsumed_rewards
+        if maximum_unconsumed_rewards == 0 or self._unconsumed_reward_count < maximum_unconsumed_rewards:
             self._deliver_reward(reward_size=reward_size, tone_duration=tone_duration)
             return True
 
@@ -1165,7 +1217,9 @@ class MesoscopeVRSystem:
                         if "zstack" not in file.name:
                             file.unlink(missing_ok=True)
 
-            # Sends the acquisition trigger to the ScanImagePC over MQTT.
+            # Sends the acquisition trigger to the ScanImagePC over MQTT. Marks the acquisition window as open
+            # before the command is dispatched, so the marker cannot fall behind the first saved frame.
+            self._log_mesoscope_acquisition_state(acquiring=True)
             self._mesoscope.begin_acquisition()
 
             message = "Mesoscope acquisition trigger: Sent. Waiting for the mesoscope frame acquisition to start..."
@@ -1189,6 +1243,7 @@ class MesoscopeVRSystem:
 
             # If the timeout window expires without receiving any mesoscope frames, aborts the acquisition and prompts
             # the user to reconfigure the mesoscope.
+            self._log_mesoscope_acquisition_state(acquiring=False)
             self._mesoscope.abort()
             message = (
                 "The Mesoscope-VR system has requested the mesoscope to start acquiring frames and failed to "
@@ -1225,6 +1280,8 @@ class MesoscopeVRSystem:
                 break
 
             self._microcontrollers.mesoscope_frame.reset_pulse_count()
+
+        self._log_mesoscope_acquisition_state(acquiring=False)
 
     def _regenerate_reference(self) -> None:
         """Regenerates the Mesoscope reference (fresh motion estimator and high-definition z-stack) on demand.
@@ -1302,6 +1359,31 @@ class MesoscopeVRSystem:
                 source_id=self._source_id,
                 acquisition_time=np.uint64(self._timestamp_timer.elapsed),
                 serialized_data=np.array([MesoscopeVRLogMessageCodes.AVERSIVE_GUIDANCE_STATE, enabled], dtype=np.uint8),
+            )
+        )
+
+    def _log_mesoscope_acquisition_state(self, *, acquiring: bool) -> None:
+        """Logs the change of the state that tracks whether the Mesoscope is expected to acquire the session's frames.
+
+        Notes:
+            The log entry brackets the periods during which the recorded frame acquisition pulses correspond to frames
+            the ScanImagePC saves to disk. Pulses logged outside a bracket originate from the operator scanning
+            manually or from the scanner arming, so the preprocessing pipeline discards them. Entries are emitted only
+            when the tracked state changes, so the log alternates between the two values.
+
+        Args:
+            acquiring: Determines whether the system expects the Mesoscope to be acquiring the session's frames.
+        """
+        if self._mesoscope_acquiring == acquiring:
+            return
+        self._mesoscope_acquiring = acquiring
+        self._logger.input_queue.put(
+            LogPackage(
+                source_id=self._source_id,
+                acquisition_time=np.uint64(self._timestamp_timer.elapsed),
+                serialized_data=np.array(
+                    [MesoscopeVRLogMessageCodes.MESOSCOPE_ACQUISITION_STATE, acquiring], dtype=np.uint8
+                ),
             )
         )
 
@@ -1421,12 +1503,15 @@ class MesoscopeVRSystem:
         # Reads the total distance traveled by the animal.
         traveled_distance = self._wheel_encoder.traveled_distance
 
-        # Updates running speed over the configured speed-calculation window.
-        if self._speed_timer.elapsed >= self._speed_calculation_window:
+        # Updates running speed over the configured speed-calculation window. Reads the window that actually
+        # elapsed and scales by it rather than by the nominal window size, because a blocking call inside the runtime
+        # cycle stretches the real window and the nominal size would inflate the speed by the whole overrun. The
+        # positive-window term keeps the scaling division well-defined.
+        elapsed_window = self._speed_timer.elapsed
+        if elapsed_window >= self._speed_calculation_window and elapsed_window > 0:
             self._speed_timer.reset()
-            # Converts the centimeters traveled during the window into centimeters per second.
             distance_delta = traveled_distance - self._distance
-            running_speed = np.float64(distance_delta * self._speed_calculation_rate)
+            running_speed = np.float64(distance_delta * _MILLISECONDS_PER_SECOND / elapsed_window)
             self._distance = traveled_distance
             self._running_speed = running_speed
             self._visualizer.update_running_speed(running_speed=running_speed)
@@ -1444,6 +1529,7 @@ class MesoscopeVRSystem:
             if self._trial_state.trial_completed(traveled_distance=traveled_distance):
                 # Captures the trial type before advance_trial() increments the trial position.
                 is_aversive = self._trial_state.is_current_trial_aversive()
+
                 failed_count = self._trial_state.advance_trial()
 
                 # Handles recovery mode activation based on trial type.
@@ -1493,15 +1579,33 @@ class MesoscopeVRSystem:
         event = self._vr_task.cycle()
 
         if event.kind == VRTaskEventKind.STIMULUS_TRIGGERED:
+            # Resolves the trial position from the number of stimulus events already consumed rather than from the
+            # distance-driven counter, which the data cycle advances before this cycle dequeues the event the finished
+            # trial produced.
+            trial_position = self._resolved_stimulus_count
+            trial_count = len(self._trial_state.aversive_puff_durations)
+
+            # A stimulus arriving after every decomposed trial has been resolved has no trial parameters to resolve
+            # against, so it is discarded instead of indexing past the arrays.
+            if trial_position >= trial_count:
+                message = (
+                    f"Discarding a Virtual Reality stimulus event received after all {trial_count} trials decomposed "
+                    f"from the session's cue sequence were resolved."
+                )
+                console.echo(message=message, level=LogLevel.WARNING)
+                return
+
+            self._resolved_stimulus_count += 1
+
             # Resolves the trial outcome from the stimulus message: delivered drives both the physical stimulus and
             # the success determination, while the cause distinguishes a self-driven outcome from a guided one.
-            is_aversive = self._trial_state.is_current_trial_aversive()
+            is_aversive = self._trial_state.aversive_puff_durations[trial_position] > 0
             guided = event.cause == StimulusCause.GUIDANCE
             if is_aversive:
                 # Aversive trial: a delivered stimulus is the gas puff the animal failed to avoid, while an omitted
                 # stimulus means the animal met the occupancy requirement and avoided the puff.
                 if event.delivered:
-                    puff_duration = self._trial_state.get_current_puff_duration()
+                    puff_duration = self._trial_state.aversive_puff_durations[trial_position]
                     self._microcontrollers.gas_puff_valve.deliver_puff(duration_ms=puff_duration)
                     self._visualizer.add_puff_event()
                 succeeded = not event.delivered
@@ -1516,7 +1620,7 @@ class MesoscopeVRSystem:
                 # Reinforcing trial: a delivered stimulus is the water reward, while an omitted stimulus means the
                 # animal left the reward zone without earning it.
                 if event.delivered:
-                    reward_size, tone_duration = self._trial_state.get_current_reward()
+                    reward_size, tone_duration = self._trial_state.reinforcing_rewards[trial_position]
                     self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
                 succeeded = event.delivered
                 self._trial_state.reinforcing_rewarded = succeeded
@@ -1614,6 +1718,7 @@ class MesoscopeVRSystem:
             return
 
         # Frame acquisition has stopped - enters emergency pause state.
+        self._log_mesoscope_acquisition_state(acquiring=False)
         self._mesoscope_terminated = True
         self._pause_runtime()
 
@@ -1652,6 +1757,12 @@ class MesoscopeVRSystem:
         if not self._ui.pause_runtime:
             self._ui.set_pause_state(paused=True)
 
+        # A pause request that arrives while the runtime is already paused must not restart the pause clock. The
+        # resume logic measures the pause interval from that clock, so restarting it discards the interval that has
+        # already accumulated.
+        if self._paused:
+            return
+
         self._pause_start_time = self._timestamp_timer.elapsed
 
         # Switches the Mesoscope-VR system into the idle state.
@@ -1680,6 +1791,7 @@ class MesoscopeVRSystem:
             self._microcontrollers.wheel_encoder.reset_distance_tracker()
             self._distance = np.float64(0.0)
             self._trial_state.completed = 0
+            self._resolved_stimulus_count = 0
 
         if self._mesoscope_terminated:
             # Disables the reference regeneration button while the mesoscope is re-armed, so a regeneration cannot be

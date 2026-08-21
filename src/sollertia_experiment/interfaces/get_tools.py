@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from pathlib import Path
 
 from ..vr_task import UnityBridgeClient
@@ -86,14 +87,15 @@ def set_zaber_device_setting_tool(
     device_index: int,
     setting: str,
     value: str,
-    *,
-    confirm: bool = False,
+    confirm: Literal["yes", "no"] | None = None,
 ) -> str:
     """Writes a configuration setting to a Zaber device's non-volatile memory.
 
     Important:
-        This operation modifies hardware non-volatile memory. The AI agent MUST show the user the current value
-        and proposed change before calling with confirm=True.
+        This operation modifies hardware non-volatile memory. When ``confirm`` is omitted, the tool reads the device
+        and returns a preview of the change together with an error instead of writing anything. Agentic callers should
+        show the user that preview and ask whether to proceed, then retry with the chosen value. A ``yes`` value
+        performs the write. A ``no`` value abandons it.
 
     Args:
         port: Serial port path (e.g., "/dev/ttyUSB0").
@@ -101,30 +103,40 @@ def set_zaber_device_setting_tool(
         setting: Setting name. Valid options are park_position, maintenance_position, mount_position,
             unsafe_flag, shutdown_flag, device_label, and axis_label.
         value: Value to write. Use integer strings for positions and flags, regular strings for labels.
-        confirm: Must be True to execute the write operation. When False, returns a preview without modifying hardware.
+        confirm: The policy applied to the write request. ``yes`` performs the write, ``no`` abandons it, and ``None``
+            returns the current value alongside an error so the caller can prompt the user.
 
     Returns:
-        Success message with old and new values, or a preview message if confirm is False.
+        A success message carrying the old and new values upon completion, a refusal carrying the previewed change and
+        the accepted values when the policy is unspecified, an abandonment notice when the policy declines the write,
+        or an error description when the write fails.
     """
-    if not confirm:
+    # Resolves the write policy before the device is touched, so an unspecified policy cannot reach the write through
+    # a falsy default. The preview read is the material the calling agent shows the user.
+    if confirm is None:
         try:
             settings = get_zaber_device_settings(port=port, device_index=device_index)
         except Exception as exception:
             return f"Error: {exception}"
-        else:
-            current_values = {
-                "park_position": settings.park_position,
-                "maintenance_position": settings.maintenance_position,
-                "mount_position": settings.mount_position,
-                "unsafe_flag": settings.unsafe_flag,
-                "shutdown_flag": settings.shutdown_flag,
-                "device_label": settings.device_label,
-                "axis_label": settings.axis_label,
-            }
-            if setting not in current_values:
-                return f"Error: Invalid setting '{setting}'. Valid: {', '.join(sorted(current_values.keys()))}"
-            current = current_values[setting]
-            return f"Preview: {setting} would change from '{current}' to '{value}'. Set confirm=True to apply."
+        current_values = {
+            "park_position": settings.park_position,
+            "maintenance_position": settings.maintenance_position,
+            "mount_position": settings.mount_position,
+            "unsafe_flag": settings.unsafe_flag,
+            "shutdown_flag": settings.shutdown_flag,
+            "device_label": settings.device_label,
+            "axis_label": settings.axis_label,
+        }
+        if setting not in current_values:
+            return f"Error: Invalid setting '{setting}'. Valid: {', '.join(sorted(current_values.keys()))}"
+        current = current_values[setting]
+        return (
+            f"Error: Writing '{setting}' modifies the device's non-volatile memory, changing it from '{current}' to "
+            f"'{value}'. Specify confirm='yes' to perform the write, or confirm='no' to abandon it. Ask the user "
+            f"which behavior they prefer before retrying."
+        )
+    if confirm == "no":
+        return f"Zaber setting write abandoned: {setting} on device {device_index} of port {port}"
 
     try:
         # Converts value to appropriate type based on setting.

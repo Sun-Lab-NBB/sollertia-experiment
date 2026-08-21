@@ -93,6 +93,11 @@ assigned to the camera during acquisition, which rename_session_videos uses to b
 _INFERENCE_LOG_TAIL_CHARACTERS: int = 2000
 """The number of trailing characters of the eye-tracking inference log surfaced when reporting an inference failure."""
 
+_FACE_TRACKING_TERMINATION_TIMEOUT: float = 30.0
+"""The number of seconds the eye-tracking inference subprocess is given to exit after it is signaled to terminate, past
+which it is killed outright. The grace period accommodates DeepLabCut releasing the GPU and closing its prediction
+files during shutdown."""
+
 
 def preprocess_session_data(session_data: SessionData) -> None:
     """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
@@ -159,29 +164,39 @@ def preprocess_session_data(session_data: SessionData) -> None:
             session_data=session_data, configuration=system_configuration.video_tracking
         )
 
-    # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
-    _pull_mesoscope_data(
-        session_data=session_data,
-        mesoscope_data=mesoscope_data,
-        threads=_PREPROCESSING_WORKER_COUNT,
-    )
+    # Groups the preprocessing steps that run while the inference is in flight, so an abort that skips the join below
+    # still reaps the inference child that holds the rig's GPU.
+    try:
+        # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
+        _pull_mesoscope_data(
+            session_data=session_data,
+            mesoscope_data=mesoscope_data,
+            threads=_PREPROCESSING_WORKER_COUNT,
+        )
 
-    # Compresses all mesoscope-acquired frames and extracts their metadata.
-    _preprocess_mesoscope_directory(
-        session_data=session_data,
-        mesoscope_data=mesoscope_data,
-        processes=_PREPROCESSING_WORKER_COUNT,
-    )
+        # Compresses all mesoscope-acquired frames and extracts their metadata.
+        _preprocess_mesoscope_directory(
+            session_data=session_data,
+            mesoscope_data=mesoscope_data,
+            processes=_PREPROCESSING_WORKER_COUNT,
+        )
 
-    # Extracts and saves the animal's surgery data to the session's data directory and updates the water restriction
-    # log to reflect the processed session.
-    _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
+        # Extracts and saves the animal's surgery data to the session's data directory and updates the water
+        # restriction log to reflect the processed session.
+        _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
-    # Window checking runs the face camera only as a live monitor of the animal, so it does not intentionally acquire
-    # any camera or behavior data. Removes the stub camera_data and behavior_data directories the acquisition camera
-    # stack leaves behind, before the session is checksummed and pushed, so the removal reaches long-term storage.
-    if session_data.session_type == SessionTypes.WINDOW_CHECKING:
-        _purge_window_checking_behavior_data(session_data=session_data)
+        # Window checking runs the face camera only as a live monitor of the animal, so it does not intentionally
+        # acquire any camera or behavior data. Removes the stub camera_data and behavior_data directories the
+        # acquisition camera stack leaves behind, before the session is checksummed and pushed, so the removal reaches
+        # long-term storage.
+        if session_data.session_type == SessionTypes.WINDOW_CHECKING:
+            _purge_window_checking_behavior_data(session_data=session_data)
+    except BaseException:
+        # An abandoned child keeps holding the GPU and the prediction file handles, so a retry of the preprocessing
+        # would start a second writer targeting the same prediction paths.
+        if face_tracking_process is not None:
+            _terminate_face_tracking(process=face_tracking_process, session_data=session_data)
+        raise
 
     # Waits for the asynchronous face-camera inference to finish and verifies it produced predictions before the session
     # is checksummed and pushed. A failed or missing inference aborts the transfer and retains the local session copy
@@ -315,6 +330,35 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
     log_path.unlink(missing_ok=True)
     message = f"Face-camera eye-tracking inference for session {session_data.session_name}: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: SessionData) -> None:
+    """Stops the face-camera eye-tracking inference subprocess and waits for it to exit.
+
+    Notes:
+        The wait on the terminated child is bounded and escalates to a kill, so an unresponsive child never stalls the
+        abort that triggers this cleanup.
+
+    Args:
+        process: The inference subprocess returned by _launch_face_tracking.
+        session_data: The SessionData instance that defines the processed session.
+    """
+    if process.poll() is not None:
+        return
+
+    message = (
+        f"Preprocessing of the session {session_data.session_name} aborted while the face-camera eye-tracking "
+        f"inference was still running. Terminating the inference subprocess."
+    )
+    console.echo(message=message, level=LogLevel.WARNING)
+
+    process.terminate()
+    try:
+        process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        # A child that ignores the termination signal keeps the GPU reserved, so it is killed and reaped outright.
+        process.kill()
+        process.wait()
 
 
 def _read_inference_log_tail(log_path: Path) -> str:
@@ -699,7 +743,9 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
     # Extracts the mesoscope frame_rate from metadata.
     frame_rate = float(metadata["FrameData"]["SI.hRoiManager.scanVolumeRate"])  # type: ignore[index]
     plane_number = int(metadata["FrameData"]["SI.hStackManager.actualNumSlices"])  # type: ignore[index]
-    channel_number = int(metadata["FrameData"]["SI.hChannels.channelsActive"])  # type: ignore[index]
+    channel_number = _resolve_active_channel_count(
+        channels_active=metadata["FrameData"]["SI.hChannels.channelsActive"],  # type: ignore[index]
+    )
     si_rois: list[dict[str, Any]] | dict[str, Any]
     si_rois = metadata["RoiGroups"]["imagingRoiGroup"]["rois"]  # type: ignore[index]
 
@@ -755,6 +801,47 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         json.dump(obj=data, fp=parameters_file, separators=(",", ":"), indent=None)  # Maximizes data compression
 
 
+def _resolve_active_channel_count(channels_active: object) -> int:
+    """Converts the value of the 'SI.hChannels.channelsActive' ScanImage metadata field into the number of imaging
+    channels the mesoscope acquired.
+
+    Notes:
+        ScanImage stores the indices of the active channels rather than their count. A single active channel is
+        serialized either as a scalar or as a one-element MATLAB vector, and multiple active channels as a longer
+        vector, which the tifffile parser resolves into a flat list for a row vector and into a list of one-element
+        lists for a column vector.
+
+    Args:
+        channels_active: The raw value of the 'SI.hChannels.channelsActive' frame-invariant metadata field.
+
+    Returns:
+        The number of channels acquired for each imaged plane.
+
+    Raises:
+        ValueError: If the metadata field stores neither a channel index nor a vector of channel indices.
+    """
+    if isinstance(channels_active, int):
+        return 1
+
+    if isinstance(channels_active, list) and channels_active:
+        # A column vector wraps each channel index in its own single-element row, so unwrapping the rows reduces both
+        # vector layouts to the same flat sequence of indices.
+        indices = [
+            element[0] if isinstance(element, list) and len(element) == 1 else element for element in channels_active
+        ]
+        if all(isinstance(index, int) for index in indices):
+            return len(indices)
+
+    message = (
+        f"Unable to determine the number of active mesoscope imaging channels from the frame-invariant ScanImage "
+        f"metadata. The 'SI.hChannels.channelsActive' field must store a channel index or a vector of channel "
+        f"indices, but got {channels_active!r}."
+    )
+    console.error(message=message, error=ValueError)
+    # Satisfies ruff RET503. console.error() is NoReturn, so this line never executes.
+    return 0  # pragma: no cover
+
+
 def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeData, threads: int = 30) -> None:
     """Pulls the target session's data acquired by the mesoscope from the ScanImagePC to the VRPC.
 
@@ -783,10 +870,6 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     # aborts the runtime early.
     if not source.exists():
         return
-
-    # Ensures that the VRPC's destination directory exists.
-    destination = session_data.raw_data_path.joinpath("raw_mesoscope_frames")
-    ensure_directory_exists(destination)
 
     # Defines the set of extensions and filenames to look for when verifying source directory contents.
     extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
@@ -817,6 +900,11 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     # does not contain any marker files used during runtime.
     for binary_file in source.glob("*.bin"):
         binary_file.unlink(missing_ok=True)
+
+    # Creates the VRPC's destination directory only after the source directory passes verification. An empty directory
+    # left behind by an aborted pull looks like a completed transfer to the frame preprocessing step below.
+    destination = session_data.raw_data_path.joinpath("raw_mesoscope_frames")
+    ensure_directory_exists(destination)
 
     # Transfers the mesoscope frames data from the ScanImagePC to the local machine and removes the source directory
     # after the transfer is complete.
@@ -854,6 +942,10 @@ def _preprocess_mesoscope_directory(
         mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
             Mesoscope-VR data acquisition system.
         processes: The number of processes to use while processing the directory.
+
+    Raises:
+        RuntimeError: If the session's 'raw_mesoscope_frames' directory exists, but does not store all files
+            (MotionEstimator.me, fov.roi, zstack.tiff) required to process the mesoscope-acquired data.
     """
     # Resolves the path to the temporary directory that stores unprocessed mesoscope-acquired data pulled to the
     # VRPC.
@@ -867,6 +959,23 @@ def _preprocess_mesoscope_directory(
     motion_estimator_file = image_directory.joinpath("MotionEstimator.me")
     fov_roi_file = image_directory.joinpath("fov.roi")
     zstack_file = image_directory.joinpath("zstack.tiff")
+
+    # An interrupted pull leaves the directory behind without the files copied unconditionally below, so the contents
+    # are verified before any of them is read. Naming every missing file at once tells the operator what the wedged
+    # session needs to become processable again.
+    missing_files = sorted(
+        file.name for file in (motion_estimator_file, fov_roi_file, zstack_file) if not file.exists()
+    )
+    if missing_files:
+        missing_files_listing = ", ".join(missing_files)
+        message = (
+            f"Unable to preprocess the mesoscope-acquired data for the session {session_data.session_name}. The "
+            f"session's 'raw_mesoscope_frames' directory must store the MotionEstimator.me, fov.roi, and zstack.tiff "
+            f"files pulled from the ScanImagePC, but the following files are missing: {missing_files_listing}. Remove "
+            f"the {image_directory} directory, restore the session's 'mesoscope_frames' directory on the ScanImagePC, "
+            f"and rerun the command that caused this error."
+        )
+        console.error(message=message, error=RuntimeError)
 
     # If necessary, persists the MotionEstimator and the fov.roi files to the 'persistent data' directory of the
     # processed animal on the ScanImagePC.
@@ -964,16 +1073,34 @@ def _preprocess_mesoscope_directory(
     # over the concatenated sequence and making the elapsed time strictly increasing gives every frame in the
     # session a unique identifier and a monotonic timestamp, matching the order the frames are written to disk.
     frame_count = len(metadata_dict["frameNumberAcquisition"])
+    elapsed_seconds = metadata_dict["frameTimestamps_sec"].astype(np.float64)
+
+    # Resolves the restart boundaries before the renumbering below overwrites the per-acquisition frame counter that
+    # marks them. The counter rises within an acquisition and falls back to one at a restart, so a non-positive step
+    # isolates every boundary regardless of the increment the counter uses. Pairing it with the elapsed-time step
+    # covers a counter that does not reset, keeping the detection at least as sensitive as the timestamps alone.
+    restarts = np.union1d(
+        np.flatnonzero(np.diff(metadata_dict["frameNumberAcquisition"]) <= 0),
+        np.flatnonzero(np.diff(elapsed_seconds) < 0),
+    )
+
     metadata_dict["frameNumberAcquisition"] = np.arange(1, frame_count + 1, dtype=np.int32)
     metadata_dict["frameNumbers"] = np.arange(1, frame_count + 1, dtype=np.int32)
 
-    elapsed_seconds = metadata_dict["frameTimestamps_sec"].astype(np.float64)
-    restarts = np.flatnonzero(np.diff(elapsed_seconds) < 0)
     if restarts.size:
-        # Each restart resumes from zero, so the elapsed time carried into it is added to every subsequent frame.
+        # Each restart resumes from zero, so the elapsed time carried into it is added to every subsequent frame. The
+        # interval separating an interrupted run from the run resuming it is absent from the ScanImage metadata, so
+        # the frames resume one frame period after the interruption. That is the shortest interval the hardware can
+        # place between two frames, which understates the pause and keeps the series strictly increasing.
+        steps = np.diff(elapsed_seconds)
+        within_acquisition = np.ones(steps.size, dtype=np.bool_)
+        within_acquisition[restarts] = False
+        frame_period = float(np.median(steps[within_acquisition])) if within_acquisition.any() else 0.0
         offsets = np.zeros(frame_count, dtype=np.float64)
         for restart_index in restarts:
-            offsets[restart_index + 1 :] += elapsed_seconds[restart_index] - elapsed_seconds[restart_index + 1]
+            offsets[restart_index + 1 :] += (
+                elapsed_seconds[restart_index] - elapsed_seconds[restart_index + 1] + frame_period
+            )
         elapsed_seconds += offsets
         # Acquisition numbers are only meaningful once each interrupted run is distinguishable from its siblings.
         acquisition = np.zeros(frame_count, dtype=np.int32)

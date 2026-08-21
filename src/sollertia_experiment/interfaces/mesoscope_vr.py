@@ -109,6 +109,14 @@ def configure_system() -> None:  # pragma: no cover
     show_default=True,
     help="Default gas puff duration in milliseconds for occupancy-type trials.",
 )
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Determines whether to overwrite the experiment configuration file if it already exists.",
+)
 def configure_experiment(
     project: str,
     experiment: str,
@@ -117,6 +125,8 @@ def configure_experiment(
     reward_size: float,
     reward_tone_duration: int,
     puff_duration: int,
+    *,
+    force: bool,
 ) -> None:  # pragma: no cover
     """Creates a Mesoscope-VR experiment configuration from a task template under the configured data root."""
     create_experiment_configuration_file(
@@ -127,6 +137,7 @@ def configure_experiment(
         reward_size=reward_size,
         reward_tone_duration=reward_tone_duration,
         puff_duration=puff_duration,
+        overwrite=force,
     )
 
 
@@ -253,7 +264,8 @@ def window_checking(ctx: click.Context) -> None:
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
+        "remain unconsumed. "
         "Defaults to 1."
     ),
 )
@@ -290,7 +302,7 @@ def lick_training(
     "-t",
     "--maximum-time",
     type=int,
-    help="The maximum time to run the training session, in minutes. Defaults to 40 minutes.",
+    help="The maximum time to run the training session, in minutes. Must be greater than 0. Defaults to 40 minutes.",
 )
 @click.option(
     "-is",
@@ -361,7 +373,8 @@ def lick_training(
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
+        "remain unconsumed. "
         "Defaults to 1."
     ),
 )
@@ -418,7 +431,8 @@ def run_training(
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
         "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
-        "the already delivered rewards. Setting this argument to 0 disables the reward consumption tracking. "
+        "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
+        "remain unconsumed. "
         "Defaults to 1."
     ),
 )
@@ -452,19 +466,23 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
 def preprocess(session_path: Path) -> None:
     """Preprocesses the target session's data stored on the data acquisition system's host-machine."""
     system_configuration = get_system_configuration()
-    data_root = get_data_root()
+
+    # Both operands are normalized before the containment check below, since a '..' segment or a symlink would otherwise
+    # route an out-of-root session past the check, or refuse an in-root session reached through a link.
+    data_root = get_data_root().resolve()
+    resolved_session_path = session_path.resolve()
 
     # Prevents using this command on sessions that are not stored on the local host-machine, but accessible to its
     # filesystem. Specifically, prevents working with sessions stored on long-term storage destinations.
     message = (
-        f"Unable to preprocess the session's directory stored at the {session_path} path. The session's directory must "
-        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"Unable to preprocess the session's directory stored at the {resolved_session_path} path. The session's "
+        f"directory must be located inside the data root of the {system_configuration.name} data acquisition system "
         f"({data_root})."
     )
-    if not session_path.is_relative_to(data_root):
+    if not resolved_session_path.is_relative_to(data_root):
         console.error(message=message, error=FileNotFoundError)
 
-    session_data = SessionData.load(session_path=session_path)
+    session_data = SessionData.load(session_path=resolved_session_path)
     preprocess_session_data(session_data)
 
 
@@ -485,21 +503,25 @@ def delete(session_path: Path) -> None:
     accessible to the data acquisition system.
     """
     system_configuration = get_system_configuration()
-    data_root = get_data_root()
+
+    # Both operands are normalized before the containment check below, since a '..' segment or a symlink would otherwise
+    # route an out-of-root session past the check, or refuse an in-root session reached through a link.
+    data_root = get_data_root().resolve()
+    resolved_session_path = session_path.resolve()
 
     # Ensures that the command can only target sessions stored on the local host-machine. While this does not make the
     # command safe, it reduces the risk of accidentally removing valid scientific data.
     message = (
-        f"Unable to delete the session's directory stored at the {session_path} path. The session's directory must "
-        f"be located inside the data root of the {system_configuration.name} data acquisition system "
+        f"Unable to delete the session's directory stored at the {resolved_session_path} path. The session's directory "
+        f"must be located inside the data root of the {system_configuration.name} data acquisition system "
         f"({data_root})."
     )
-    if not session_path.is_relative_to(data_root):
+    if not resolved_session_path.is_relative_to(data_root):
         console.error(message=message, error=FileNotFoundError)
 
     # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
     # host-machine.
-    session_data = SessionData.load(session_path=session_path)
+    session_data = SessionData.load(session_path=resolved_session_path)
     purge_session(session_data)
 
 

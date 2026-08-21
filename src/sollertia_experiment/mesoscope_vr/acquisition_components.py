@@ -4,11 +4,14 @@ Mesoscope-VR data acquisition runtime.
 
 from __future__ import annotations
 
+import os
+import sys
 from enum import IntEnum
 import math
 import atexit
 import shutil
 from typing import TYPE_CHECKING
+from decimal import ROUND_FLOOR, Decimal
 from dataclasses import field, fields, dataclass
 
 import numpy as np
@@ -27,11 +30,15 @@ from sollertia_shared_assets import (
 
 from .system import MesoscopeData, MesoscopePositions
 from .runtime_ui import collect_surgery_quality, collect_experimenter_notes, collect_experimenter_given_water_volume
-from ..cross_system import request_text, wait_for_enter, request_confirmation, request_required_confirmation
+from ..cross_system import (
+    request_text,
+    wait_for_enter,
+    request_confirmation,
+    request_required_confirmation,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from collections.abc import Callable
 
     from numpy.typing import NDArray
 
@@ -45,6 +52,27 @@ user interaction."""
 _DEFAULT_TOTAL_WATER_VOLUME_ML: float = 1.0
 """The total session water volume, in milliliters, offered as the fallback default when the experimenter is prompted for
 the amount of water the animal should receive at session teardown and no prior session recorded a water intake."""
+_THREE_DECIMAL_QUANTUM: Decimal = Decimal("0.001")
+"""The decimal grid step the Mesoscope position values are floored onto before they are written to the position
+snapshot."""
+_REFERENCE_WRITE_PERMISSION_BITS: int = 0o666
+"""The permission bits requested for a staged reference file, before the process umask narrows them.
+
+Notes:
+    Matches the bits ataraxis-data-structures requests in atomic_write(), so a reference file published here carries
+    the same permissions as every other file the platform writes from scratch, rather than inheriting whatever mode
+    the ScanImagePC copy happened to carry.
+"""
+_REFERENCE_RENAME_RETRY_COUNT: int = 5
+"""The maximum number of times publishing a staged reference file is attempted before the failure propagates."""
+_REFERENCE_RENAME_RETRY_DELAY_MILLISECONDS: int = 500
+"""The delay in milliseconds before the second attempt to publish a staged reference file.
+
+Notes:
+    The delay doubles on each further attempt, matching the back-off ataraxis-data-structures applies in
+    atomic_write(). Windows refuses the rename while a scanner holds the destination open, and the holder releases it
+    on its own after a duration this module cannot predict.
+"""
 
 
 class _ResponseDelayTimer:
@@ -106,6 +134,10 @@ class MesoscopeVRLogMessageCodes(IntEnum):
     DISTANCE_SNAPSHOT = 5
     """The system has taken a snapshot of the total distance traveled by the animal at the time Unity signaled runtime
     termination (emergency pause)."""
+    MESOSCOPE_ACQUISITION_STATE = 6
+    """The system has changed whether it expects the Mesoscope to be acquiring the session's frames. The value is one
+    while the ScanImagePC is expected to write session frames and zero otherwise, which brackets the periods during
+    which the logged frame acquisition pulses correspond to saved frames."""
 
 
 @dataclass(slots=True)
@@ -171,29 +203,14 @@ class TrialState:
             return False
         return bool(traveled_distance > self.distances[self.completed])
 
-    def get_current_reward(self) -> tuple[float, int]:
-        """Retrieves the reward parameters for the current reinforcing trial.
-
-        Returns:
-            A tuple containing the reward size in microliters and the reward tone duration in milliseconds.
-        """
-        return self.reinforcing_rewards[self.completed]
-
-    def get_current_puff_duration(self) -> int:
-        """Retrieves the gas puff duration for the current aversive trial.
-
-        Returns:
-            The gas puff duration in milliseconds.
-        """
-        return self.aversive_puff_durations[self.completed]
-
     def is_current_trial_aversive(self) -> bool:
         """Determines whether the current trial is an aversive (gas puff) trial from its nonzero per-trial puff
         duration.
 
         Notes:
             The accessor indexes the per-trial puff duration array at the current trial position, so it is only valid
-            while trial_completed() returns False.
+            while that position is below the length of the array, which is what trial_completed() returning True
+            guarantees for the trial it just resolved.
 
         Returns:
             True if the current trial stores a nonzero gas puff duration, False otherwise.
@@ -374,29 +391,6 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
 
     message = "Motor Positioning: Complete."
     console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def run_shutdown_step(description: str, step: Callable[[], None]) -> None:
-    """Executes a single shutdown callable, isolating it so that an error or interrupt does not propagate.
-
-    The Mesoscope-VR shutdown sequences tear down several subprocess-backed assets in turn. Allowing an exception or a
-    repeated KeyboardInterrupt from one asset to propagate would skip the remaining teardown steps. This would leave the
-    orphaned subprocesses to be collected by the garbage collector, which tears down their shared-memory managers out
-    of order and cascades into multiprocessing errors. This helper contains each failure so the remaining steps still
-    run, while the originally propagating exception (if any) resumes once the shutdown sequence completes.
-
-    Args:
-        description: A short gerund phrase naming the step, used to contextualize an error encountered while running it.
-        step: The zero-argument callable that performs the shutdown step.
-    """
-    try:
-        step()
-    except (Exception, KeyboardInterrupt) as error:
-        message = (
-            f"Encountered an error while {description} during the Mesoscope-VR shutdown sequence: {error!r}. "
-            f"Continuing with the remaining shutdown steps."
-        )
-        console.echo(message=message, level=LogLevel.ERROR)
 
 
 def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
@@ -665,8 +659,12 @@ def setup_mesoscope(
     # fully refreshed. The matching mesoscope_positions snapshot is updated during session finalization, so an aborted
     # session may pair this reference with the previous positions until the next completed session.
     if replace_reference:
-        shutil.copy2(src=target_files[0], dst=mesoscope_data.scanimagepc_data.motion_estimator_path)
-        shutil.copy2(src=target_files[1], dst=mesoscope_data.scanimagepc_data.roi_path)
+        _publish_reference_pair(
+            motion_estimator_source=target_files[0],
+            roi_source=target_files[1],
+            motion_estimator_destination=mesoscope_data.scanimagepc_data.motion_estimator_path,
+            roi_destination=mesoscope_data.scanimagepc_data.roi_path,
+        )
         console.echo(message="Mesoscope reference: Replaced.", level=LogLevel.SUCCESS)
 
     console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
@@ -745,6 +743,167 @@ def finalize_session_descriptor(
         src=session_data.raw_data.session_descriptor_path,
         dst=mesoscope_data.vrpc_data.session_descriptor_path,
     )
+
+
+def _publish_reference_pair(
+    motion_estimator_source: Path,
+    roi_source: Path,
+    motion_estimator_destination: Path,
+    roi_destination: Path,
+) -> None:
+    """Replaces the animal's persisted reference pair with the freshly generated motion estimator and ROI files.
+
+    Notes:
+        The two files describe one imaging field and are only meaningful together, so both are staged beside their
+        destinations and flushed to disk before either is published. A failure while staging removes every staged file
+        and leaves the destinations untouched. A failure between the two renames restores the destination the first
+        rename already replaced, from a copy staged alongside it, so the pair never survives half-replaced.
+
+        The restore is itself a rename, so the only window this cannot close is a crash of the interpreter or the host
+        between the two renames, which a filesystem transaction would be needed to close.
+
+        Each staged file is created with the permission bits ataraxis-data-structures requests in atomic_write(),
+        narrowed by the process umask, so the published pair carries the platform's usual permissions rather than the
+        mode the ScanImagePC copy happened to carry.
+
+    Args:
+        motion_estimator_source: The path to the freshly generated MotionEstimator.me file.
+        roi_source: The path to the freshly generated fov.roi file.
+        motion_estimator_destination: The path to the animal's persisted MotionEstimator.me file.
+        roi_destination: The path to the animal's persisted fov.roi file.
+
+    Raises:
+        OSError: If a staged file cannot be written.
+        PermissionError: If a destination stays locked by another process for every publishing attempt.
+    """
+    staged_files: list[tuple[Path, Path]] = []
+    replaced_files: list[tuple[Path, Path]] = []
+    try:
+        for source, destination in (
+            (motion_estimator_source, motion_estimator_destination),
+            (roi_source, roi_destination),
+        ):
+            staged_files.append((_stage_reference_file(source=source, destination=destination), destination))
+
+            # Stages a copy of the destination the rename below replaces, so a failure on the second rename can put
+            # the first destination back rather than leaving a mismatched pair behind.
+            if destination.exists():
+                replaced_files.append(
+                    (
+                        _stage_reference_file(source=destination, destination=destination.with_suffix(".previous")),
+                        destination,
+                    )
+                )
+
+        for staged_path, destination in staged_files:
+            _publish_staged_file(staged_path=staged_path, destination=destination)
+    except BaseException:
+        for staged_path, destination in replaced_files:
+            _restore_replaced_file(staged_path=staged_path, destination=destination)
+        for staged_path, _ in staged_files:
+            staged_path.unlink(missing_ok=True)
+        raise
+    else:
+        for staged_path, _ in replaced_files:
+            staged_path.unlink(missing_ok=True)
+
+
+def _restore_replaced_file(staged_path: Path, destination: Path) -> None:
+    """Puts a replaced reference file back from the copy staged before it was overwritten.
+
+    Notes:
+        The restore runs while an error is already propagating, so a failure here is reported and swallowed rather
+        than allowed to replace the error that triggered the rollback.
+
+    Args:
+        staged_path: The path to the staged copy of the destination's previous contents.
+        destination: The destination path to restore.
+    """
+    try:
+        _publish_staged_file(staged_path=staged_path, destination=destination)
+    except (Exception, KeyboardInterrupt) as error:
+        message = (
+            f"Unable to restore the previous contents of {destination} after the mesoscope reference publication "
+            f"failed: {error!r}. The animal's persisted reference pair may be mismatched, so regenerate it before the "
+            f"next imaging session."
+        )
+        console.echo(message=message, level=LogLevel.ERROR)
+
+
+def _stage_reference_file(source: Path, destination: Path) -> Path:
+    """Copies the source file into a temporary file beside its destination and flushes it to disk.
+
+    Notes:
+        The temporary file is named after the destination and the writing process, so two runtimes publishing the same
+        destination cannot collide on it, and it is created in the destination's own directory so the rename that
+        publishes it stays within one filesystem.
+
+    Args:
+        source: The path to the file whose contents are staged.
+        destination: The path the staged file is published to later.
+
+    Returns:
+        The path to the staged temporary file.
+
+    Raises:
+        OSError: If the temporary file cannot be created or written.
+    """
+    staged_path = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+
+    # Opens the staged file directly rather than through mkstemp(), which hardcodes the 0o600 bits that suit a private
+    # scratch file and would leave a published reference readable only by the account that wrote it.
+    descriptor = os.open(
+        path=staged_path, flags=os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode=_REFERENCE_WRITE_PERMISSION_BITS
+    )
+    try:
+        with os.fdopen(fd=descriptor, mode="wb") as file:
+            file.write(source.read_bytes())
+
+            # Forces the contents out of the userspace and kernel buffers, so a host losing power after the rename
+            # finds a complete file rather than a partial one.
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        # The caller only learns of a staged file once this function returns it, so a failure after the file exists
+        # removes it here rather than leaving it for the caller's rollback.
+        staged_path.unlink(missing_ok=True)
+        raise
+
+    return staged_path
+
+
+def _publish_staged_file(staged_path: Path, destination: Path) -> None:
+    """Renames a staged reference file over its destination path.
+
+    Notes:
+        Windows refuses the rename while another process holds the destination open without sharing its deletion,
+        which a scanner or an indexer does for as long as it takes to read the file. The attempt is repeated with a
+        doubling delay there, since the holder releases the file on its own. Every other platform replaces an open
+        destination without complaint and renames on the first attempt.
+
+    Args:
+        staged_path: The path to the staged temporary file.
+        destination: The destination path the staged file is renamed to.
+
+    Raises:
+        PermissionError: If the destination stays locked by another process for every attempt.
+    """
+    if sys.platform != "win32":
+        staged_path.replace(target=destination)
+        return
+
+    delay_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+    delay = _REFERENCE_RENAME_RETRY_DELAY_MILLISECONDS
+    for attempt in range(_REFERENCE_RENAME_RETRY_COUNT):
+        try:
+            staged_path.replace(target=destination)
+        except PermissionError:
+            if attempt == _REFERENCE_RENAME_RETRY_COUNT - 1:
+                raise
+            delay_timer.delay(delay=delay, allow_sleep=True, block=False)
+            delay *= 2
+        else:
+            return
 
 
 def _resolve_previous_session_water_context(persistent_data_path: Path) -> _PreviousSessionWaterContext | None:
@@ -826,20 +985,22 @@ def _prompt_red_dot_alignment(previous_value: float) -> float:
 
 
 def _validate_red_dot_response(response: str) -> bool | str:
-    """Validates a red-dot alignment Z position response, accepting a number or an empty response.
+    """Validates a red-dot alignment Z position response, accepting a finite number or an empty response.
 
     Args:
         response: The raw text entered by the operator.
 
     Returns:
-        True when the response is empty or parses as a number, or an error message describing the constraint.
+        True when the response is empty or parses as a finite number, or an error message describing the constraint.
     """
     if not response.strip():
         return True
     try:
-        float(response)
+        parsed_value = float(response)
     except ValueError:
         return "Enter a numeric value or leave the response empty to keep the stored value."
+    if not math.isfinite(parsed_value):
+        return "Enter a finite numeric value. Infinity and not-a-number responses are not valid positions."
     return True
 
 
@@ -856,4 +1017,7 @@ def _floor_to_three_decimals(value: float) -> float:
     Returns:
         The value rounded down to at most three decimal places.
     """
-    return math.floor(value * 1000.0) / 1000.0
+    # Floors on the decimal grid, reached through the shortest decimal representation of the input, because scaling a
+    # binary float by 1000 lands an input that already carries three decimals just below its grid point and floors it
+    # one step low.
+    return float(Decimal(str(value)).quantize(exp=_THREE_DECIMAL_QUANTUM, rounding=ROUND_FLOOR))

@@ -8,6 +8,7 @@ import copy
 from typing import TYPE_CHECKING
 from pathlib import Path
 import tempfile
+from functools import partial
 
 from tqdm import tqdm
 import numpy as np
@@ -45,6 +46,7 @@ from ..cross_system import (
     GasPuffValveInterface,
     wait_for_enter,
     get_version_data,
+    run_shutdown_step,
     get_project_experiments,
     request_required_confirmation,
 )
@@ -57,7 +59,6 @@ from .acquisition_components import (
     RESPONSE_DELAY,
     RESPONSE_DELAY_TIMER,
     setup_mesoscope,
-    run_shutdown_step,
     reset_zaber_motors,
     setup_zaber_motors,
     generate_zaber_snapshot,
@@ -414,10 +415,13 @@ def lick_training_logic(
     if maximum_unconsumed_rewards is not None:
         descriptor.maximum_unconsumed_rewards = maximum_unconsumed_rewards
 
-    # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
-    # the feature by deferring the assignment until after the total number of rewards is calculated. This ensures that
-    # the feature can be properly disabled by setting the limit equal to the total reward count.
-    disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
+    if descriptor.maximum_unconsumed_rewards < 0:
+        message = (
+            f"Unable to execute the session for the animal {animal_id}. The maximum_unconsumed_rewards parameter must "
+            f"be zero, which removes the limit, or a positive count, but got "
+            f"{descriptor.maximum_unconsumed_rewards}."
+        )
+        console.error(message=message, error=ValueError)
 
     # Initializes the timer used to enforce reward delays.
     delay_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -425,11 +429,33 @@ def lick_training_logic(
     message = "Generating the pseudorandom reward delay sequence..."
     console.echo(message=message, level=LogLevel.INFO)
 
+    # Rejects a non-positive water budget before it reaches the sample count computation below, where the cast to an
+    # unsigned integer would silently fold a negative budget into a zero reward count. Raises the error before system
+    # initialization to allow automatic session data purge.
+    if descriptor.maximum_water_volume_ml <= 0:
+        message = (
+            f"Unable to generate the lick training reward sequence. The maximum water volume "
+            f"(maximum_water_volume_ml) must be greater than 0 milliliters, but got "
+            f"{descriptor.maximum_water_volume_ml} milliliters."
+        )
+        console.error(message=message, error=ValueError)
+
     # Converts maximum volume to uL and divides it by the reward size to get the number of delays to sample from
     # the delay distribution.
     number_of_samples = np.floor(
         (descriptor.maximum_water_volume_ml * _MICROLITERS_PER_MILLILITER) / descriptor.water_reward_size_ul
     ).astype(np.uint64)
+
+    # Aborts if the water budget cannot fund a single reward. Raises the error before system initialization to allow
+    # automatic session data purge.
+    if number_of_samples == 0:
+        message = (
+            f"Unable to generate the lick training reward sequence. The maximum water volume "
+            f"({descriptor.maximum_water_volume_ml} milliliters) funds {number_of_samples} rewards of the requested "
+            f"reward size ({descriptor.water_reward_size_ul} microliters). Increase the maximum water volume or "
+            f"decrease the reward size."
+        )
+        console.error(message=message, error=ValueError)
 
     # Generates samples from a uniform distribution within delay bounds.
     random_generator = np.random.default_rng()
@@ -489,11 +515,6 @@ def lick_training_logic(
         descriptor.maximum_training_time_min = int(
             np.ceil(convert_time(time=cumulative_time[-1], from_units=TimeUnits.SECOND, to_units=TimeUnits.MINUTE))
         )
-
-    # If the maximum unconsumed reward count is below 1, disables the feature by setting the number to match the
-    # number of rewards to be delivered.
-    if disable_unconsumed_limit:
-        descriptor.maximum_unconsumed_rewards = len(reward_delays)
 
     system: MesoscopeVRSystem | None = None
     try:
@@ -747,10 +768,22 @@ def run_training_logic(
     if maximum_unconsumed_rewards is not None:
         descriptor.maximum_unconsumed_rewards = maximum_unconsumed_rewards
 
-    # Validates the maximum unconsumed rewards parameter. If the maximum unconsumed reward count is below 1, disables
-    # the feature by deferring the assignment until after the maximum number of deliverable rewards is calculated. This
-    # ensures that the feature can be properly disabled by setting the limit equal to the total reward count.
-    disable_unconsumed_limit = descriptor.maximum_unconsumed_rewards < 1
+    if descriptor.maximum_unconsumed_rewards < 0:
+        message = (
+            f"Unable to execute the session for the animal {animal_id}. The maximum_unconsumed_rewards parameter must "
+            f"be zero, which removes the limit, or a positive count, but got "
+            f"{descriptor.maximum_unconsumed_rewards}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Rejects a non-positive training time before any session asset is created. A zero-length session skips the main
+    # training loop, and the next session inherits its training time, so the zero-length runtime perpetuates itself.
+    if descriptor.maximum_training_time_min <= 0:
+        message = (
+            f"Unable to execute the run training session. The maximum training time (maximum_training_time_min) must "
+            f"be greater than 0 minutes, but got {descriptor.maximum_training_time_min} minutes."
+        )
+        console.error(message=message, error=ValueError)
 
     # Determines whether the volume-driven threshold increase is disabled. A non-positive increase threshold holds the
     # speed and duration thresholds at their initial values for the entire session, while a positive threshold enables
@@ -770,13 +803,6 @@ def run_training_logic(
     epoch_timer_engaged: bool = False
     # Ensures a positive value and converts the maximum idle time from seconds to milliseconds.
     maximum_idle_time_ms = max(0.0, descriptor.maximum_idle_time_s) * 1000
-
-    # If the maximum unconsumed reward count is below 1, disables the feature by setting the number to match the
-    # maximum number of rewards that can be delivered during the session.
-    if disable_unconsumed_limit:
-        descriptor.maximum_unconsumed_rewards = int(
-            np.ceil(descriptor.maximum_water_volume_ml / (descriptor.water_reward_size_ul / 1000))
-        )
 
     # Converts all arguments used to determine the speed and duration threshold over time into numpy variables to
     # optimize the main session's runtime loop:
@@ -812,7 +838,8 @@ def run_training_logic(
     previous_auto_speed = np.float64(np.nan)
     previous_auto_duration = np.float64(np.nan)
 
-    # This one-time tracker is used to initialize the speed and duration threshold visualization.
+    # This one-time tracker is used to initialize the speed and duration threshold visualization and to mark the
+    # thresholds as computed when the descriptor is updated at the end of the session.
     once = True
 
     # Updates the descriptor with the final threshold values saved at the end of the session. These are
@@ -1006,9 +1033,11 @@ def run_training_logic(
         progress_bar.close()
 
         # Updates the descriptor with the final thresholds reached during the session. These will be used as the
-        # starting thresholds for the next session.
-        descriptor.final_run_speed_threshold_cm_s = float(speed_threshold)
-        descriptor.final_run_duration_threshold_s = float(duration_threshold / 1000)  # Converts back to seconds
+        # starting thresholds for the next session. A session aborted before the first loop iteration keeps the initial
+        # thresholds assigned above, since the loop had no chance to compute new ones.
+        if not once:
+            descriptor.final_run_speed_threshold_cm_s = float(speed_threshold)
+            descriptor.final_run_duration_threshold_s = float(duration_threshold / 1000)  # Converts back to seconds
 
     # RecursionErrors should not be raised by any session component except in the case that the user wants to terminate
     # the session as part of the startup checkpoint. Therefore, silences the error.
@@ -1166,6 +1195,14 @@ def experiment_logic(
     # If necessary, updates the descriptor with the argument override values provided by the user.
     if maximum_unconsumed_rewards is not None:
         descriptor.maximum_unconsumed_rewards = maximum_unconsumed_rewards
+
+    if descriptor.maximum_unconsumed_rewards < 0:
+        message = (
+            f"Unable to execute the session for the animal {animal_id}. The maximum_unconsumed_rewards parameter must "
+            f"be zero, which removes the limit, or a positive count, but got "
+            f"{descriptor.maximum_unconsumed_rewards}."
+        )
+        console.error(message=message, error=ValueError)
 
     # Initializes the timer to enforce experiment state durations.
     runtime_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
@@ -1398,6 +1435,18 @@ def maintenance_logic() -> None:
 
             # Enters the main control loop, relinquishing control to the maintenance GUI.
             while not ui.exit_signal:
+                # The exit signal is the only way out of this loop, and only the GUI process sets it, so a GUI
+                # process that dies without setting it, for example due to a Qt initialization failure, leaves the
+                # valve or the brake actuated with no window to release them. The signal is re-read here because the
+                # GUI sets it immediately before exiting.
+                if not ui.is_alive and not ui.exit_signal:
+                    message = (
+                        "Unable to continue the Mesoscope-VR maintenance runtime. The maintenance GUI process "
+                        "terminated without requesting the runtime shutdown, leaving the runtime without a way to "
+                        "control the managed hardware."
+                    )
+                    console.error(message=message, error=RuntimeError)
+
                 # Opens the valve.
                 if ui.valve_open_signal:
                     valve.set_state(state=True)
@@ -1438,37 +1487,53 @@ def maintenance_logic() -> None:
             message = "Terminating Mesoscope-VR maintenance runtime..."
             console.echo(message=message, level=LogLevel.INFO)
 
-            # If Zaber motors were used and are still connected, moves them to the park position.
+            # Tears down the runtime in a fixed order, isolating each step so that an asset error or a repeated
+            # KeyboardInterrupt during cleanup cannot skip the remaining steps and leave the valve open or the brake
+            # actuated.
+
+            # If Zaber motors were used and are still connected, moves them to the park position. The operator prompt
+            # is isolated together with the movement it gates, so an interrupt at the prompt leaves the motors in place
+            # until the operator clears the cage.
             if move_zaber_motors and zaber_motors is not None and zaber_motors.is_connected:
-                message = (
-                    "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, "
-                    "such as water collection flasks, from the Mesoscope-VR cage."
+                motors = zaber_motors
+                run_shutdown_step(
+                    description="parking the Zaber motors", step=lambda: _park_maintenance_motors(zaber_motors=motors)
                 )
-                console.echo(message=message, level=LogLevel.WARNING)
-
-                # Delays for 500 milliseconds to ensure the user reads the message before continuing.
-                RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
-
-                wait_for_enter(message="Press Enter to continue")
-                zaber_motors.park_position()
-                zaber_motors.disconnect()
+                run_shutdown_step(description="disconnecting from the Zaber motors", step=motors.disconnect)
 
             # Shuts down the actor microcontroller interface.
             if controller is not None:
-                controller.stop()
-                message = "Actor MicroController interface: Terminated."
-                console.echo(message=message, level=LogLevel.SUCCESS)
+                # Reports the success from inside the isolated step, so a failed teardown is not followed by a line
+                # claiming the interface terminated cleanly.
+                run_shutdown_step(
+                    description="stopping the Actor MicroController interface",
+                    step=partial(_stop_actor_controller, controller=controller),
+                )
 
             # Stops the data logger.
             if logger is not None:
-                logger.stop()
+                run_shutdown_step(description="stopping the data logger", step=logger.stop)
 
             # Shuts down the UI.
             if ui is not None:
-                ui.shutdown()
+                run_shutdown_step(description="shutting down the maintenance GUI", step=ui.shutdown)
 
             message = "Mesoscope-VR system maintenance runtime: Terminated."
             console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def _stop_actor_controller(controller: MicroControllerInterface) -> None:
+    """Stops the Actor MicroController interface and reports the successful teardown.
+
+    Notes:
+        The success report lives inside this helper so that the isolated shutdown step which runs it cannot report a
+        clean teardown for a stop that raised.
+
+    Args:
+        controller: The Actor MicroController interface to stop.
+    """
+    controller.stop()
+    console.echo(message="Actor MicroController interface: Terminated.", level=LogLevel.SUCCESS)
 
 
 def _verify_project_configured(
@@ -1534,3 +1599,23 @@ def _verify_animal_project_membership(
             f"migrate' CLI command to transfer the animal to the desired project."
         )
         console.error(message=message, error=ValueError)
+
+
+def _park_maintenance_motors(zaber_motors: ZaberMotors) -> None:
+    """Prompts the operator to clear the Mesoscope-VR cage and moves the managed Zaber motors to their parking
+    positions.
+
+    Args:
+        zaber_motors: The ZaberMotors instance that manages the motors used during the maintenance runtime.
+    """
+    message = (
+        "Preparing to reset all Zaber motors. Remove all objects used during Mesoscope-VR maintenance, such as water "
+        "collection flasks, from the Mesoscope-VR cage."
+    )
+    console.echo(message=message, level=LogLevel.WARNING)
+
+    # Delays to ensure the user reads the message before continuing.
+    RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
+
+    wait_for_enter(message="Press Enter to continue")
+    zaber_motors.park_position()

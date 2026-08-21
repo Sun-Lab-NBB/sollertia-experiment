@@ -115,11 +115,6 @@ class EncoderInterface(ModuleInterface):
 
         self._monitoring: bool = False
 
-    def __del__(self) -> None:
-        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
-        self._distance_tracker.disconnect()
-        self._distance_tracker.destroy()
-
     def initialize_local_assets(self) -> None:
         """Connects to the instance's shared memory buffer in the main runtime process."""
         self._distance_tracker.connect()
@@ -285,11 +280,6 @@ class LickInterface(ModuleInterface):
         self._check_state: np.uint8 = np.uint8(1)
 
         self._monitoring: bool = False
-
-    def __del__(self) -> None:
-        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
-        self._lick_tracker.disconnect()
-        self._lick_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
         """Connects to the instance's shared memory buffer in the main runtime process."""
@@ -543,11 +533,6 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
 
         self._monitoring: bool = False
 
-    def __del__(self) -> None:
-        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
-        self._pulse_tracker.disconnect()
-        self._pulse_tracker.destroy()
-
     def initialize_local_assets(self) -> None:
         """Connects to the instance's shared memory buffer in the main runtime process."""
         self._pulse_tracker.connect()
@@ -743,9 +728,8 @@ class WaterValveInterface(ModuleInterface):
             microcontroller.
         _configured_valve_state: Tracks the current state of the valve (Open or Closed) set through this interface
             instance.
-        _previous_volume: Tracks the volume of water the valve was instructed to dispense during the previous reward
-            delivery.
-        _previous_tone_duration: Tracks the tone duration used during the previous reward delivery or simulation.
+        _transmitted_parameters: The pulse duration, calibration count, and tone duration triple last transmitted to
+            the module, or None before the first transmission.
         _cycle_timer: A PrecisionTimer instance that tracks how long the valve stays open during reward delivery.
     """
 
@@ -806,17 +790,11 @@ class WaterValveInterface(ModuleInterface):
         self._previous_module_state: bool = False
         # Reflects what this interface last commanded the module to do.
         self._configured_valve_state: bool = False
-        # The 0.0 initial value is a deliberate sentinel: it is below the valve's dispensable minimum, so it can never
-        # match a real commanded volume. This forces the first deliver_reward() to re-send the valve parameters and
-        # actually configure the firmware. Do not initialize this to a valid volume (see simulate_reward()).
-        self._previous_volume: float = 0.0
-        self._previous_tone_duration: int = 0
+        # Mirrors the parameter structure the firmware currently holds. Every method that rewrites that structure
+        # records the transmitted triple here, so a command issued by one method invalidates the values the other
+        # methods assume. The None start forces the first transmission to reach the firmware.
+        self._transmitted_parameters: tuple[np.uint32, np.uint16, np.uint32] | None = None
         self._cycle_timer: PrecisionTimer | None = None
-
-    def __del__(self) -> None:
-        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
-        self._valve_tracker.disconnect()
-        self._valve_tracker.destroy()
 
     def initialize_local_assets(self) -> None:
         """Connects to the instance's shared memory buffer in the main runtime process."""
@@ -898,34 +876,35 @@ class WaterValveInterface(ModuleInterface):
         Raises:
             ValueError: If the requested volume is too small to be reliably dispensed by the valve.
         """
-        # This ensures the valve settings are only updated when volume, tone_duration, or both changed compared to
-        # the previous command runtime, reducing communication overhead.
-        if volume != self._previous_volume or tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_volume = volume
-            self._previous_tone_duration = tone_duration
+        pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
+        tone_duration_us: np.uint32 = np.uint32(
+            round(convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND))
+        )
 
-            tone_duration_us: np.uint32 = np.uint32(
-                round(
-                    convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
-                )
+        # Matches the transmitted tone duration to the duration the firmware actually sounds, so the logged parameter
+        # records the delivered tone rather than the requested one.
+        tone_extended: bool = bool(0 < tone_duration_us < pulse_duration)
+        if tone_extended:
+            tone_duration_us = pulse_duration
+
+        # Reports the override on every reward that carries it, rather than only on the rewards that reach the
+        # transmission below, so the operator is not left believing a shortened tone was delivered as requested.
+        if tone_extended:
+            message = (
+                f"The requested reward tone duration of {tone_duration} ms for ValveModule "
+                f"{int(self._module_id)} is shorter than the {int(pulse_duration) / 1000:.1f} ms valve pulse it "
+                f"accompanies. Extending the tone to match the pulse."
             )
-            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=volume)
+            console.echo(message=message, level=LogLevel.WARNING)
 
-            # Matches the transmitted tone duration to the duration the firmware actually sounds, so the logged
-            # parameter records the delivered tone rather than the requested one.
-            if 0 < tone_duration_us < pulse_duration:
-                message = (
-                    f"The requested reward tone duration of {tone_duration} ms for ValveModule "
-                    f"{int(self._module_id)} is shorter than the {int(pulse_duration) / 1000:.1f} ms valve pulse it "
-                    f"accompanies. Extending the tone to match the pulse."
-                )
-                console.echo(message=message, level=LogLevel.WARNING)
-                tone_duration_us = pulse_duration
-
-            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration_us))
+        # Transmitting a triple the firmware already holds costs a serial message that changes nothing, so the
+        # transmission is skipped while the values match.
+        if self._transmitted_parameters != (pulse_duration, self._calibration_count, tone_duration_us):
+            self._transmit_parameters(pulse_duration=pulse_duration, tone_duration_us=tone_duration_us)
 
         self.send_command(command=self._reward, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The pulse command returns the valve to the closed state, so the commanded state tracks that transition.
+        self._configured_valve_state = False
 
     def simulate_reward(self, tone_duration: int = 300) -> None:
         """Simulates delivering water reward by emitting an audible 'reward' tone without opening the valve.
@@ -939,30 +918,27 @@ class WaterValveInterface(ModuleInterface):
                 reward delivery.
 
         Raises:
-            ValueError: If the previously delivered volume is too small to be reliably dispensed by the valve.
+            ValueError: If the fallback reference volume is too small to be reliably dispensed by the valve.
         """
         if tone_duration == 0:
             return
 
-        # This ensures the valve settings are only updated when tone_duration changed compared to the previous
-        # command runtime, reducing communication overhead.
-        if tone_duration != self._previous_tone_duration:
-            # Parameters are cached here to use the tone_duration before it is converted to microseconds.
-            self._previous_tone_duration = tone_duration
+        # Reuses the pulse duration the firmware already holds to keep the simulated reward consistent with a real one.
+        # Before the first transmission there is nothing to reuse, so the default reward volume supplies the duration.
+        # The valve stays closed throughout a simulated reward, so the duration only has to be one the firmware accepts.
+        pulse_duration: np.uint32 = (
+            self._transmitted_parameters[0]
+            if self._transmitted_parameters is not None
+            else self.get_duration_from_volume(target_volume=5.0)
+        )
+        tone_duration_us: np.uint32 = np.uint32(
+            round(convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND))
+        )
 
-            # Reuses the last commanded reward volume to keep the valve pulse duration consistent with real rewards.
-            # Before the first deliver_reward(), _previous_volume is still the 0.0 sentinel, which is below the
-            # dispensable minimum; falls back to the default reward volume so get_duration_from_volume does not reject
-            # it. The valve never opens during a simulated reward, so the exact pulse duration is immaterial, and the
-            # sentinel is left unchanged so the next deliver_reward() still re-sends the valve parameters.
-            reference_volume = self._previous_volume if self._previous_volume > 0.0 else 5.0
-            pulse_duration: np.uint32 = self.get_duration_from_volume(target_volume=reference_volume)
-            tone_duration_us: np.uint32 = np.uint32(
-                round(
-                    convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND)
-                )
-            )
-            self.send_parameters(parameter_data=(pulse_duration, self._calibration_count, tone_duration_us))
+        # Transmitting a triple the firmware already holds costs a serial message that changes nothing, so the
+        # transmission is skipped while the values match.
+        if self._transmitted_parameters != (pulse_duration, self._calibration_count, tone_duration_us):
+            self._transmit_parameters(pulse_duration=pulse_duration, tone_duration_us=tone_duration_us)
 
         self.send_command(command=self._tone, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
 
@@ -974,10 +950,12 @@ class WaterValveInterface(ModuleInterface):
             A well-calibrated valve is expected to deliver 1.0 milliliter of water during this procedure.
         """
         # Always uses the same configuration: 5.0 uL and 200 pulses.
-        self.send_parameters(
-            parameter_data=(self.get_duration_from_volume(target_volume=5.0), self._calibration_count, _ZERO_UINT32)
+        self._transmit_parameters(
+            pulse_duration=self.get_duration_from_volume(target_volume=5.0), tone_duration_us=_ZERO_UINT32
         )
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The referencing cycle returns the valve to the closed state, so the commanded state tracks that transition.
+        self._configured_valve_state = False
         # Indicates that the valve has entered the referencing cycle.
         self._valve_tracker[1] = 0
 
@@ -999,8 +977,10 @@ class WaterValveInterface(ModuleInterface):
             pulse_duration = _MAXIMUM_VALVE_PULSE_DURATION_MS
 
         # Converts the pulse duration to microseconds before updating the valve's parameters.
-        self.send_parameters(parameter_data=(np.uint32(pulse_duration * 1000), self._calibration_count, _ZERO_UINT32))
+        self._transmit_parameters(pulse_duration=np.uint32(pulse_duration * 1000), tone_duration_us=_ZERO_UINT32)
         self.send_command(command=self._calibrate, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The calibration cycle returns the valve to the closed state, so the commanded state tracks that transition.
+        self._configured_valve_state = False
         # Indicates that the valve has entered the calibration cycle.
         self._valve_tracker[1] = 0
 
@@ -1067,6 +1047,21 @@ class WaterValveInterface(ModuleInterface):
         otherwise.
         """
         return bool(self._valve_tracker[1] == 0)
+
+    def _transmit_parameters(self, pulse_duration: np.uint32, tone_duration_us: np.uint32) -> None:
+        """Sends the valve's parameter structure to the microcontroller and records the transmitted values.
+
+        Notes:
+            Every command that rewrites the module's parameter structure transmits it through this method, so the
+            recorded triple always describes the values the firmware holds.
+
+        Args:
+            pulse_duration: The duration, in microseconds, to keep the valve open during each pulse.
+            tone_duration_us: The duration, in microseconds, of the tone emitted alongside each pulse.
+        """
+        parameters = (pulse_duration, self._calibration_count, tone_duration_us)
+        self.send_parameters(parameter_data=parameters)
+        self._transmitted_parameters = parameters
 
 
 class ScreenInterface(ModuleInterface):
@@ -1184,11 +1179,6 @@ class GasPuffValveInterface(ModuleInterface):
             exists_ok=True,
         )
 
-    def __del__(self) -> None:
-        """Ensures the instance's shared memory buffer is properly cleaned up when the instance is garbage-collected."""
-        self._puff_tracker.disconnect()
-        self._puff_tracker.destroy()
-
     def initialize_local_assets(self) -> None:
         """Connects to the instance's shared memory buffer in the main runtime process."""
         self._puff_tracker.connect()
@@ -1255,8 +1245,10 @@ class GasPuffValveInterface(ModuleInterface):
             # Sends pulse_duration with placeholder calibration_count and tone_duration values (both unused here).
             self.send_parameters(parameter_data=(duration_us, np.uint16(1), _ZERO_UINT32))
 
-        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
         # Increments the puff count in process_received_data when a valve_closed event is received.
+        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The pulse command returns the valve to the closed state, so the commanded state tracks that transition.
+        self._configured_state = False
 
     @property
     def puff_count(self) -> int:

@@ -83,10 +83,10 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
     # logged message, so a full listing holds one path per acquisition message of the entire session.
     unarchived_entry = next(log_directory.glob("*.npy"), None)
 
-    if unarchived_entry is None:
+    if unarchived_entry is None and not archives:
         return
 
-    if archives:
+    if unarchived_entry is not None and archives:
         message = (
             f"The temporary log directory for the session {session_data.session_name} contains both unprocessed .npy "
             f"log files and processed .npz archives. Since log archiving overwrites existing .npz archives, it is "
@@ -95,17 +95,20 @@ def assemble_session_logs(session_data: SessionData, processes: int) -> None:
         )
         console.error(message=message, error=RuntimeError)
 
-    assemble_log_archives(
-        log_directory=log_directory,
-        remove_sources=True,
-        memory_mapping=False,
-        verbose=True,
-        verify_integrity=False,
-        max_workers=processes,
-    )
+    # A run interrupted between archiving and the rename leaves the log directory holding archives alone. Skipping
+    # the archiving step in that case allows the rename below to complete the interrupted run.
+    if unarchived_entry is not None:
+        assemble_log_archives(
+            log_directory=log_directory,
+            remove_sources=True,
+            memory_mapping=False,
+            verbose=True,
+            verify_integrity=False,
+            max_workers=processes,
+        )
 
-    # Renames the processed directory to behavior_data. Since behavior_data might already exist due to SessionData
-    # directory generation, removes any existing behavior_data directories before renaming the log directory.
+    # Renames the processed directory to behavior_data. Path.rename() fails when the target directory already exists,
+    # so any behavior_data directory left behind by an interrupted preprocessing run is removed first.
     behavior_data_path = session_data.raw_data.behavior_data_path
 
     if behavior_data_path.exists():

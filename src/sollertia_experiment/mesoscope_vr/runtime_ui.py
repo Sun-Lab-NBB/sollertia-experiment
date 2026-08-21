@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -107,15 +108,15 @@ class _DataArrayIndex(IntEnum):
 class _WaterValveTrackerIndex(IntEnum):
     """Defines the indices of the water delivery valve tracker SharedMemoryArray managed by the WaterValveInterface."""
 
-    OPEN_STATE = 2
-    """Stores the valve open/close state (0 - closed, 1 - open)."""
+    TOTAL_VOLUME = 0
+    """Stores the cumulative volume of water dispensed by the valve during runtime."""
 
 
 class _GasPuffTrackerIndex(IntEnum):
     """Defines the indices of the gas puff valve tracker SharedMemoryArray managed by the GasPuffValveInterface."""
 
-    OPEN_STATE = 1
-    """Stores the valve open/close state (0 - closed, 1 - open)."""
+    TOTAL_PUFFS = 0
+    """Stores the cumulative number of gas puffs delivered by the valve during runtime."""
 
 
 class RuntimeControlUI:
@@ -325,27 +326,27 @@ class RuntimeControlUI:
     @property
     def exit_signal(self) -> bool:
         """Returns True if the user has requested the system to abort the data acquisition session's runtime."""
-        exit_flag = bool(self._data_array[_DataArrayIndex.EXIT_SIGNAL])
-        # Clears the slot only when it carried a request. The runtime reads this property on every cycle, and each
-        # write takes the shared array's cross-process lock, so an unconditional clear pays that lock for nothing.
-        if exit_flag:
-            self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 0
+        # Holds the array's lock across the read and the clear, so the clear cannot discard a request the GUI writes
+        # after the read. Each subscript operation takes and releases the lock on its own.
+        with self._data_array.array() as data:
+            exit_flag = bool(data[_DataArrayIndex.EXIT_SIGNAL])
+            data[_DataArrayIndex.EXIT_SIGNAL] = 0
         return exit_flag
 
     @property
     def reward_signal(self) -> bool:
         """Returns True if the user has requested the system to deliver a water reward."""
-        reward_flag = bool(self._data_array[_DataArrayIndex.REWARD_SIGNAL])
-        if reward_flag:
-            self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 0
+        with self._data_array.array() as data:
+            reward_flag = bool(data[_DataArrayIndex.REWARD_SIGNAL])
+            data[_DataArrayIndex.REWARD_SIGNAL] = 0
         return reward_flag
 
     @property
     def generate_reference_signal(self) -> bool:
         """Returns True if the user has requested the system to regenerate the Mesoscope reference."""
-        signal = bool(self._data_array[_DataArrayIndex.GENERATE_REFERENCE])
-        if signal:
-            self._data_array[_DataArrayIndex.GENERATE_REFERENCE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GENERATE_REFERENCE])
+            data[_DataArrayIndex.GENERATE_REFERENCE] = 0
         return signal
 
     @property
@@ -382,15 +383,17 @@ class RuntimeControlUI:
     @property
     def open_valve(self) -> bool:
         """Returns True if the user has requested the system to open the water delivery valve."""
-        open_flag = bool(self._data_array[_DataArrayIndex.OPEN_VALVE])
-        self._data_array[_DataArrayIndex.OPEN_VALVE] = 0
+        with self._data_array.array() as data:
+            open_flag = bool(data[_DataArrayIndex.OPEN_VALVE])
+            data[_DataArrayIndex.OPEN_VALVE] = 0
         return open_flag
 
     @property
     def close_valve(self) -> bool:
         """Returns True if the user has requested the system to close the water delivery valve."""
-        close_flag = bool(self._data_array[_DataArrayIndex.CLOSE_VALVE])
-        self._data_array[_DataArrayIndex.CLOSE_VALVE] = 0
+        with self._data_array.array() as data:
+            close_flag = bool(data[_DataArrayIndex.CLOSE_VALVE])
+            data[_DataArrayIndex.CLOSE_VALVE] = 0
         return close_flag
 
     @property
@@ -411,23 +414,25 @@ class RuntimeControlUI:
     @property
     def gas_valve_open_signal(self) -> bool:
         """Returns True if the user has requested to open the gas puff valve."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_OPEN])
-        self._data_array[_DataArrayIndex.GAS_VALVE_OPEN] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_OPEN])
+            data[_DataArrayIndex.GAS_VALVE_OPEN] = 0
         return signal
 
     @property
     def gas_valve_close_signal(self) -> bool:
         """Returns True if the user has requested to close the gas puff valve."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE])
-        self._data_array[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_CLOSE])
+            data[_DataArrayIndex.GAS_VALVE_CLOSE] = 0
         return signal
 
     @property
     def gas_valve_puff_signal(self) -> bool:
         """Returns True if the user has requested to deliver a gas puff."""
-        signal = bool(self._data_array[_DataArrayIndex.GAS_VALVE_PUFF])
-        if signal:
-            self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 0
+        with self._data_array.array() as data:
+            signal = bool(data[_DataArrayIndex.GAS_VALVE_PUFF])
+            data[_DataArrayIndex.GAS_VALVE_PUFF] = 0
         return signal
 
     @property
@@ -624,6 +629,8 @@ class _ControlUIWindow(QMainWindow):
         _has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference regeneration
             button.
         _is_paused: Tracks whether the runtime is paused.
+        _close_confirmed: Tracks whether the pending window close was decided by the runtime or by the monitoring
+            cycle, which bypasses the operator confirmation prompt.
         _setup_complete: Tracks whether the initial setup phase is complete. Once True, valve open/close buttons
             are permanently disabled.
         _reference_generation_enabled: Tracks whether the reference regeneration button is currently enabled, so the
@@ -631,7 +638,11 @@ class _ControlUIWindow(QMainWindow):
         _reinforcing_guidance_enabled: Tracks whether reinforcing trial guidance is enabled.
         _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
         _reward_in_progress: Tracks whether a reward delivery is in progress.
+        _reward_baseline_volume: The cumulative dispensed water volume recorded when the current reward delivery was
+            requested, against which its completion is detected.
         _puff_in_progress: Tracks whether a gas puff delivery is in progress.
+        _puff_baseline_count: The cumulative delivered gas puff count recorded when the current gas puff delivery was
+            requested, against which its completion is detected.
         _last_auto_speed: Tracks the most recently displayed runtime-driven running speed threshold, in hundredths of
             a centimeter per second, so the speed spinbox is refreshed only when the automatic component changes.
         _last_auto_duration: Tracks the most recently displayed runtime-driven running epoch duration threshold, in
@@ -690,13 +701,16 @@ class _ControlUIWindow(QMainWindow):
         self._has_mesoscope: bool = has_mesoscope
 
         self._is_paused: bool = True
+        self._close_confirmed: bool = False
         self._setup_complete: bool = False
         self._reference_generation_enabled: bool = True
         self._reinforcing_guidance_enabled: bool = False
         self._aversive_guidance_enabled: bool = False
 
         self._reward_in_progress: bool = False
+        self._reward_baseline_volume: float = 0.0
         self._puff_in_progress: bool = False
+        self._puff_baseline_count: int = 0
 
         # Initializes the runtime-driven threshold trackers to a sentinel so the first monitoring cycle always
         # synchronizes the run training spinboxes with the runtime state.
@@ -730,11 +744,30 @@ class _ControlUIWindow(QMainWindow):
         Args:
             event: The Qt-generated window shutdown event instance.
         """
-        # Sends a runtime termination signal via the SharedMemoryArray before accepting the close event.
-        with contextlib.suppress(Exception):
-            self._data_array[_DataArrayIndex.TERMINATION] = 1
+        # A close the runtime itself drives carries no prompt, as the decision is already made.
+        if self._close_confirmed:
+            if event is not None:
+                event.accept()
+            return
+
+        # Closing the window aborts the runtime, so an operator-initiated close is confirmed first. An accidental
+        # click on the window close control, or an Escape keypress, would otherwise abort the session outright.
+        confirmation = QMessageBox.question(
+            self,
+            "Abort Runtime",
+            "Closing this window aborts the data acquisition runtime. Abort the runtime?",
+            buttons=QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            defaultButton=QMessageBox.StandardButton.No,
+        )
+        if confirmation == QMessageBox.StandardButton.Yes:
+            with contextlib.suppress(Exception):
+                self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 1
+
+        # The window stays open in both cases. The runtime confirms the abort in the terminal and closes this window
+        # itself once the shutdown completes, so tearing the window down here would strand those prompts behind a
+        # dead GUI.
         if event is not None:
-            event.accept()
+            event.ignore()
 
     def _setup_ui(self) -> None:
         """Creates and arranges all UI elements."""
@@ -1450,6 +1483,7 @@ class _ControlUIWindow(QMainWindow):
         """
         try:
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
+                self._close_confirmed = True
                 self.close()
 
             # Checks for external pause state changes and, if necessary, updates the GUI to reflect the current
@@ -1504,30 +1538,37 @@ class _ControlUIWindow(QMainWindow):
                 divisor=float(_DURATION_THRESHOLD_SCALE),
             )
 
-            # Reads the open/close state from each tracker (0 - closed, 1 - open).
-            water_valve_state = int(self._valve_tracker[_WaterValveTrackerIndex.OPEN_STATE])
-            gas_valve_state = int(self._gas_puff_tracker[_GasPuffTrackerIndex.OPEN_STATE])
+            # Reads the monotonic delivery totals the completion checks below compare against their pre-request
+            # baselines.
+            dispensed_volume = float(self._valve_tracker[_WaterValveTrackerIndex.TOTAL_VOLUME])
+            delivered_puffs = int(self._gas_puff_tracker[_GasPuffTrackerIndex.TOTAL_PUFFS])
 
-            # Detects when water valve closes (state transitions to closed while reward was in progress).
-            if self._reward_in_progress and water_valve_state == 0:
+            # Detects when the water valve closes after a reward delivery by watching the cumulative dispensed volume
+            # rather than the live open state. The interface increments that total once per completed reward, so a
+            # reward pulse shorter than the polling interval cannot slip between two polls the way the open state can.
+            if self._reward_in_progress and dispensed_volume > self._reward_baseline_volume:
                 self._reward_in_progress = False
                 self._valve_status_label.setText("Valve: 🔒 Closed")
                 self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
-            # Detects when gas puff delivery completes (state transitions to closed while puff was in progress).
-            # Only updates if aversive trials are enabled (gas_valve_status_label exists).
-            if self._puff_in_progress and gas_valve_state == 0 and self._gas_valve_status_label is not None:
+            # Detects when the gas puff valve closes after a puff delivery, using the cumulative puff count for the
+            # same reason the reward uses the cumulative volume. Only updates when aversive trials are enabled, since
+            # the gas valve status label exists only then.
+            if (
+                self._puff_in_progress
+                and self._gas_valve_status_label is not None
+                and delivered_puffs > self._puff_baseline_count
+            ):
                 self._puff_in_progress = False
                 self._gas_valve_status_label.setText("Valve: 🔒 Closed")
                 self._gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
 
         except Exception:
+            self._close_confirmed = True
             self.close()
 
     def _exit_runtime(self) -> None:
         """Instructs the system to terminate the runtime."""
-        previous_status = self._runtime_status_label.text()
-        style = self._runtime_status_label.styleSheet()
         self._data_array[_DataArrayIndex.EXIT_SIGNAL] = 1
         self._runtime_status_label.setText("✖ Exit signal sent")
         self._runtime_status_label.setStyleSheet("QLabel { color: #e74c3c; font-weight: bold; }")
@@ -1540,13 +1581,14 @@ class _ControlUIWindow(QMainWindow):
         QTimer.singleShot(_EXIT_FEEDBACK_DELAY_MS, lambda: self._exit_button.setStyleSheet(exit_button_style))
         QTimer.singleShot(_EXIT_FEEDBACK_DELAY_MS, lambda: self._exit_button.setEnabled(True))
 
-        # Restores the status back to the previous state.
-        QTimer.singleShot(_EXIT_FEEDBACK_DELAY_MS, lambda: self._runtime_status_label.setText(previous_status))
-        QTimer.singleShot(_EXIT_FEEDBACK_DELAY_MS, lambda: self._runtime_status_label.setStyleSheet(style))
+        # Rebuilds the status label from the pause state in effect at restore time, so a pause or resume that lands
+        # inside the feedback window survives the restore.
+        QTimer.singleShot(_EXIT_FEEDBACK_DELAY_MS, self._update_pause_ui)
 
     def _deliver_reward(self) -> None:
         """Instructs the system to deliver a water reward to the animal."""
         self._data_array[_DataArrayIndex.REWARD_SIGNAL] = 1
+        self._reward_baseline_volume = float(self._valve_tracker[_WaterValveTrackerIndex.TOTAL_VOLUME])
         self._reward_in_progress = True
         self._valve_status_label.setText("Valve: 💧 Delivering")
         self._valve_status_label.setStyleSheet("QLabel { color: #3498db; font-weight: bold; }")
@@ -1734,6 +1776,7 @@ class _ControlUIWindow(QMainWindow):
     def _gas_valve_puff(self) -> None:
         """Instructs the system to deliver a gas puff."""
         self._data_array[_DataArrayIndex.GAS_VALVE_PUFF] = 1
+        self._puff_baseline_count = int(self._gas_puff_tracker[_GasPuffTrackerIndex.TOTAL_PUFFS])
         self._puff_in_progress = True
         if self._gas_valve_status_label is not None:
             self._gas_valve_status_label.setText("Valve: 💨 Puffing")

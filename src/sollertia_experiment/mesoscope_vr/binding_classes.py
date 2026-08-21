@@ -22,6 +22,7 @@ from ..cross_system import (
     WaterValveInterface,
     GasPuffValveInterface,
     MesoscopeFrameTTLInterface,
+    run_shutdown_step,
 )
 
 if TYPE_CHECKING:
@@ -554,12 +555,16 @@ class MicroControllerInterfaces:
         message = "Terminating Ataraxis Micro Controller (AMC) Interfaces..."
         console.echo(message=message, level=LogLevel.INFO)
 
-        self._started = False
+        # Stops all microcontroller interfaces. This also shuts down and resets all managed hardware modules. Each
+        # controller is isolated, so a failing teardown does not strand the communication processes of the controllers
+        # that follow it past the data logger they write to.
+        run_shutdown_step(description="stopping the actor microcontroller", step=self._actor.stop)
+        run_shutdown_step(description="stopping the sensor microcontroller", step=self._sensor.stop)
+        run_shutdown_step(description="stopping the encoder microcontroller", step=self._encoder.stop)
 
-        # Stops all microcontroller interfaces. This also shuts down and resets all managed hardware modules.
-        self._actor.stop()
-        self._sensor.stop()
-        self._encoder.stop()
+        # Clears the flag only once every controller has been torn down, so that a failure severe enough to escape the
+        # isolated steps above leaves the instance stoppable on a retry.
+        self._started = False
 
         message = "Ataraxis Micro Controller (AMC) Interfaces: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -714,10 +719,16 @@ class VideoSystems:
         message = "Stopping camera frame acquisition and saving..."
         console.echo(message=message, level=LogLevel.INFO)
 
+        # Isolates each camera, as the two systems own independent subprocess sets and encoders. A failure while tearing
+        # one of them down would otherwise orphan the other camera's processes and leave its .mp4 file unfinalized.
         if self._face_camera_started:
-            self._face_camera.stop_frame_saving()
+            run_shutdown_step(
+                description="disabling face camera frame saving", step=self._face_camera.stop_frame_saving
+            )
         if self._body_camera_started:
-            self._body_camera.stop_frame_saving()
+            run_shutdown_step(
+                description="disabling body camera frame saving", step=self._body_camera.stop_frame_saving
+            )
 
         message = "Camera frame saving: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)
@@ -728,11 +739,12 @@ class VideoSystems:
         drain_timer = PrecisionTimer(precision=TimerPrecisions.SECOND)
         drain_timer.delay(delay=_CAMERA_DRAIN_DELAY_S, allow_sleep=True, block=False)
 
-        self._face_camera.stop()
-        self._body_camera.stop()
-
-        self._face_camera_started = False
-        self._body_camera_started = False
+        if self._face_camera_started:
+            run_shutdown_step(description="stopping the face camera", step=self._face_camera.stop)
+            self._face_camera_started = False
+        if self._body_camera_started:
+            run_shutdown_step(description="stopping the body camera", step=self._body_camera.stop)
+            self._body_camera_started = False
 
         message = "Camera frame acquisition: Stopped."
         console.echo(message=message, level=LogLevel.SUCCESS)
