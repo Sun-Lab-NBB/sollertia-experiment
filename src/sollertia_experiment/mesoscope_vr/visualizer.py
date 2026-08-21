@@ -67,7 +67,7 @@ _TRIAL_OUTCOME_SUCCESS: np.int8 = np.int8(1)
 _TRIAL_OUTCOME_GUIDED: np.int8 = np.int8(2)
 """The trial-outcome code for a trial completed via the guidance fallback."""
 
-_SPEED_AXIS_YLIM: tuple[float, float] = (-5.0, 105.0)
+_SPEED_AXIS_YLIM: tuple[float, float] = (-2.0, 42.0)
 """The lower and upper Y-axis bounds, in centimeter per second, for the running speed plot."""
 _BINARY_AXIS_YLIM: tuple[float, float] = (-0.05, 1.05)
 """The lower and upper Y-axis bounds for the binary state plots (lick, valve, and air puff)."""
