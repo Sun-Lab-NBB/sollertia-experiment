@@ -8,6 +8,7 @@ hardware-agnostic discovery commands are exposed separately via the 'sle get' co
 """
 
 from pathlib import Path
+from dataclasses import dataclass
 
 import click
 from ataraxis_base_utilities import LogLevel, console
@@ -30,6 +31,73 @@ from ..mesoscope_vr import (
 
 CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
+
+
+@dataclass(frozen=True, slots=True)
+class _SharedSessionParameters:
+    """Bundles the options parsed on the 'run' group and shared across its 'window-checking', 'lick-training',
+    'run-training', and 'experiment' subcommands.
+
+    The group callback builds one of these from its options and stores it on the Click context, and each subcommand
+    reads it back through the _pass_shared_parameters decorator. Each subcommand requires only the options its session
+    consumes, so the 'window-checking' subcommand runs without the animal weight its session does not record.
+    """
+
+    user: str | None
+    """The ID of the user supervising the session."""
+
+    project: str | None
+    """The name of the project to which the animal belongs."""
+
+    animal: str | None
+    """The ID of the animal undergoing the session."""
+
+    animal_weight: float | None
+    """The weight of the animal, in grams, at the beginning of the session."""
+
+    def require_user(self) -> str:
+        """Returns the supervising user's ID, raising a Click usage error when '--user' was not supplied."""
+        if self.user is None:
+            message = (
+                "Unable to resolve the user supervising the session for the 'run' command. The '-u' / '--user' option "
+                "must be supplied before the subcommand name, but it was omitted."
+            )
+            console.error(message=message, error=click.UsageError)
+        return self.user
+
+    def require_project(self) -> str:
+        """Returns the project name, raising a Click usage error when '--project' was not supplied."""
+        if self.project is None:
+            message = (
+                "Unable to resolve the project the animal belongs to for the 'run' command. The '-p' / '--project' "
+                "option must be supplied before the subcommand name, but it was omitted."
+            )
+            console.error(message=message, error=click.UsageError)
+        return self.project
+
+    def require_animal(self) -> str:
+        """Returns the animal's ID, raising a Click usage error when '--animal' was not supplied."""
+        if self.animal is None:
+            message = (
+                "Unable to resolve the animal undergoing the session for the 'run' command. The '-a' / '--animal' "
+                "option must be supplied before the subcommand name, but it was omitted."
+            )
+            console.error(message=message, error=click.UsageError)
+        return self.animal
+
+    def require_animal_weight(self) -> float:
+        """Returns the animal's weight, raising a Click usage error when '--animal-weight' was not supplied."""
+        if self.animal_weight is None:
+            message = (
+                "Unable to resolve the weight of the animal undergoing the session for the 'run' command. The '-w' / "
+                "'--animal-weight' option must be supplied before the subcommand name, but it was omitted."
+            )
+            console.error(message=message, error=click.UsageError)
+        return self.animal_weight
+
+
+_pass_shared_parameters = click.make_pass_decorator(_SharedSessionParameters)
+"""Injects the 'run' group's _SharedSessionParameters as the first argument of each of its subcommands."""
 
 
 @click.group("mesoscope", context_settings=CONTEXT_SETTINGS)
@@ -174,44 +242,49 @@ def check_bridge() -> None:
     "-u",
     "--user",
     type=str,
-    required=True,
+    default=None,
     help="The ID of the user supervising the session.",
 )
 @click.option(
     "-p",
     "--project",
     type=str,
-    required=True,
+    default=None,
     help="The name of the project to which the animal belongs.",
 )
 @click.option(
     "-a",
     "--animal",
     type=str,
-    required=True,
+    default=None,
     help="The ID of the animal undergoing the session.",
 )
 @click.option(
     "-w",
     "--animal-weight",
     type=float,
-    required=True,
+    default=None,
     help="The weight of the animal, in grams, at the beginning of the session.",
 )
 @click.pass_context
-def run(ctx: click.Context, user: str, project: str, animal: str, animal_weight: float) -> None:  # pragma: no cover
-    """Runs the specified data acquisition session for the target animal and project combination."""
-    # Stores common parameters in the context dictionary to be accessible from the subcommands.
-    ctx.ensure_object(dict)
-    ctx.obj["user"] = user
-    ctx.obj["project"] = project
-    ctx.obj["animal"] = animal
-    ctx.obj["animal_weight"] = animal_weight
+def run(
+    context: click.Context,
+    user: str | None,
+    project: str | None,
+    animal: str | None,
+    animal_weight: float | None,
+) -> None:  # pragma: no cover
+    """Runs the specified data acquisition session for the target animal and project combination.
+
+    The user, project, animal, and animal weight are parsed on this group and shared by every subcommand, so they must
+    be given before the subcommand name.
+    """
+    context.obj = _SharedSessionParameters(user=user, project=project, animal=animal, animal_weight=animal_weight)
 
 
 @run.command("window-checking")
-@click.pass_context
-def window_checking(ctx: click.Context) -> None:
+@_pass_shared_parameters
+def window_checking(shared: _SharedSessionParameters) -> None:
     """Runs the cranial window quality checking session.
 
     The primary purpose of the cranial window quality checking session is to ensure that the animal is suitable for
@@ -220,9 +293,9 @@ def window_checking(ctx: click.Context) -> None:
     to work for the target animal.
     """
     window_checking_logic(
-        experimenter=ctx.obj["user"],
-        project_name=ctx.obj["project"],
-        animal_id=ctx.obj["animal"],
+        experimenter=shared.require_user(),
+        project_name=shared.require_project(),
+        animal_id=shared.require_animal(),
     )
 
 
@@ -269,9 +342,9 @@ def window_checking(ctx: click.Context) -> None:
         "Defaults to 1."
     ),
 )
-@click.pass_context
+@_pass_shared_parameters
 def lick_training(
-    ctx: click.Context,
+    shared: _SharedSessionParameters,
     maximum_time: int | None,
     minimum_delay: int | None,
     maximum_delay: int | None,
@@ -285,10 +358,10 @@ def lick_training(
     operate the lick-port and associate licking at the port with water delivery.
     """
     lick_training_logic(
-        experimenter=ctx.obj["user"],
-        project_name=ctx.obj["project"],
-        animal_id=ctx.obj["animal"],
-        animal_weight=ctx.obj["animal_weight"],
+        experimenter=shared.require_user(),
+        project_name=shared.require_project(),
+        animal_id=shared.require_animal(),
+        animal_weight=shared.require_animal_weight(),
         minimum_reward_delay=minimum_delay,
         maximum_reward_delay=maximum_delay,
         maximum_water_volume=maximum_volume,
@@ -378,9 +451,9 @@ def lick_training(
         "Defaults to 1."
     ),
 )
-@click.pass_context
+@_pass_shared_parameters
 def run_training(
-    ctx: click.Context,
+    shared: _SharedSessionParameters,
     maximum_time: int | None,
     initial_speed: float | None,
     initial_duration: float | None,
@@ -400,10 +473,10 @@ def run_training(
     experiment sessions lasting ~60 minutes.
     """
     run_training_logic(
-        experimenter=ctx.obj["user"],
-        project_name=ctx.obj["project"],
-        animal_id=ctx.obj["animal"],
-        animal_weight=ctx.obj["animal_weight"],
+        experimenter=shared.require_user(),
+        project_name=shared.require_project(),
+        animal_id=shared.require_animal(),
+        animal_weight=shared.require_animal_weight(),
         initial_speed_threshold=initial_speed,
         initial_duration_threshold=initial_duration,
         speed_increase_step=speed_step,
@@ -436,8 +509,8 @@ def run_training(
         "Defaults to 1."
     ),
 )
-@click.pass_context
-def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int | None) -> None:
+@_pass_shared_parameters
+def run_experiment(shared: _SharedSessionParameters, experiment: str, unconsumed_rewards: int | None) -> None:
     """Runs the specified experiment session.
 
     Experiment runtimes are carried out after the lick and run training sessions. This command runs any experiment
@@ -445,11 +518,11 @@ def run_experiment(ctx: click.Context, experiment: str, unconsumed_rewards: int 
     configuration for the local data-acquisition system, use the 'sle mesoscope configure experiment' subcommand.
     """
     experiment_logic(
-        experimenter=ctx.obj["user"],
-        project_name=ctx.obj["project"],
+        experimenter=shared.require_user(),
+        project_name=shared.require_project(),
         experiment_name=experiment,
-        animal_id=ctx.obj["animal"],
-        animal_weight=ctx.obj["animal_weight"],
+        animal_id=shared.require_animal(),
+        animal_weight=shared.require_animal_weight(),
         maximum_unconsumed_rewards=unconsumed_rewards,
     )
 

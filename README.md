@@ -871,8 +871,9 @@ supported session types is unique to each system; commonly this includes an 'exp
 primary use case for most acquisition systems in the lab. Some systems may also support one or more training session
 types, which often do not acquire any brain activity data, but otherwise behave similarly to experiment sessions.
 
-All session commands require common parameters: user ID, project name, animal ID, and animal weight. These are provided
-to the parent `sle mesoscope run` command before specifying the session type.
+Session commands take common parameters: user ID, project name, animal ID, and animal weight. These are provided to the
+parent `sle mesoscope run` command before specifying the session type. Each session type requires only the parameters it
+records, so the window checking session runs without the animal weight.
 
 #### Mesoscope-VR Session Commands
 
@@ -880,7 +881,7 @@ The Mesoscope-VR system supports four types of runtime sessions:
 
 **1. Window Checking Session**
 
-`sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT window-checking`
+`sle mesoscope run -u USER -p PROJECT -a ANIMAL window-checking`
 
 This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
 zstack.tiff files for the checked animal. This session is typically used ~2–3 weeks after the surgical intervention and
