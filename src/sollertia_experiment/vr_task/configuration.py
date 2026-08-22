@@ -39,9 +39,8 @@ def load_vr_task_template(unity_scene_name: str) -> TaskTemplate:
         The TaskTemplate parsed from the matching YAML file.
 
     Raises:
-        FileNotFoundError: If the task templates directory has not been configured, if the previously configured task
-            templates directory no longer exists, or if the configured task templates directory does not contain a YAML
-            file whose stem matches the given Unity scene name.
+        FileNotFoundError: If the configured task templates directory is unset or missing on disk. The same error
+            is raised when that directory holds no YAML file whose stem matches the given Unity scene name.
     """
     templates_directory = get_task_templates_directory()
     template_path = templates_directory.joinpath(f"{unity_scene_name}.yaml")

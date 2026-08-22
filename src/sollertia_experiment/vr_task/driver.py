@@ -79,7 +79,8 @@ class VRTaskEventKind(IntEnum):
     TRIGGER_DELAY_REQUESTED = 2
     """Unity requested the acquisition system to apply a brake pulse for the specified duration."""
     UNITY_TERMINATED = 3
-    """Unity reported that its runtime has been terminated; the acquisition system must enter an emergency pause."""
+    """Unity reported that its runtime has been terminated, so the acquisition system must enter an emergency
+    pause."""
 
 
 class StimulusCause(StrEnum):
@@ -107,7 +108,7 @@ class VRTaskEvent:
     """The name of the trial that resolved. Populated only for the STIMULUS_TRIGGERED event."""
     delivered: bool = True
     """Determines whether the trial's physical stimulus was delivered. Populated only for the STIMULUS_TRIGGERED
-    event; defaults to True so payloads predating the field resolve as a delivery."""
+    event, and defaults to True so a payload that omits the field resolves as a delivery."""
     cause: StimulusCause = StimulusCause.BEHAVIOR
     """The cause of the trial outcome: the animal's behavior or the guidance fallback. Populated only for the
     STIMULUS_TRIGGERED event."""
@@ -163,9 +164,9 @@ class _VRTaskMQTTTopics(StrEnum):
     """Sensor-interaction event published by the acquisition runtime when the animal engages an interaction sensor
     (empty trigger payload). The Mesoscope-VR system resolves this generic event to the lick sensor."""
     STIMULUS = "Stimulus"
-    """Trial outcome event published by Unity when a stimulus trigger zone resolves a trial (StimulusMessage with
-    string trialName, bool delivered, and string cause reporting whether the physical stimulus fired and whether
-    the animal's behavior or the guidance fallback produced the outcome)."""
+    """Trial outcome event published by Unity when a stimulus trigger zone resolves a trial. The StimulusMessage
+    carries a string trialName, a bool delivered, and a string cause. Together they report whether the physical
+    stimulus fired and whether the animal's behavior or the guidance fallback produced the outcome."""
     DELAY = "Delay"
     """Brake activation request published by Unity carrying the remaining occupancy duration in milliseconds
     (TriggerDelayMessage with uint delayMilliseconds)."""
@@ -189,8 +190,8 @@ class VRTaskDriver:
 
     Encapsulates the MQTT contract with Unity: connection lifecycle, scene handshake, VR display verification, wall
     cue sequence retrieval, per-cycle stimulus pump, guidance toggling, and resume-after-Unity-restart. The driver
-    is hardware-agnostic; per-cycle Unity events are surfaced as typed VRTaskEvent values that the caller dispatches
-    to acquisition system hardware.
+    is hardware-agnostic, and per-cycle Unity events are surfaced as typed VRTaskEvent values that the caller
+    dispatches to acquisition system hardware.
 
     Args:
         configuration: The runtime configuration that defines the MQTT broker discovery fields.
@@ -291,10 +292,10 @@ class VRTaskDriver:
         """Carries out the Unity setup sequence used at the start of a session.
 
         Notes:
-            Requires the Unity Editor MCP Bridge to be reachable, opens the expected scene, arms Unity, verifies the
-            active scene matches the expected one, prompts the operator to verify the VR display, and requests the
-            wall cue sequence used by the task. Scene activation and Play Mode control are issued through the bridge;
-            the operator only confirms that the VR display renders correctly.
+            Requires the Unity Editor MCP Bridge to be reachable. The sequence opens the expected scene, arms Unity,
+            verifies the active scene matches the expected one, prompts the operator to verify the VR display, and
+            requests the wall cue sequence used by the task. Scene activation and Play Mode control are issued through
+            the bridge, and the operator only confirms that the VR display renders correctly.
 
             The caller must enable the VR screens before invoking this method and disable them once it returns, as
             the display verification stage relies on the screens rendering the active scene.
@@ -445,9 +446,9 @@ class VRTaskDriver:
         Notes:
             Persists any unsaved editor changes when switching scenes, then queries the actor's motion controller and
             rebinds it to the physical linear treadmill only when a different controller is bound. Skipping the write
-            when the scene already uses the linear treadmill avoids marking an otherwise clean scene dirty, while the
-            corrective write still prevents a scene left with the keyboard-driven simulated controller from
-            substituting simulated motion for the animal's treadmill motion during the experiment.
+            when the scene already uses the linear treadmill avoids marking an otherwise clean scene dirty. The
+            corrective write prevents a scene left with the keyboard-driven simulated controller from substituting
+            simulated motion for the animal's treadmill motion during the experiment.
 
         Raises:
             UnityBridgeError: If the expected scene cannot be resolved to a project scene path, the bridge refuses
@@ -534,10 +535,12 @@ class VRTaskDriver:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
 
         Notes:
-            Re-fetches the cue sequence from Unity, decomposes it into per-trial cumulative distances and stimulus
-            parameters, and resets the driver's tracked Unity position to the origin.
+            Re-fetches the cue sequence from Unity, decomposes it into per-trial cumulative distances and trial names,
+            and resets the driver's tracked Unity position to the origin.
 
         Raises:
+            ValueError: If the task template defines no trial structures, or if a run of two or more other trial cue
+                sequences reproduces the cue sequence of one trial exactly.
             RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
         """
         self._clear_buffer()

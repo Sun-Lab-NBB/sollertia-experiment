@@ -133,8 +133,8 @@ def decompose_cue_sequence(
         The DecomposedTrials instance with two aligned per-trial sequences: cumulative distances and trial names.
 
     Raises:
-        ValueError: If the task template defines no trial structures, or if the cue sequence of one trial is a prefix
-            of the cue sequence of another trial.
+        ValueError: If the task template defines no trial structures, or if a run of two or more other trial cue
+            sequences reproduces the cue sequence of one trial exactly.
         RuntimeError: If the decomposer cannot match any trial motif at some position in the cue sequence.
     """
     cue_name_to_code = {cue.name: int(cue.code) for cue in task_template.cues}
@@ -206,8 +206,8 @@ def _find_ambiguous_motif(trial_motifs: list[NDArray[np.uint8]]) -> int | None:
     """Finds a trial motif that a run of two or more other motifs reproduces exactly.
 
     Notes:
-        Such a motif makes the cue sequence genuinely ambiguous, because the same stretch of cues reads either as that
-        one trial or as the run that reproduces it, and the greedy longest-match decomposer resolves the ambiguity by
+        Such a motif makes the cue sequence genuinely ambiguous, because the same stretch of cues reads either as
+        that one trial or as the run that reproduces it. The greedy longest-match decomposer resolves the ambiguity by
         always taking the single longer trial. A motif that merely extends another one is left alone, since the
         decomposer still reads it correctly whenever the extension itself is unambiguous.
 

@@ -10,7 +10,7 @@ This ensures you:
 - Follow existing patterns and conventions
 - Don't introduce inconsistencies or break integrations
 
-## Style guide requirements
+## Style guide compliance
 
 You MUST invoke the appropriate `automation:*` style skill before performing ANY of the following tasks:
 
@@ -30,7 +30,7 @@ Failure to invoke the appropriate skill results in style violations.
 ## Cross-referenced library verification
 
 Sollertia platform projects often depend on other `ataraxis-*` or `sollertia-*` libraries. These libraries may be stored
-locally in the same parent directory as this project (`/home/cyberaxolotl/Desktop/GitHubRepos/`).
+locally in the same parent directory that holds this project's repository root.
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
 
@@ -91,6 +91,20 @@ Configuration below).
 | `mesoscope:mesoscope-vr`                      | Mesoscope-VR hardware inventory, configuration, and bindings         |
 | `mesoscope:mesoscope-vr-runtime`              | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
 | `mesoscope:mesoscope-vr-snapshots`            | Read/write per-session Zaber and Mesoscope position snapshots        |
+| `mesoscope:mesoscope-vr-session-schema`       | Mesoscope-VR session descriptor and hardware-state field schema      |
+| `mesoscope:mesoscope-vr-experiment-schema`    | Mesoscope-VR experiment configuration and trial-class field schema   |
+
+## MCP server
+
+The library ships one MCP server, started with `sle mcp` and selecting its transport through `-t/--transport`
+(`stdio` by default, `streamable-http` otherwise). It exposes the tools backing both CLI layers, with the
+hardware-agnostic tools in `interfaces/get_tools.py` and the Mesoscope-VR tools in `interfaces/mesoscope_vr_tools.py`.
+The README lists every tool with its purpose.
+
+`interfaces/mcp_server.py` discovers tool modules by their `*_tools.py` filename suffix and imports each one, so a new
+acquisition system registers its tools by adding `interfaces/{system}_tools.py` and needs no edit to the server module.
+The server deliberately omits the assets, video, and communication tools, which the `slsa mcp`, `axvs mcp`, and
+`axci mcp` servers of those dependencies serve instead.
 
 ## Acquisition system configuration
 
@@ -99,7 +113,7 @@ before helping users interact with the acquisition system.
 
 **For hardware discovery and health checks**, use the `experiment:acquisition-system-setup` and
 `experiment:system-health-check` skills. These drive this library's `sle get` commands together with the `video` and
-`communication` MCP servers; the `assets` plugin does NOT expose hardware-discovery tools. Invoke them when users
+`communication` MCP servers, and the `assets` plugin does NOT expose hardware-discovery tools. Invoke them when users
 want to:
 - Discover hardware (cameras, microcontrollers, Zaber motors, MQTT broker)
 - Verify hardware connectivity and storage mounts before running experiments
@@ -119,7 +133,7 @@ Example triggers: "Set up the mesoscope system", "Change the lick threshold".
 ## Project context
 
 This is **sollertia-experiment**, the data acquisition and preprocessing runtime of the Sollertia platform. Every
-Sollertia acquisition system runs in Virtual Reality, presenting a Unity task in the linear infinite corridor; the
+Sollertia acquisition system runs in Virtual Reality, presenting a Unity task in the linear infinite corridor. The
 library manages these systems and is designed to be extended with new ones. Currently, sollertia-experiment manages
 the **Mesoscope-VR** two-photon imaging system, which combines brain imaging with virtual reality behavioral tasks.
 
@@ -131,6 +145,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 | `src/sollertia_experiment/mesoscope_vr/` | Mesoscope-VR system implementation (current system)      |
 | `src/sollertia_experiment/cross_system/` | Cross-system utilities shared by all acquisition systems |
 | `src/sollertia_experiment/vr_task/`      | VR task driver: Unity MQTT coupling, trial decomposition |
+| `assets/mesoscope_vr/`                   | MATLAB assets deployed to the ScanImagePC, not packaged  |
 
 ### Architecture
 
@@ -159,7 +174,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 For low-level camera hardware implementation, use the `video:camera-interface` skill.
 
 For PC-side microcontroller hardware implementation, use the `experiment:microcontroller-interface` skill (the
-registry of paired Module + ModuleInterface classes); for the underlying AXCI base API, use the
+registry of paired Module + ModuleInterface classes). For the underlying AXCI base API, use the
 `communication:microcontroller-interface` skill.
 
 For Zaber motor configuration, use the `experiment:zaber-interface` skill and follow the existing patterns in
@@ -167,8 +182,7 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 
 **Adding hardware bindings (general):**
 
-1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to
-   `cross_system/module_interfaces.py`
+1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `cross_system/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
 4. Use configuration dataclasses from `sollertia-shared-assets` for hardware parameters

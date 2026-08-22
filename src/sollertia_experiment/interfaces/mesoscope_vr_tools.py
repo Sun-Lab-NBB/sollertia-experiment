@@ -77,8 +77,8 @@ def write_system_configuration_tool(
         overwrite: Determines whether to overwrite an existing system configuration file.
 
     Returns:
-        A dictionary with ``file_path`` and ``data`` (the validated configuration payload), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``file_path`` and ``data`` (the validated configuration payload), or ``{"error": ...}``
+        on failure.
     """
     try:
         directory = get_working_directory().joinpath(CONFIGURATION_DIRECTORY)
@@ -106,8 +106,8 @@ def validate_system_configuration_tool() -> dict[str, Any]:
     """Validates the active Mesoscope-VR system configuration and reports filesystem mount status.
 
     Returns:
-        A dictionary with ``valid``, ``issues``, and ``paths`` (the per-path mount report), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``valid``, ``issues``, and ``paths`` (the per-path mount report), or ``{"error": ...}`` on
+        failure.
     """
     try:
         configuration = get_system_configuration()
@@ -213,8 +213,8 @@ def read_session_zaber_positions_tool(session_path: str) -> dict[str, Any]:
         session_path: The path to the session directory or its raw_data subdirectory.
 
     Returns:
-        A dictionary with ``file_path`` and ``data`` (the serialized ZaberPositions payload), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``file_path`` and ``data`` (the serialized ZaberPositions payload), or ``{"error": ...}`` on
+        failure.
     """
     session_root, error = _resolve_session_root(session_path=session_path)
     if error is not None:
@@ -240,8 +240,8 @@ def write_session_zaber_positions_tool(
         overwrite: Determines whether to overwrite an existing positions file.
 
     Returns:
-        A dictionary with ``file_path`` and ``data`` (the validated ZaberPositions payload), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``file_path`` and ``data`` (the validated ZaberPositions payload), or ``{"error": ...}`` on
+        failure.
     """
     session_root, error = _resolve_session_root(session_path=session_path)
     if error is not None:
@@ -262,8 +262,8 @@ def read_session_mesoscope_positions_tool(session_path: str) -> dict[str, Any]:
         session_path: The path to the session directory or its raw_data subdirectory.
 
     Returns:
-        A dictionary with ``file_path`` and ``data`` (the serialized MesoscopePositions payload), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``file_path`` and ``data`` (the serialized MesoscopePositions payload), or ``{"error": ...}``
+        on failure.
     """
     session_root, error = _resolve_session_root(session_path=session_path)
     if error is not None:
@@ -289,8 +289,8 @@ def write_session_mesoscope_positions_tool(
         overwrite: Determines whether to overwrite an existing positions file.
 
     Returns:
-        A dictionary with ``file_path`` and ``data`` (the validated MesoscopePositions payload), or
-        ``{"error": ...}`` on failure.
+        A dictionary with ``file_path`` and ``data`` (the validated MesoscopePositions payload), or ``{"error": ...}``
+        on failure.
     """
     session_root, error = _resolve_session_root(session_path=session_path)
     if error is not None:
@@ -567,8 +567,8 @@ def _diff_genicam_configurations(stored: GenicamConfiguration, live: GenicamConf
 
     Returns:
         A dictionary describing the camera-identity match, per-node value mismatches, and the nodes present in only
-        one of the two configurations, plus an overall ``match`` flag that is True only when the camera identities
-        match and every stored node is present on the live camera with the stored value.
+        one of the two configurations. It also carries an overall ``match`` flag that is True only when the camera
+        identities match and every stored node is present on the live camera with the stored value.
     """
     identity_match = (
         stored.camera_model == live.camera_model and stored.camera_serial_number == live.camera_serial_number

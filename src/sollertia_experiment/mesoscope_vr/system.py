@@ -90,9 +90,9 @@ class MesoscopeFileSystem:
     """Stores the filesystem configuration of the Mesoscope-VR data acquisition system.
 
     Notes:
-        The local data root (the directory under which all projects are stored on this machine) is no longer part
-        of this configuration. It is owned by the Sollertia platform as the shared data root; resolve it with
-        ``get_data_root()`` and set it with the ``slsa configure data-root`` command.
+        The Sollertia platform owns the local data root, which is the directory under which all projects are stored
+        on this machine. Resolve it with ``get_data_root()`` and set it with the ``slsa configure data-root``
+        command.
     """
 
     mesoscope_directory: Path = Path()
@@ -116,9 +116,9 @@ class MesoscopeGoogleSheets:
 
     Notes:
         Both sheet identifiers are optional. A sheet whose identifier is left unset (an empty string) is treated as not
-        configured, and the data exchange that depends on it is skipped with a warning. If neither
-        identifier is set, the system disables all Google Sheets integration and preprocesses sessions without
-        snapshotting surgery records or updating the water restriction log.
+        configured, and the data exchange that depends on it is skipped with a warning. If neither identifier is
+        set, the system disables all Google Sheets integration and preprocesses sessions without snapshotting surgery
+        records or updating the water restriction log.
     """
 
     surgery_sheet_id: str = ""
@@ -254,7 +254,7 @@ class MesoscopeAcquisition:
     """The spacing, in micrometers, between consecutive target imaging planes in the acquired z-stack."""
     z_range_um: tuple[int, int] = (1050, 1050)
     """The [minimum, maximum] z-plane range to image, in micrometers. Equal boundaries image a single plane at that
-    depth; distinct boundaries image the inclusive slice between them."""
+    depth, and distinct boundaries image the inclusive slice between them."""
     z_exclusion_um: tuple[int, int] = (0, 0)
     """The [minimum, maximum] boundaries, in micrometers, of the non-imaged exclusion zone used for two-plane imaging.
     Equal boundaries disable two-plane imaging. When the boundaries differ, they must fall within z_range_um."""
@@ -421,9 +421,9 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
         """Saves the instance's data to disk as a .yaml file.
 
         Notes:
-            Path and Enum fields are serialized automatically by YamlConfig. The valve_calibration_data
-            tuple is temporarily converted to a dict for serialization so that existing .yaml files
-            retain their mapping layout for the calibration table, then restored after the write.
+            Path and Enum fields are serialized automatically by YamlConfig. The valve_calibration_data tuple is
+            temporarily converted to a dict for serialization so that existing .yaml files retain their mapping layout
+            for the calibration table, then restored after the write.
 
         Args:
             path: The path to the .yaml file to save the data to.
@@ -594,8 +594,9 @@ class _ScanImagePCData:
 
 
 # Registers the Mesoscope-VR system configuration with the shared cross-system registry so the shared create / resolve
-# / load helpers can operate on it. The shared helpers own the file lifecycle; this package only adds the registration
-# and the typed get_system_configuration() wrapper below. The shared get_system_configuration_path is re-exported as-is.
+# / load helpers can operate on it. The shared helpers own the file lifecycle, and this package only adds the
+# registration and the typed get_system_configuration() wrapper below. The shared get_system_configuration_path is
+# re-exported as-is.
 register_system_configuration(system=AcquisitionSystems.MESOSCOPE_VR, configuration_class=MesoscopeSystemConfiguration)
 
 
@@ -623,9 +624,9 @@ def create_experiment_configuration_file(
 ) -> None:
     """Creates a Mesoscope-VR experiment configuration file from a task template under the configured data root.
 
-    Resolves the target project directory under the local data root, instantiates the named task template from the
-    configured task templates directory, builds a Mesoscope-VR experiment configuration with the provided trial
-    defaults, populates the requested number of default-valued runtime states, and writes the result to the project's
+    Resolves the target project directory under the local data root and instantiates the named task template from the
+    configured task templates directory. The resulting Mesoscope-VR experiment configuration carries the provided
+    trial defaults and the requested number of default-valued runtime states, and it is written to the project's
     configuration directory.
 
     Args:

@@ -134,20 +134,20 @@ def write_yaml_validated(
         }
 
     ensure_directory_exists(path=file_path.parent)
-    temp_path = file_path.with_name(f".{file_path.stem}.{uuid.uuid4().hex[:8]}.tmp.yaml")
+    temporary_path = file_path.with_name(f".{file_path.stem}.{uuid.uuid4().hex[:8]}.tmp.yaml")
 
     try:
-        temp_path.write_text(yaml.safe_dump(data=payload, sort_keys=False))
-        instance = validator_cls.from_yaml(file_path=temp_path)
+        temporary_path.write_text(yaml.safe_dump(data=payload, sort_keys=False))
+        instance = validator_cls.from_yaml(file_path=temporary_path)
         if hasattr(instance, "__post_init__"):
             instance.__post_init__()
     except Exception as exception:
         with contextlib.suppress(FileNotFoundError):
-            temp_path.unlink()
+            temporary_path.unlink()
         return {"error": f"Validation failed for {validator_cls.__name__}: {exception}"}
     finally:
         with contextlib.suppress(FileNotFoundError):
-            temp_path.unlink()
+            temporary_path.unlink()
 
     mismatches = _field_type_mismatches(instance=instance, prefix="")
     if mismatches:

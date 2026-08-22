@@ -80,7 +80,7 @@ _MICROLITERS_PER_MILLILITER: float = 1000.0
 
 
 # PyCharm does not narrow the Optional `zaber_motors` after assignment (the Optional is required for the finally
-# guard) and resolves the descriptor union to its first member; both are false positives that mypy does not report.
+# guard) and resolves the descriptor union to its first member. Both are false positives that mypy does not report.
 def window_checking_logic(
     experimenter: str,
     project_name: str,
@@ -252,9 +252,9 @@ def window_checking_logic(
     finally:
         # Tears down the runtime in a fixed order, isolating each step so that an asset error or a repeated
         # KeyboardInterrupt during cleanup cannot skip the remaining steps. The camera and data logger processes are
-        # stopped first, while their shared-memory managers are still alive; deferring this to garbage collection tears
-        # down the managers first, which crashes the __del__ finalizers and cascades into multiprocessing errors. Both
-        # stop() methods are idempotent, so re-running them after the success path is a no-op.
+        # stopped first, while their shared-memory managers are still alive. Deferring this to garbage collection
+        # tears down the managers first, which crashes the __del__ finalizers and cascades into multiprocessing
+        # errors. Both stop() methods are idempotent, so re-running them after the success path is a no-op.
         if cameras is not None:
             run_shutdown_step(description="stopping the cameras", step=cameras.stop)
         if logger is not None:
@@ -290,7 +290,7 @@ def window_checking_logic(
 
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
-# mis-infers some descriptor fields and numpy scalars; these are false positives that mypy does not report.
+# mis-infers some descriptor fields and numpy scalars. These are false positives that mypy does not report.
 def lick_training_logic(
     experimenter: str,
     project_name: str,
@@ -610,7 +610,7 @@ def lick_training_logic(
 
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
-# mis-infers some descriptor fields; these are false positives that mypy does not report.
+# mis-infers some descriptor fields. These are false positives that mypy does not report.
 def run_training_logic(
     experimenter: str,
     project_name: str,
@@ -1065,7 +1065,7 @@ def run_training_logic(
 
 
 # PyCharm does not narrow the Optional `system` after assignment (the Optional is required for the finally guard) and
-# mis-infers a descriptor field; these are false positives that mypy does not report.
+# mis-infers a descriptor field. This is a false positive that mypy does not report.
 def experiment_logic(
     experimenter: str,
     project_name: str,
@@ -1351,8 +1351,8 @@ def maintenance_logic() -> None:
 
     # All calibration procedures are executed in a temporary directory deleted after runtime.
     with tempfile.TemporaryDirectory(prefix="sl_maintenance_") as output_directory:
-        # Binds the runtime assets to None ahead of initialization so the finally block can safely
-        # tear down only the assets that were successfully created if initialization fails partway.
+        # Binds the runtime assets to None ahead of initialization so the finally block can safely tear down only
+        # the assets that were successfully created if initialization fails partway.
         logger: DataLogger | None = None
         controller: MicroControllerInterface | None = None
         zaber_motors: ZaberMotors | None = None
@@ -1371,7 +1371,7 @@ def maintenance_logic() -> None:
             logger.start()
 
             # Initializes the interface for the Actor MicroController. The calibration data union is narrower than the
-            # interface's declared parameter type; the mismatch is already acknowledged with the type: ignore below.
+            # interface's declared parameter type, and the type: ignore below acknowledges the mismatch.
             valve: WaterValveInterface = WaterValveInterface(
                 valve_calibration_data=(
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]
