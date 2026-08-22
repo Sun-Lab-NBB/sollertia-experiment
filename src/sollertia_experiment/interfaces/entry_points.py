@@ -12,8 +12,8 @@ warnings.warn_explicit = warnings.warn = lambda *_, **__: None
 
 # Silences the benign Qt teardown warnings (e.g., "QObject::killTimer: Timers cannot be stopped from another thread")
 # that OpenCV's Qt backend writes to stderr when the camera-preview windows are destroyed in the video acquisition
-# subprocesses. The variable is set before any subprocess is spawned, so every child inherits it; setdefault preserves
-# any value the operator has already exported.
+# subprocesses. The variable is set before any subprocess is spawned, so every child inherits it, and setdefault
+# preserves any value the operator has already exported.
 os.environ.setdefault("QT_LOGGING_RULES", "default.warning=false")
 
 import click  # noqa: E402

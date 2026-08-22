@@ -158,8 +158,8 @@ class EncoderInterface(ModuleInterface):
         """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            report_ccw: Determines whether to report rotation in the counterclockwise (CCW; positive) direction.
-            report_cw: Determines whether to report rotation in the clockwise (CW; negative) direction.
+            report_ccw: Determines whether to report rotation in the counterclockwise (CCW, positive) direction.
+            report_cw: Determines whether to report rotation in the clockwise (CW, negative) direction.
             delta_threshold: The minimum displacement change (delta) between any two consecutive readouts for reporting
                 the rotation to the PC.
         """
@@ -436,9 +436,9 @@ class TorqueInterface(ModuleInterface):
         """Sets the module's PC-addressable runtime parameters to the input values.
 
         Args:
-            report_ccw: Determines whether the sensor should report torques in the counterclockwise (CCW; positive)
+            report_ccw: Determines whether the sensor should report torques in the counterclockwise (CCW, positive)
                 direction.
-            report_cw: Determines whether the sensor should report torque in the clockwise (CW; negative) direction.
+            report_cw: Determines whether the sensor should report torque in the clockwise (CW, negative) direction.
             signal_threshold: The minimum torque level, in raw analog units of 12-bit Analog-to-Digital-Converter
                 (ADC), reported to the PC as a significant torque signal. Note: signals below the threshold are
                 pulled to 0.
@@ -485,6 +485,9 @@ class TorqueInterface(ModuleInterface):
 class MesoscopeFrameTTLInterface(ModuleInterface):
     """Interfaces with the TTLModule instance that monitors the Mesoscope frame-acquisition pulses, running on the
     Sensor MicroController.
+
+    Notes:
+        Type code 1.
 
     Args:
         polling_frequency: The frequency, in microseconds, at which to check for incoming TTL signals when monitoring
@@ -991,12 +994,12 @@ class WaterValveInterface(ModuleInterface):
         Args:
             target_volume: The volume of water, in microliters, to deliver.
 
+        Returns:
+            The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
+
         Raises:
             ValueError: If the desired water volume is too small to be reliably dispensed by the valve, based on its
                 calibration data.
-
-        Returns:
-            The duration, in microseconds, the valve needs to stay open to deliver the specified volume.
         """
         # Determines the minimum valid pulse duration, hardcoded at 10 ms (10000 microseconds): calibrating below this
         # is empirically pointless for most water valves, so it is treated as the lower pulse-duration bound. The
@@ -1114,8 +1117,7 @@ class ScreenInterface(ModuleInterface):
         """Sets the screens to the desired power state.
 
         Args:
-            state: The desired screen power state. True means the screens are powered on; False means the screens are
-                powered off.
+            state: Determines whether the screens are powered on.
         """
         # Ends the runtime early if the desired state matches the current screen power state.
         if state is self._enabled:
@@ -1126,7 +1128,7 @@ class ScreenInterface(ModuleInterface):
 
     @property
     def state(self) -> bool:
-        """Returns True if the screens are currently powered on; False otherwise."""
+        """Returns True when the screens are currently powered on."""
         return self._enabled
 
 

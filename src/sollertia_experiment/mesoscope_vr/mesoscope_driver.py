@@ -51,12 +51,12 @@ class _MesoscopeMQTTTopics(StrEnum):
     Notes:
         The catalog occupies a flat PascalCase namespace prefixed with 'Mesoscope' that does not overlap with the
         Unity Virtual Reality task topics, so both surfaces share a single MQTT broker. The acquisition runtime
-        publishes the command topics; the ScanImagePC publishes the status and error topics.
+        publishes the command topics, and the ScanImagePC publishes the status and error topics.
     """
 
     ALIVE = "MesoscopeAlive"
     """Liveness probe published by the VRPC (empty payload). The ScanImagePC replies on the Status topic with a
-    reception acknowledgement; the VRPC treats the absence of a reply within the acknowledgement timeout as the
+    reception acknowledgement. The VRPC treats the absence of a reply within the acknowledgement timeout as the
     runAcquisition command loop not running. Mirrors the request-reply presence check used for the Unity bridge."""
     PRELOAD = "MesoscopePreload"
     """Request to preload a persisted reference estimator as an alignment aid, carrying the 'project' and 'animal'
@@ -77,7 +77,8 @@ class _MesoscopeMQTTTopics(StrEnum):
     planes as a JSON payload. Used to resume an acquisition interrupted by a transient failure."""
     QUERY_STATE = "MesoscopeQueryState"
     """Request for a one-shot snapshot of the Mesoscope stage, fast-Z, and laser state (empty payload). The
-    ScanImagePC replies on the State topic; used to populate a MesoscopePositions instance at runtime boundaries."""
+    ScanImagePC replies on the State topic, and the reply populates a MesoscopePositions instance at runtime
+    boundaries."""
     STATUS = "MesoscopeStatus"
     """Acknowledgement and progress reply published by the ScanImagePC, carrying 'command', 'state', and optional
     'detail' fields."""
@@ -116,9 +117,9 @@ class MesoscopeDriver:
     connection lifecycle, the estimator-preload and reference-generation setup handshake, the begin, abort, and
     recover acquisition commands, and a one-shot state query. Mesoscope control is tightly coupled to the Virtual
     Reality task, so the driver reuses the Virtual Reality broker discovery configuration rather than defining its
-    own. Each command is dispatched
-    with a reception acknowledgement and, where applicable, a terminal-state confirmation; the actual frame
-    acquisition is confirmed by the caller through the hardware TTL frame stream, not over MQTT.
+    own. Each command is dispatched with a reception acknowledgement and, where applicable, a terminal-state
+    confirmation. The caller confirms the actual frame acquisition through the hardware TTL frame stream rather than
+    over MQTT, because MQTT carries no per-frame signal.
 
     Args:
         configuration: The Virtual Reality task configuration that defines the shared MQTT broker discovery fields.
@@ -173,8 +174,8 @@ class MesoscopeDriver:
             acknowledge it on the Status topic, mirroring the request-reply presence check used for the Unity bridge.
             A reply confirms that the command loop is running, while the absence of a reply within the acknowledgement
             timeout indicates that it is not. The probe is resent on each timeout because the operator must launch the
-            runAcquisition function manually; it requires the ScanImage handles and interactive imaging-parameter
-            confirmations.
+            runAcquisition function manually, and that call requires the ScanImage handles and interactive
+            imaging-parameter confirmations.
         """
         message = (
             "Launch the 'runAcquisition(hSI, hSICtl, <parameters>)' function in the MATLAB command line on the "
@@ -209,7 +210,7 @@ class MesoscopeDriver:
 
         Notes:
             The ScanImagePC enables the motion manager so the estimator is visible but leaves automatic correction
-            disabled; the operator enables correction manually while aligning the Mesoscope. The persisted estimator
+            disabled, and the operator enables correction manually while aligning the Mesoscope. The persisted estimator
             path is local to the ScanImagePC filesystem, so the VRPC sends only the project and animal identifiers and
             the ScanImagePC resolves the path under its own Mesoscope data root. When no persisted estimator exists for
             the animal (for example, on the first imaging day), the ScanImagePC proceeds without an alignment aid.
@@ -497,7 +498,7 @@ def check_mesoscope_bridge() -> tuple[bool, str]:
     Notes:
         Loads the active Mesoscope-VR system configuration to resolve the shared broker address, connects to the
         broker, issues a single bounded liveness probe, and disconnects. This is the pre-flight counterpart to the
-        Unity bridge reachability check; an unreachable interface means the operator has not launched the
+        Unity bridge reachability check, and an unreachable interface means the operator has not launched the
         runAcquisition function on the ScanImagePC.
 
     Returns:

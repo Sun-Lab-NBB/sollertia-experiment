@@ -26,7 +26,7 @@ carry an unsafe motor outside the range from which it can be homed.
 """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ZaberDeviceSettings:
     """Stores configuration settings read from a Zaber device's non-volatile memory."""
 
@@ -54,7 +54,7 @@ class ZaberDeviceSettings:
     """The current absolute position of the motor in native motor units."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ZaberValidationResult:
     """Stores the results of validating a Zaber device's configuration."""
 
@@ -70,7 +70,7 @@ class ZaberValidationResult:
     """Contains non-critical issues that may affect device operation."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _ZaberAxisData:
     """Stores the identification data for an axis of a Zaber device."""
 
@@ -80,7 +80,7 @@ class _ZaberAxisData:
     """The user-assigned name of the axis."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _ZaberDeviceData:
     """Stores the identification data about a Zaber device."""
 
@@ -96,7 +96,7 @@ class _ZaberDeviceData:
     """Stores _ZaberAxisData instances for each axis managed by this device."""
 
 
-@dataclass
+@dataclass(slots=True)
 class _ZaberPortData:
     """Stores the identification data for all Zaber devices connected to a serial port."""
 
@@ -163,14 +163,13 @@ def discover_zaber_devices() -> None:
 def get_zaber_devices_info() -> str:
     """Scans all available serial ports for Zaber devices and returns formatted device information.
 
+    Notes:
+        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt the discovery
+        process.
+
     Returns:
         A formatted table string containing port, device, and axis information for all discovered Zaber devices.
         Ports with connection errors are listed as having "No Devices".
-
-    Notes:
-        This function is designed for programmatic access to Zaber device information, such as from MCP tools.
-        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt
-        the discovery process.
     """
     port_info_list = _scan_active_ports()
     return _format_device_info(port_info_list=port_info_list)
@@ -232,7 +231,7 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
 
     Notes:
         Position values are validated against device motion limits before writing. Device label changes
-        automatically update the checksum (USER_DATA_0) to maintain device validation; axis label changes do not.
+        automatically update the checksum (USER_DATA_0) to maintain device validation, and axis label changes do not.
         The checksum setting cannot be modified directly as it is managed by the binding library.
 
     Args:
@@ -385,8 +384,8 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
     """Validates a Zaber device's configuration for use with the binding library.
 
     Notes:
-        Performs comprehensive validation including checksum verification against the device label,
-        position bounds checking against motion limits, and configuration completeness verification.
+        Performs comprehensive validation including checksum verification against the device label, position bounds
+        checking against motion limits, and configuration completeness verification.
 
     Args:
         port: Serial port path (e.g., "/dev/ttyUSB0").
@@ -579,29 +578,6 @@ class ZaberAxis:
             f"position={self.get_position()})."
         )
 
-    def _padded_method_call[T](self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
-        """Interacts with the motor hardware by executing the requested method with the appropriate time padding to
-        prevent overwhelming the communication interface.
-
-        Args:
-            method: The method to call with timing guards.
-            *args: Positional arguments to pass to the method.
-            **kwargs: Keyword arguments to pass to the method.
-
-        Returns:
-            The value returned by the specified method's call.
-        """
-        # Ensures that at least 5 milliseconds have elapsed since the previous interaction with the motor's hardware.
-        # This design is chosen over delay() to allow instantaneous escapes if this method is called when the delay
-        # has already expired.
-        while not self._pacing_guard.expired:
-            pass
-
-        result = method(*args, **kwargs)
-
-        self._pacing_guard.kick()
-        return result
-
     def get_position(self) -> float:
         """Returns the current absolute position of the motor, in native motor units, relative to its home position."""
         return self._padded_method_call(method=self._motor.get_position)
@@ -732,6 +708,29 @@ class ZaberAxis:
         # Parks the motor and sets the shutdown flag.
         self.park()
         self._shutdown_flag = True
+
+    def _padded_method_call[T](self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
+        """Interacts with the motor hardware by executing the requested method with the appropriate time padding to
+        prevent overwhelming the communication interface.
+
+        Args:
+            method: The method to call with timing guards.
+            *args: Positional arguments to pass to the method.
+            **kwargs: Keyword arguments to pass to the method.
+
+        Returns:
+            The value returned by the specified method's call.
+        """
+        # Ensures that at least 5 milliseconds have elapsed since the previous interaction with the motor's hardware.
+        # This design is chosen over delay() to allow instantaneous escapes if this method is called when the delay
+        # has already expired.
+        while not self._pacing_guard.expired:
+            pass
+
+        result = method(*args, **kwargs)
+
+        self._pacing_guard.kick()
+        return result
 
 
 class ZaberDevice:

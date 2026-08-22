@@ -2,16 +2,7 @@
 
 from .system import (
     ZaberPositions,
-    MesoscopeCameras,
-    MesoscopeVRAssets,
     MesoscopePositions,
-    MesoscopeFileSystem,
-    MesoscopeAcquisition,
-    MesoscopeGoogleSheets,
-    MesoscopeVideoTracking,
-    MesoscopeAcquisitionOrder,
-    MesoscopeMicroControllers,
-    MesoscopeStorageDestination,
     MesoscopeSystemConfiguration,
     get_system_configuration,
     create_system_configuration_file,
@@ -25,7 +16,7 @@ from .data_acquisition import (
     lick_training_logic,
     window_checking_logic,
 )
-from .mesoscope_driver import MesoscopeDriver, check_mesoscope_bridge
+from .mesoscope_driver import check_mesoscope_bridge
 from .data_preprocessing import (
     purge_session,
     preprocess_session_data,
@@ -33,18 +24,8 @@ from .data_preprocessing import (
 )
 
 __all__ = [
-    "MesoscopeAcquisition",
-    "MesoscopeAcquisitionOrder",
-    "MesoscopeCameras",
-    "MesoscopeDriver",
-    "MesoscopeFileSystem",
-    "MesoscopeGoogleSheets",
-    "MesoscopeMicroControllers",
     "MesoscopePositions",
-    "MesoscopeStorageDestination",
     "MesoscopeSystemConfiguration",
-    "MesoscopeVRAssets",
-    "MesoscopeVideoTracking",
     "ZaberPositions",
     "check_mesoscope_bridge",
     "create_experiment_configuration_file",

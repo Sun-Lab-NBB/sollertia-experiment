@@ -177,10 +177,11 @@ class MesoscopeVRSystem:
             scene, or None if the managed runtime is not a Mesoscope experiment session.
         _vr_task: The VRTaskDriver instance that drives the Unity game engine that runs the Virtual Reality task or
             None, if the managed runtime is not a Mesoscope experiment session.
+        _mesoscope: The MesoscopeDriver instance that commands the ScanImage software over the shared Virtual Reality
+            MQTT broker.
         _ui: The RuntimeControlUI instance that maintains a Graphical User Interface that allows the user to
             control the session's runtime.
-        _visualizer: The BehaviorVisualizer instance used during runtime to visualize the animal's behavior or
-            None, if the managed runtime does not require behavior visualization.
+        _visualizer: The BehaviorVisualizer instance used during runtime to visualize the animal's behavior.
         _mesoscope_timer: The PrecisionTimer instance used to track the delay between receiving consecutive
             mesoscope frame acquisition pulses.
         _trial_state: The TrialState instance that tracks the progression of trials during experiment runtimes.
@@ -687,37 +688,6 @@ class MesoscopeVRSystem:
         message = "Mesoscope-VR system runtime: Terminated."
         console.echo(message=message, level=LogLevel.SUCCESS)
 
-    def _emergency_shutdown(self) -> None:
-        """Performs a best-effort teardown of any assets brought up by an interrupted or failed start() call.
-
-        Notes:
-            This runs when stop() is invoked after start() failed or was interrupted before completing initialization.
-            It stops the subprocess-backed assets while their shared-memory managers are still alive, which prevents the
-            multiprocessing teardown cascade that occurs if the partially initialized assets are instead collected by
-            the garbage collector. Every teardown target is idempotent and self-guards against having never been
-            started, so each step is safe to run regardless of how far initialization progressed. Each step is also
-            isolated so that a failure or repeated interrupt in one asset does not prevent the rest from shutting down.
-        """
-        message = "Mesoscope-VR system initialization did not complete. Shutting down all initialized system assets..."
-        console.echo(message=message, level=LogLevel.ERROR)
-
-        # Closes the Qt-backed visualizer and control UI first to release the shared Qt backend, then tears down the
-        # acquisition assets so that the frame producers (cameras) and the microcontrollers stop before the data logger
-        # they feed. The Zaber motors are disconnected without the interactive parking sequence used during a graceful
-        # shutdown, because the runtime is aborting.
-        run_shutdown_step(description="closing the behavior visualizer", step=self._visualizer.close)
-        run_shutdown_step(description="shutting down the runtime control UI", step=self._ui.shutdown)
-        if self._vr_task is not None:
-            run_shutdown_step(description="disconnecting from the VR task", step=self._vr_task.disconnect)
-        run_shutdown_step(description="stopping the cameras", step=self._cameras.stop)
-        run_shutdown_step(description="disconnecting from the ScanImagePC", step=self._mesoscope.disconnect)
-        run_shutdown_step(description="disconnecting from the Zaber motors", step=self._zaber_motors.disconnect)
-        run_shutdown_step(description="stopping the microcontrollers", step=self._microcontrollers.stop)
-        run_shutdown_step(description="stopping the data logger", step=self._logger.stop)
-
-        message = "Mesoscope-VR system assets: Shut down."
-        console.echo(message=message, level=LogLevel.SUCCESS)
-
     def change_runtime_state(self, new_state: int) -> None:
         """Updates and logs the new acquired session's runtime state (stage).
 
@@ -1188,7 +1158,7 @@ class MesoscopeVRSystem:
         """Commands the ScanImagePC to begin frame acquisition over MQTT and waits for the frame acquisition to begin.
 
         Notes:
-            The MQTT command only triggers acquisition; the hardware TTL frame stream remains the authoritative
+            The MQTT command only triggers acquisition, and the hardware TTL frame stream remains the authoritative
             confirmation that the mesoscope actually started acquiring frames.
         """
         # Continuously retries starting the mesoscope acquisition until successful.
@@ -1524,7 +1494,7 @@ class MesoscopeVRSystem:
             self._vr_task.push_position(absolute_position=self._wheel_encoder.absolute_position)
 
             # Checks if the animal has completed the current trial. The trial's outcome was already resolved and
-            # reported to the visualizer at the stimulus point (in _unity_cycle); this block only advances the
+            # reported to the visualizer at the stimulus point (in _unity_cycle), so this block only advances the
             # distance-based trial counter and drives recovery mode from the resolved outcome flags.
             if self._trial_state.trial_completed(traveled_distance=traveled_distance):
                 # Captures the trial type before advance_trial() increments the trial position.
@@ -1570,8 +1540,8 @@ class MesoscopeVRSystem:
         """Dispatches the next Unity event from the Virtual Reality task driver to the Mesoscope-VR hardware.
 
         Notes:
-            Each call consumes at most one Unity event. The VRTaskDriver returns a typed event; this method maps the
-            event back into mesoscope-specific hardware actions and runtime state updates.
+            Each call consumes at most one Unity event. The VRTaskDriver returns a typed event, and this method maps
+            the event back into mesoscope-specific hardware actions and runtime state updates.
         """
         if self._vr_task is None:
             return
@@ -1900,9 +1870,39 @@ class MesoscopeVRSystem:
         self.descriptor.incomplete = False
 
         # Collects the experimenter notes and the post-session water, then writes the completed descriptor. The
-        # descriptor union accepted by the
-        # runtime is a strict subset of the union accepted by finalize_session_descriptor, so the assignment is
-        # type-safe.
+        # descriptor union accepted by the runtime is a strict subset of the union accepted by
+        # finalize_session_descriptor, so the assignment is type-safe.
         finalize_session_descriptor(
             descriptor=self.descriptor, session_data=self._session_data, mesoscope_data=self._mesoscope_data
         )
+
+    def _emergency_shutdown(self) -> None:
+        """Performs a best-effort teardown of any assets brought up by an interrupted or failed start() call.
+
+        Notes:
+            This runs when stop() is invoked after start() failed or was interrupted before completing initialization.
+            It stops the subprocess-backed assets while their shared-memory managers are still alive, which prevents the
+            multiprocessing teardown cascade that occurs if the partially initialized assets are instead collected by
+            the garbage collector. Every teardown target is idempotent and self-guards against having never been
+            started, so each step is safe to run regardless of how far initialization progressed. Each step is also
+            isolated so that a failure or repeated interrupt in one asset does not prevent the rest from shutting down.
+        """
+        message = "Mesoscope-VR system initialization did not complete. Shutting down all initialized system assets..."
+        console.echo(message=message, level=LogLevel.ERROR)
+
+        # Closes the Qt-backed visualizer and control UI first to release the shared Qt backend, then tears down the
+        # acquisition assets so that the frame producers (cameras) and the microcontrollers stop before the data logger
+        # they feed. The Zaber motors are disconnected without the interactive parking sequence used during a graceful
+        # shutdown, because the runtime is aborting.
+        run_shutdown_step(description="closing the behavior visualizer", step=self._visualizer.close)
+        run_shutdown_step(description="shutting down the runtime control UI", step=self._ui.shutdown)
+        if self._vr_task is not None:
+            run_shutdown_step(description="disconnecting from the VR task", step=self._vr_task.disconnect)
+        run_shutdown_step(description="stopping the cameras", step=self._cameras.stop)
+        run_shutdown_step(description="disconnecting from the ScanImagePC", step=self._mesoscope.disconnect)
+        run_shutdown_step(description="disconnecting from the Zaber motors", step=self._zaber_motors.disconnect)
+        run_shutdown_step(description="stopping the microcontrollers", step=self._microcontrollers.stop)
+        run_shutdown_step(description="stopping the data logger", step=self._logger.stop)
+
+        message = "Mesoscope-VR system assets: Shut down."
+        console.echo(message=message, level=LogLevel.SUCCESS)

@@ -15,6 +15,11 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
+_SYSTEM_CONFIGURATION_CLASSES: dict[AcquisitionSystems, type[SystemConfiguration]] = {}
+"""Maps each registered acquisition system to its SystemConfiguration subclass. Populated at import time by
+register_system_configuration(), called from each acquisition system's configuration module."""
+
+
 @dataclass
 class SystemConfiguration(YamlConfig):
     """Base class for Sollertia data acquisition system configurations.
@@ -37,11 +42,6 @@ class SystemConfiguration(YamlConfig):
         self.to_yaml(file_path=path)
 
 
-_SYSTEM_CONFIGURATION_CLASSES: dict[AcquisitionSystems, type[SystemConfiguration]] = {}
-"""Maps each registered acquisition system to its SystemConfiguration subclass. Populated at import time by
-register_system_configuration(), called from each acquisition system's configuration module."""
-
-
 def register_system_configuration(
     system: AcquisitionSystems | str, configuration_class: type[SystemConfiguration]
 ) -> None:
@@ -49,18 +49,13 @@ def register_system_configuration(
 
     Each acquisition system calls this function at import time so that the cross-system configuration helpers below can
     create, resolve, and load that system's configuration file. Registration is the only system-specific wiring the
-    file lifecycle requires; everything else is shared.
+    file lifecycle requires, and everything else is shared.
 
     Args:
         system: The acquisition system the configuration class belongs to.
         configuration_class: The system's SystemConfiguration subclass.
     """
     _SYSTEM_CONFIGURATION_CLASSES[AcquisitionSystems(str(system))] = configuration_class
-
-
-def _system_configuration_filename(system: AcquisitionSystems) -> str:
-    """Returns the canonical configuration-file name for the specified acquisition system."""
-    return f"{system}_system_configuration.yaml"
 
 
 def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
@@ -169,3 +164,8 @@ def get_system_configuration_data() -> SystemConfiguration:
     console.error(message=message, error=ValueError)
     # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
     raise ValueError(message)  # pragma: no cover
+
+
+def _system_configuration_filename(system: AcquisitionSystems) -> str:
+    """Returns the canonical configuration-file name for the specified acquisition system."""
+    return f"{system}_system_configuration.yaml"

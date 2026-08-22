@@ -107,9 +107,9 @@ def set_zaber_device_setting_tool(
             returns the current value alongside an error so the caller can prompt the user.
 
     Returns:
-        A success message carrying the old and new values upon completion, a refusal carrying the previewed change and
-        the accepted values when the policy is unspecified, an abandonment notice when the policy declines the write,
-        or an error description when the write fails.
+        A success message carrying the old and new values upon completion, or an error description when the write
+        fails. An unspecified policy instead returns a refusal carrying the previewed change and the accepted values,
+        and a declining policy returns an abandonment notice.
     """
     # Resolves the write policy before the device is touched, so an unspecified policy cannot reach the write through
     # a falsy default. The preview read is the material the calling agent shows the user.

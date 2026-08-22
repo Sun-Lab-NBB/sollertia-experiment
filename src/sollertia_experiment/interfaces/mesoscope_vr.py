@@ -1,10 +1,5 @@
 """Provides the 'sle mesoscope' command group for configuring, running, and managing the Mesoscope-VR data acquisition
-system.
-
-This module combines all Mesoscope-VR-specific interfaces into a single command group: system configuration
-('configure'), system maintenance ('maintain'), checking the mesoscope control bridge ('check-bridge'), data
-acquisition sessions ('run'), and session data management ('preprocess', 'delete', 'migrate'). The general,
-hardware-agnostic discovery commands are exposed separately via the 'sle get' command group.
+system. The general, hardware-agnostic discovery commands are exposed separately via the 'sle get' command group.
 """
 
 from pathlib import Path
@@ -225,8 +220,8 @@ def maintain() -> None:
 def check_bridge() -> None:
     """Checks whether the ScanImagePC's runAcquisition control loop is reachable for Mesoscope imaging sessions.
 
-    The runAcquisition function is a lock-in command loop the operator launches once on the ScanImagePC; it arms and
-    commands the Mesoscope over MQTT for the entire runtime. An unreachable bridge means it is not running.
+    The runAcquisition function is a lock-in command loop the operator launches once on the ScanImagePC, and it arms
+    and commands the Mesoscope over MQTT for the entire runtime. An unreachable bridge means it is not running.
     """
     try:
         reachable, status = check_mesoscope_bridge()

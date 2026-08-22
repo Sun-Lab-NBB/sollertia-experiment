@@ -198,7 +198,7 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
 
     Notes:
         This function computes the data integrity checksum before the transfer and removes the entire local session
-        directory — including any processed_data not transferred — after the raw data is successfully transferred to
+        directory, including any processed_data not transferred, after the raw data is successfully transferred to
         all destinations.
 
         If the input collection contains no storage destinations, the function aborts early with a warning and leaves
@@ -253,7 +253,7 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         message="All transfers completed successfully. Removing the now-redundant source directory...",
         level=LogLevel.INFO,
     )
-    # source is the raw_data directory; its parent is the session directory to remove.
+    # Removes the session directory, which is the parent of the raw_data directory the transfer used as its source.
     delete_directory(directory_path=source.parent)
 
 

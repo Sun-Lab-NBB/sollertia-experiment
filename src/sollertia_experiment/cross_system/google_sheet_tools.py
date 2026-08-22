@@ -91,149 +91,6 @@ _REQUIRED_WATER_RESTRICTION_HEADERS: set[str] = {
 """Defines all headers (columns) that must exist in a validly formatted water restriction log Google Sheet."""
 
 
-def _convert_date_time_to_timestamp(date: str, time: str) -> int:
-    """Converts the input date and time strings to the microseconds-since-UTC-epoch timestamp format used by the
-    Sollertia platform.
-
-    Notes:
-        The input date and time are human-entered values expressed in the host machine's local time. They are
-        interpreted as local time and converted to a UTC timestamp for internal storage.
-
-    Args:
-        date: The date string in one of the supported formats: "%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", or "%m/%d/%Y".
-        time: The time string in the format "%H:%M".
-
-    Returns:
-        The number of microseconds elapsed since UTC epoch onset.
-
-    Raises:
-        ValueError: If date or time inputs are an empty string. If the date or time format does not match any of the
-            supported input formats.
-    """
-    if not isinstance(date, str) or not date:
-        message = (
-            f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
-            f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'date' argument, but "
-            f"encountered {date} of type {type(date).__name__}."
-        )
-        console.error(message=message, error=ValueError)
-
-    if not isinstance(time, str) or not time:
-        message = (
-            f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
-            f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'time' argument, but "
-            f"encountered {time} of type {type(time).__name__}."
-        )
-        console.error(message=message, error=ValueError)
-
-    try:
-        parsed_time = datetime.strptime(time, "%H:%M").time()  # noqa: DTZ007
-    except ValueError:
-        message = (
-            f"Invalid time format encountered when parsing Google Sheet data. Expected the supported time format "
-            f"(%H:%M), but encountered {time}."
-        )
-        console.error(message=message, error=ValueError)
-
-    for date_format in _SUPPORTED_DATE_FORMATS:
-        try:
-            parsed_date = datetime.strptime(date, date_format).date()  # noqa: DTZ007
-            break
-        except ValueError:
-            continue
-    else:
-        message = (
-            f"Invalid date format encountered when parsing Google Sheet data. Expected one of the supported formats "
-            f"({sorted(_SUPPORTED_DATE_FORMATS)}), but encountered {date}."
-        )
-        console.error(message=message, error=ValueError)
-
-    # Human-entered date and time values use the host machine's local time. Interprets the combined value as local
-    # time, then converts it to a UTC microsecond timestamp for internal storage.
-    local_datetime = datetime.combine(date=parsed_date, time=parsed_time).astimezone()
-    return int(local_datetime.timestamp() * 1_000_000)
-
-
-def _extract_coordinate_value(substring: str) -> float:
-    """Extracts the numeric value from the input stereotactic coordinate substring.
-
-    Args:
-        substring: The stereotactic coordinate substring that contains the coordinate value to be extracted.
-
-    Returns:
-        The extracted coordinate value.
-
-    Raises:
-        ValueError: If the input substring does not contain an extractable anatomical coordinate value.
-    """
-    # Finds the coordinate number that precedes the anatomical axis designator (AP, ML, DV) and extracts it as a float.
-    match = re.search(r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", substring)
-
-    if match is not None:
-        return float(match.group(1))
-
-    message = f"Unable to extract the anatomical coordinate value from the input substring {substring}."
-    console.error(message=message, error=ValueError)
-    # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
-    raise ValueError(message)  # pragma: no cover
-
-
-def _parse_stereotactic_coordinates(coordinate_string: str) -> tuple[float, float, float]:
-    """Parses the AP, ML, and DV stereotactic coordinates from the input coordinate string.
-
-    Notes:
-        This function expects the coordinates to be stored as a string formatted as: "-1.8 AP, 2 ML, .25 DV".
-
-    Args:
-        coordinate_string: The input string containing the stereotactic coordinates.
-
-    Returns:
-        The tuple of 3 floats, each storing the value of the extracted coordinates in the following order: AP, ML, DV.
-    """
-    ap_coordinate = 0.0
-    ml_coordinate = 0.0
-    dv_coordinate = 0.0
-    for substring in (s.strip() for s in coordinate_string.split(",")):
-        if "AP" in substring.upper():
-            ap_coordinate = _extract_coordinate_value(substring)
-        elif "ML" in substring.upper():
-            ml_coordinate = _extract_coordinate_value(substring)
-        elif "DV" in substring.upper():
-            dv_coordinate = _extract_coordinate_value(substring)
-
-    return ap_coordinate, ml_coordinate, dv_coordinate
-
-
-def _convert_index_to_column_letter(index: int) -> str:
-    """Converts a 0-based column index to an Excel-style (Google Sheet) column letter (A, B, C, ... Z, AA, AB, ...).
-
-    Args:
-        index: The 0-based column index to be converted.
-
-    Returns:
-        The Excel-style column letter corresponding to the input index.
-    """
-    result = ""
-    while index >= 0:
-        remainder = index % 26
-        result = chr(65 + remainder) + result  # 65 is ASCII for 'A'
-        index = index // 26 - 1
-    return result
-
-
-def _replace_empty_values(row_data: list[str]) -> list[str | None]:
-    """Replaces empty cells and cells containing 'n/a', '--', or '---' inside the input row_data list with None.
-
-    Args:
-        row_data: The list of cell values read from a Google Sheet row.
-
-    Returns:
-        The filtered version of the input list with all empty and placeholder values replaced with None.
-    """
-    empty_values = {"", "n/a", "--", "---"}
-    return [None if cell.strip().lower() in empty_values else cell for cell in row_data]
-
-
 class SurgeryLog:
     """Interfaces with the Sollertia platform's surgery log Google Sheet.
 
@@ -358,6 +215,10 @@ class SurgeryLog:
             )
             console.error(message=message, error=ValueError)
 
+    def __del__(self) -> None:
+        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
+        self.close()
+
     def close(self) -> None:
         """Closes the underlying HTTP connection to the processed surgery log, releasing its SSL socket.
 
@@ -372,10 +233,6 @@ class SurgeryLog:
         service = getattr(self, "_service", None)
         if service is not None:
             _close_google_service(service=service)
-
-    def __del__(self) -> None:
-        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
-        self.close()
 
     def extract_animal_data(self) -> SurgeryData:
         """Extracts and returns the processed animal's surgical intervention data as a SurgeryData object.
@@ -555,7 +412,7 @@ class SurgeryLog:
         Args:
             quality: The integer value that reflects the quality of the animal's surgical intervention for scientific
                 data acquisition on a scale from 0 (unusable) to 3 (high-grade scientific publication). The 0-3 scale is
-                advisory; this method does not validate that the input falls within that range.
+                advisory, and this method does not validate that the input falls within that range.
         """
         quality_column = self._get_column_id("surgery quality")
 
@@ -793,6 +650,10 @@ class WaterLog:
         # pre-filled with dates. If not, this method will enter a loop to prompt the user to resolve the date issue.
         self._session_row_index: int = self._find_date_row(formatted_date)
 
+    def __del__(self) -> None:
+        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
+        self.close()
+
     def close(self) -> None:
         """Closes the underlying HTTP connection to the processed water restriction and animal interaction log,
         releasing its SSL socket.
@@ -808,10 +669,6 @@ class WaterLog:
         service = getattr(self, "_service", None)
         if service is not None:
             _close_google_service(service=service)
-
-    def __del__(self) -> None:
-        """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
-        self.close()
 
     def update_water_log(self, weight: float, water_ml: float, experimenter_id: str, session_type: str) -> None:
         """Updates the processed data acquisition session's row in the processed log file with the input animal's data.
@@ -959,3 +816,146 @@ def _close_google_service(service: Resource) -> None:
                     worker_http.close()
 
     service.close()
+
+
+def _convert_date_time_to_timestamp(date: str, time: str) -> int:
+    """Converts the input date and time strings to the microseconds-since-UTC-epoch timestamp format used by the
+    Sollertia platform.
+
+    Notes:
+        The input date and time are human-entered values expressed in the host machine's local time. They are
+        interpreted as local time and converted to a UTC timestamp for internal storage.
+
+    Args:
+        date: The date string in one of the supported formats: "%m-%d-%y", "%m-%d-%Y", "%m/%d/%y", or "%m/%d/%Y".
+        time: The time string in the format "%H:%M".
+
+    Returns:
+        The number of microseconds elapsed since UTC epoch onset.
+
+    Raises:
+        ValueError: If date or time inputs are an empty string. If the date or time format does not match any of the
+            supported input formats.
+    """
+    if not isinstance(date, str) or not date:
+        message = (
+            f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
+            f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'date' argument, but "
+            f"encountered {date} of type {type(date).__name__}."
+        )
+        console.error(message=message, error=ValueError)
+
+    if not isinstance(time, str) or not time:
+        message = (
+            f"Unable to convert the input date and time into the number of microseconds elapsed since UTC epoch onset "
+            f"timestamp when parsing Google Sheet data. Expected a non-empty string input for 'time' argument, but "
+            f"encountered {time} of type {type(time).__name__}."
+        )
+        console.error(message=message, error=ValueError)
+
+    try:
+        parsed_time = datetime.strptime(time, "%H:%M").time()  # noqa: DTZ007
+    except ValueError:
+        message = (
+            f"Invalid time format encountered when parsing Google Sheet data. Expected the supported time format "
+            f"(%H:%M), but encountered {time}."
+        )
+        console.error(message=message, error=ValueError)
+
+    for date_format in _SUPPORTED_DATE_FORMATS:
+        try:
+            parsed_date = datetime.strptime(date, date_format).date()  # noqa: DTZ007
+            break
+        except ValueError:
+            continue
+    else:
+        message = (
+            f"Invalid date format encountered when parsing Google Sheet data. Expected one of the supported formats "
+            f"({sorted(_SUPPORTED_DATE_FORMATS)}), but encountered {date}."
+        )
+        console.error(message=message, error=ValueError)
+
+    # Human-entered date and time values use the host machine's local time. Interprets the combined value as local
+    # time, then converts it to a UTC microsecond timestamp for internal storage.
+    local_datetime = datetime.combine(date=parsed_date, time=parsed_time).astimezone()
+    return int(local_datetime.timestamp() * 1_000_000)
+
+
+def _extract_coordinate_value(substring: str) -> float:
+    """Extracts the numeric value from the input stereotactic coordinate substring.
+
+    Args:
+        substring: The stereotactic coordinate substring that contains the coordinate value to be extracted.
+
+    Returns:
+        The extracted coordinate value.
+
+    Raises:
+        ValueError: If the input substring does not contain an extractable anatomical coordinate value.
+    """
+    # Finds the coordinate number that precedes the anatomical axis designator (AP, ML, DV) and extracts it as a float.
+    match = re.search(r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", substring)
+
+    if match is not None:
+        return float(match.group(1))
+
+    message = f"Unable to extract the anatomical coordinate value from the input substring {substring}."
+    console.error(message=message, error=ValueError)
+    # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
+    raise ValueError(message)  # pragma: no cover
+
+
+def _parse_stereotactic_coordinates(coordinate_string: str) -> tuple[float, float, float]:
+    """Parses the AP, ML, and DV stereotactic coordinates from the input coordinate string.
+
+    Notes:
+        This function expects the coordinates to be stored as a string formatted as: "-1.8 AP, 2 ML, .25 DV".
+
+    Args:
+        coordinate_string: The input string containing the stereotactic coordinates.
+
+    Returns:
+        The tuple of 3 floats, each storing the value of the extracted coordinates in the following order: AP, ML, DV.
+    """
+    ap_coordinate = 0.0
+    ml_coordinate = 0.0
+    dv_coordinate = 0.0
+    for substring in (s.strip() for s in coordinate_string.split(",")):
+        if "AP" in substring.upper():
+            ap_coordinate = _extract_coordinate_value(substring)
+        elif "ML" in substring.upper():
+            ml_coordinate = _extract_coordinate_value(substring)
+        elif "DV" in substring.upper():
+            dv_coordinate = _extract_coordinate_value(substring)
+
+    return ap_coordinate, ml_coordinate, dv_coordinate
+
+
+def _convert_index_to_column_letter(index: int) -> str:
+    """Converts a 0-based column index to an Excel-style (Google Sheet) column letter (A, B, C, ... Z, AA, AB, ...).
+
+    Args:
+        index: The 0-based column index to be converted.
+
+    Returns:
+        The Excel-style column letter corresponding to the input index.
+    """
+    result = ""
+    while index >= 0:
+        remainder = index % 26
+        result = chr(65 + remainder) + result  # 65 is ASCII for 'A'
+        index = index // 26 - 1
+    return result
+
+
+def _replace_empty_values(row_data: list[str]) -> list[str | None]:
+    """Replaces empty cells and cells containing 'n/a', '--', or '---' inside the input row_data list with None.
+
+    Args:
+        row_data: The list of cell values read from a Google Sheet row.
+
+    Returns:
+        The filtered version of the input list with all empty and placeholder values replaced with None.
+    """
+    empty_values = {"", "n/a", "--", "---"}
+    return [None if cell.strip().lower() in empty_values else cell for cell in row_data]

@@ -186,7 +186,7 @@ class BehaviorVisualizer:
         self._puff_axis: Axes | None = None
         self._speed_axis: Axes | None = None
 
-        # Manages blitting-based partial redraws; created when the visualizer window is opened.
+        # Manages blitting-based partial redraws, and is created when the visualizer window is opened.
         self._blit_manager: _BlitManager | None = None
 
         # Running speed threshold and duration threshold lines.
@@ -218,6 +218,10 @@ class BehaviorVisualizer:
         self._has_reinforcing_trials: bool = True
         self._has_aversive_trials: bool = True
 
+    def __del__(self) -> None:
+        """Ensures that the visualization is terminated before the instance is garbage-collected."""
+        self.close()
+
     def open(
         self,
         mode: VisualizerMode | int = VisualizerMode.EXPERIMENT,
@@ -231,8 +235,8 @@ class BehaviorVisualizer:
             This method must be called before any visualization updates can occur.
 
         Args:
-            mode: The display mode that determines the subplot layout. Should be a VisualizerMode member; any
-                unrecognized value is treated as EXPERIMENT.
+            mode: The display mode that determines the subplot layout. An unrecognized value is treated as
+                EXPERIMENT.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
                 When True, the trial panel shows a row for reinforcing trial outcomes.
             has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
@@ -469,8 +473,8 @@ class BehaviorVisualizer:
         if self._trial_axis is not None:
             self._setup_trial_axis()
 
-        # Collects the data lines re-rendered on every update cycle. Only the lines for the axes
-        # present in the active display mode are created.
+        # Collects the data lines re-rendered on every update cycle. Only the lines for the axes present in the
+        # active display mode are created.
         animated_lines: list[Line2D] = [self._lick_line, self._valve_line]
         if self._puff_line is not None:
             animated_lines.append(self._puff_line)
@@ -487,10 +491,6 @@ class BehaviorVisualizer:
         self._blit_manager.update()
 
         self._is_open = True
-
-    def __del__(self) -> None:
-        """Ensures that the visualization is terminated before the instance is garbage-collected."""
-        self.close()
 
     def update(self) -> None:
         """Re-renders the visualization plot managed by the instance to include the data acquired since the last
@@ -558,8 +558,8 @@ class BehaviorVisualizer:
             self._duration_threshold_line.set_visible(True)  # type: ignore[union-attr]
             self._once = False
 
-        # Rebuilds the cached background to capture the repositioned threshold lines and text, then
-        # redraws the data lines on top.
+        # Rebuilds the cached background to capture the repositioned threshold lines and text, then redraws the
+        # data lines on top.
         self._blit_manager.refresh()  # type: ignore[union-attr]
 
     def add_lick_event(self) -> None:
@@ -647,8 +647,8 @@ class BehaviorVisualizer:
                 labels.append(str(start_trial_number + index - (_TRIAL_HISTORY_SIZE - displayed_trial_count)))
         self._trial_axis.set_xticklabels(labels=labels)
 
-        # Rebuilds the cached background so the updated trial rectangles and tick labels persist
-        # across subsequent blitted updates.
+        # Rebuilds the cached background so the updated trial rectangles and tick labels persist across subsequent
+        # blitted updates.
         self._blit_manager.refresh()  # type: ignore[union-attr]
 
     def close(self) -> None:

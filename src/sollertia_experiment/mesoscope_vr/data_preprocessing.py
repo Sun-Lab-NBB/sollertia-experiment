@@ -215,6 +215,183 @@ def preprocess_session_data(session_data: SessionData) -> None:
     console.echo(message=message, level=LogLevel.SUCCESS)
 
 
+def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
+    """Renames the shared 'mesoscope_data' ScanImagePC directory to include the target session's name.
+
+    Args:
+        mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
+            Mesoscope-VR data acquisition system.
+    """
+    # If necessary, renames the 'shared' mesoscope_data directory to use the name specific to the preprocessed session.
+    # It is essential that this is done before preprocessing, as the preprocessing pipeline uses this semantic for
+    # finding and pulling the mesoscope data for the processed session.
+    general_path = mesoscope_data.scanimagepc_data.mesoscope_data_path
+    session_specific_path = mesoscope_data.scanimagepc_data.session_specific_path
+
+    # Note, the renaming only happens if the session-specific cache does not exist, the general mesoscope_data cache
+    # exists, and it is not empty (has files inside).
+    if not session_specific_path.exists() and general_path.exists() and list(general_path.glob("*")):
+        general_path.rename(session_specific_path)
+        # Generates a new empty mesoscope_data directory to support future runtimes.
+        ensure_directory_exists(general_path)
+
+
+def purge_session(session_data: SessionData) -> None:
+    """Removes all data and directories associated with the input session from all Mesoscope-VR system machines and
+    long-term storage destinations.
+
+    Notes:
+        This function is extremely dangerous and should be used with caution. It is designed to remove all data from
+        failed or no longer necessary sessions from all storage locations. Never use this function on sessions that
+        contain valid scientific data.
+
+    Args:
+        session_data: The SessionData instance that defines the session whose data needs to be removed.
+    """
+    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
+    system_configuration = get_system_configuration()
+
+    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
+    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
+
+    # Queries the paths to all known session data directories, including the long-term storage destinations.
+    deletion_candidates = [session_data.raw_data_path.parent]
+    deletion_candidates.extend(destination.session_path for destination in mesoscope_data.destinations.destinations)
+    deletion_candidates.append(mesoscope_data.scanimagepc_data.session_specific_path)
+
+    # Sessions without the nk.bin marker successfully initialized their runtime and likely contain valid data, so the
+    # deletion requires explicit user confirmation. Sessions with the nk.bin marker are considered safe to remove.
+    deleted = delete_session_directories(
+        candidates=tuple(deletion_candidates),
+        session_name=session_data.session_name,
+        require_confirmation=not session_data.raw_data.nk_path.exists(),
+    )
+
+    # Aborts without further changes if the user declined the deletion.
+    if not deleted:
+        return
+
+    # Ensures that the mesoscope_data directory is reset, in case it has any lingering files from the purged runtime.
+    for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
+        file.unlink(missing_ok=True)
+
+    message = "Session data purging: Complete."
+    console.echo(message=message, level=LogLevel.SUCCESS)
+
+
+def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
+    """Transfers all sessions performed by the specified animal from the source project to the target project across
+    all storage locations.
+
+    Notes:
+        The migration strategy depends on whether the host-machine is configured with any long-term storage
+        destinations. Systems with at least one configured destination treat the preferred (first configured)
+        destination as the source of truth. They preprocess any sessions that still reside only on the host machine,
+        then pull, re-preprocess, and purge each session. Systems without any configured destination keep all data on
+        the acquisition host machine, so the migration reduces to an on-premises operation that relocates each locally
+        stored session to the target project directory and reassigns it. The persistent data relocation and the cleanup
+        of redundant directories apply to both modes.
+
+        The migration fails with an error if any session cannot be preprocessed or migrated. Each session is handled as
+        an isolated unit that cleans up after itself on failure, so re-running the migration after resolving the error
+        resumes from the failed session without manual intervention.
+
+    Args:
+        animal: The animal for which to migrate the data.
+        source_project: The name of the project from which to migrate the data.
+        target_project: The name of the project to which the data should be migrated.
+
+    Raises:
+        FileNotFoundError: If the target project does not exist on the host machine.
+    """
+    console.echo(message=f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
+
+    # Queries the system configuration parameters, which includes the filesystem configuration.
+    system_configuration = get_system_configuration()
+    filesystem = system_configuration.filesystem
+
+    # Resolves the local data root and the per-project animal directories used in the migration process. The data
+    # root is owned by the Sollertia platform, not by the Mesoscope-VR filesystem configuration.
+    data_root = get_data_root()
+    source_animal = AnimalData(root=data_root, project_name=source_project, animal_id=animal)
+    destination_animal = AnimalData(root=data_root, project_name=target_project, animal_id=animal)
+    destination_local_root = destination_animal.path
+
+    # If the target project does not exist, aborts with an error.
+    if not destination_local_root.parent.exists():
+        message = (
+            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
+            f"target project does not exist. Use the 'slsa configure project' command to create the project before "
+            f"migrating animals to this project."
+        )
+        console.error(message=message, error=FileNotFoundError)
+
+    # Ensures that the root directory for the processed animal exists on the local machine.
+    ensure_directory_exists(destination_local_root)
+
+    # Resolves the configured long-term storage destinations in preference order (configuration order). The first
+    # configured destination is treated as the source of truth from which the session data is pulled.
+    configured_destinations = [(name, root) for name, root in filesystem.storage_directories.items() if root != Path()]
+
+    # Systems without any configured long-term storage destination keep all data on the acquisition host machine, so
+    # the session migration reduces to a local relocation. Systems with at least one destination pull from the
+    # preferred (first configured) destination.
+    if not configured_destinations:
+        _migrate_sessions_on_premises(
+            source_animal=source_animal,
+            destination_animal=destination_animal,
+            target_project=target_project,
+        )
+    else:
+        preferred_name, preferred_root = configured_destinations[0]
+        _migrate_sessions_via_destination(
+            destination_name=preferred_name,
+            storage_animal=source_animal.for_root(root=preferred_root),
+            source_animal=source_animal,
+            destination_animal=destination_animal,
+            target_project=target_project,
+        )
+
+    console.echo(message="Migrating persistent data directories...")
+    # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
+    # data, if any was resolved for any processed session. Skips the move when the mesoscope directory is unconfigured
+    # (an unset root resolves to an unsafe relative path, matching the deletion guard below) or when the source
+    # directory was never created, which is the case for animals that never ran a mesoscope-imaging session or for an
+    # accidental re-run after a prior migration already moved the data.
+    old_path = filesystem.mesoscope_directory.joinpath(source_project, animal)
+    new_path = filesystem.mesoscope_directory.joinpath(target_project, animal)
+    if filesystem.mesoscope_directory != Path() and old_path.exists():
+        if new_path.exists():
+            shutil.rmtree(new_path)
+        shutil.move(src=old_path, dst=new_path)
+
+    # Also moves the VRPC persistent data for the animal between projects. Skips the move when the source persistent
+    # directory was never created for this animal.
+    old_path = source_animal.persistent_data_path
+    new_path = destination_animal.persistent_data_path
+    if old_path.exists():
+        if new_path.exists():
+            shutil.rmtree(new_path)
+        shutil.move(src=old_path, dst=new_path)
+
+    # Removes the old animal directory from the acquisition host machine and all configured long-term storage
+    # destinations. This also removes any lingering data not moved during the migration process, ensuring that each
+    # animal is found under at most a single project directory everywhere. Unconfigured destinations are skipped, since
+    # their unset roots resolve to relative paths that are unsafe to delete.
+    deletion_root_candidates = [
+        filesystem.mesoscope_directory,
+        data_root,
+        *filesystem.storage_directories.values(),
+    ]
+    deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]
+    for candidate in console.track(
+        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
+    ):
+        delete_directory(directory_path=candidate)
+
+    console.echo(message="Migration: Complete.", level=LogLevel.SUCCESS)
+
+
 def _launch_face_tracking(
     session_data: SessionData, configuration: MesoscopeVideoTracking
 ) -> subprocess.Popen[bytes] | None:
@@ -394,183 +571,6 @@ def _purge_window_checking_behavior_data(session_data: SessionData) -> None:
             delete_directory(directory_path=directory)
             message = f"Window checking {directory.name} directory: Removed."
             console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
-    """Renames the shared 'mesoscope_data' ScanImagePC directory to include the target session's name.
-
-    Args:
-        mesoscope_data: The MesoscopeData instance that defines the session-specific filesystem layout of the
-            Mesoscope-VR data acquisition system.
-    """
-    # If necessary, renames the 'shared' mesoscope_data directory to use the name specific to the preprocessed session.
-    # It is essential that this is done before preprocessing, as the preprocessing pipeline uses this semantic for
-    # finding and pulling the mesoscope data for the processed session.
-    general_path = mesoscope_data.scanimagepc_data.mesoscope_data_path
-    session_specific_path = mesoscope_data.scanimagepc_data.session_specific_path
-
-    # Note, the renaming only happens if the session-specific cache does not exist, the general mesoscope_frames cache
-    # exists, and it is not empty (has files inside).
-    if not session_specific_path.exists() and general_path.exists() and list(general_path.glob("*")):
-        general_path.rename(session_specific_path)
-        # Generates a new empty mesoscope_frames directory to support future runtimes.
-        ensure_directory_exists(general_path)
-
-
-def purge_session(session_data: SessionData) -> None:
-    """Removes all data and directories associated with the input session from all Mesoscope-VR system machines and
-    long-term storage destinations.
-
-    Notes:
-        This function is extremely dangerous and should be used with caution. It is designed to remove all data from
-        failed or no longer necessary sessions from all storage locations. Never use this function on sessions that
-        contain valid scientific data.
-
-    Args:
-        session_data: The SessionData instance that defines the session whose data needs to be removed.
-    """
-    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
-    system_configuration = get_system_configuration()
-
-    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
-    mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
-
-    # Queries the paths to all known session data directories, including the long-term storage destinations.
-    deletion_candidates = [session_data.raw_data_path.parent]
-    deletion_candidates.extend(destination.session_path for destination in mesoscope_data.destinations.destinations)
-    deletion_candidates.append(mesoscope_data.scanimagepc_data.session_specific_path)
-
-    # Sessions without the nk.bin marker successfully initialized their runtime and likely contain valid data, so the
-    # deletion requires explicit user confirmation. Sessions with the nk.bin marker are considered safe to remove.
-    deleted = delete_session_directories(
-        candidates=tuple(deletion_candidates),
-        session_name=session_data.session_name,
-        require_confirmation=not session_data.raw_data.nk_path.exists(),
-    )
-
-    # Aborts without further changes if the user declined the deletion.
-    if not deleted:
-        return
-
-    # Ensures that the mesoscope_data directory is reset, in case it has any lingering files from the purged runtime.
-    for file in mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"):
-        file.unlink(missing_ok=True)
-
-    message = "Session data purging: Complete."
-    console.echo(message=message, level=LogLevel.SUCCESS)
-
-
-def migrate_animal_between_projects(animal: str, source_project: str, target_project: str) -> None:
-    """Transfers all sessions performed by the specified animal from the source project to the target project across
-    all storage locations.
-
-    Notes:
-        The migration strategy depends on whether the host-machine is configured with any long-term storage
-        destinations. Systems with at least one configured destination treat the preferred (first configured)
-        destination as the source of truth. They preprocess any sessions that still reside only on the host machine,
-        then pull, re-preprocess, and purge each session. Systems without any configured destination keep all data on
-        the acquisition host machine, so the migration reduces to an on-premises operation that relocates each locally
-        stored session to the target project directory and reassigns it. The persistent data relocation and the cleanup
-        of redundant directories apply to both modes.
-
-        The migration fails with an error if any session cannot be preprocessed or migrated. Each session is handled as
-        an isolated unit that cleans up after itself on failure, so re-running the migration after resolving the error
-        resumes from the failed session without manual intervention.
-
-    Args:
-        animal: The animal for which to migrate the data.
-        source_project: The name of the project from which to migrate the data.
-        target_project: The name of the project to which the data should be migrated.
-
-    Raises:
-        FileNotFoundError: If the target project does not exist on the host machine.
-    """
-    console.echo(message=f"Migrating the animal {animal} from project {source_project} to project {target_project}...")
-
-    # Queries the system configuration parameters, which includes the filesystem configuration.
-    system_configuration = get_system_configuration()
-    filesystem = system_configuration.filesystem
-
-    # Resolves the local data root and the per-project animal directories used in the migration process. The data
-    # root is owned by the Sollertia platform, not by the Mesoscope-VR filesystem configuration.
-    data_root = get_data_root()
-    source_animal = AnimalData(root=data_root, project_name=source_project, animal_id=animal)
-    destination_animal = AnimalData(root=data_root, project_name=target_project, animal_id=animal)
-    destination_local_root = destination_animal.path
-
-    # If the target project does not exist, aborts with an error.
-    if not destination_local_root.parent.exists():
-        message = (
-            f"Unable to migrate the animal {animal} from project {source_project} to project {target_project}. The "
-            f"target project does not exist. Use the 'slsa configure project' command to create the project before "
-            f"migrating animals to this project."
-        )
-        console.error(message=message, error=FileNotFoundError)
-
-    # Ensures that the root directory for the processed animal exists on the local machine.
-    ensure_directory_exists(destination_local_root)
-
-    # Resolves the configured long-term storage destinations in preference order (configuration order). The first
-    # configured destination is treated as the source of truth from which the session data is pulled.
-    configured_destinations = [(name, root) for name, root in filesystem.storage_directories.items() if root != Path()]
-
-    # Systems without any configured long-term storage destination keep all data on the acquisition host machine, so
-    # the session migration reduces to a local relocation. Systems with at least one destination pull from the
-    # preferred (first configured) destination.
-    if not configured_destinations:
-        _migrate_sessions_on_premises(
-            source_animal=source_animal,
-            destination_animal=destination_animal,
-            target_project=target_project,
-        )
-    else:
-        preferred_name, preferred_root = configured_destinations[0]
-        _migrate_sessions_via_destination(
-            destination_name=preferred_name,
-            storage_animal=source_animal.for_root(root=preferred_root),
-            source_animal=source_animal,
-            destination_animal=destination_animal,
-            target_project=target_project,
-        )
-
-    console.echo(message="Migrating persistent data directories...")
-    # Moves ScanImagePC persistent data for the animal between projects. This preserves existing MotionEstimator and ROI
-    # data, if any was resolved for any processed session. Skips the move when the mesoscope directory is unconfigured
-    # (an unset root resolves to an unsafe relative path, matching the deletion guard below) or when the source
-    # directory was never created, which is the case for animals that never ran a mesoscope-imaging session or for an
-    # accidental re-run after a prior migration already moved the data.
-    old_path = filesystem.mesoscope_directory.joinpath(source_project, animal)
-    new_path = filesystem.mesoscope_directory.joinpath(target_project, animal)
-    if filesystem.mesoscope_directory != Path() and old_path.exists():
-        if new_path.exists():
-            shutil.rmtree(new_path)
-        shutil.move(src=old_path, dst=new_path)
-
-    # Also moves the VRPC persistent data for the animal between projects. Skips the move when the source persistent
-    # directory was never created for this animal.
-    old_path = source_animal.persistent_data_path
-    new_path = destination_animal.persistent_data_path
-    if old_path.exists():
-        if new_path.exists():
-            shutil.rmtree(new_path)
-        shutil.move(src=old_path, dst=new_path)
-
-    # Removes the old animal directory from the acquisition host machine and all configured long-term storage
-    # destinations. This also removes any lingering data not moved during the migration process, ensuring that each
-    # animal is found under at most a single project directory everywhere. Unconfigured destinations are skipped, since
-    # their unset roots resolve to relative paths that are unsafe to delete.
-    deletion_root_candidates = [
-        filesystem.mesoscope_directory,
-        data_root,
-        *filesystem.storage_directories.values(),
-    ]
-    deletion_candidates = [root.joinpath(source_project, animal) for root in deletion_root_candidates if root != Path()]
-    for candidate in console.track(
-        iterable=deletion_candidates, description="Deleting redundant animal directories", unit="directory"
-    ):
-        delete_directory(directory_path=candidate)
-
-    console.echo(message="Migration: Complete.", level=LogLevel.SUCCESS)
 
 
 def _verify_and_get_stack_size(file: Path) -> int:
@@ -808,8 +808,8 @@ def _resolve_active_channel_count(channels_active: object) -> int:
     Notes:
         ScanImage stores the indices of the active channels rather than their count. A single active channel is
         serialized either as a scalar or as a one-element MATLAB vector, and multiple active channels as a longer
-        vector, which the tifffile parser resolves into a flat list for a row vector and into a list of one-element
-        lists for a column vector.
+        vector. The tifffile parser resolves such a vector into a flat list for a row vector and into a list of
+        one-element lists for a column vector.
 
     Args:
         channels_active: The raw value of the 'SI.hChannels.channelsActive' frame-invariant metadata field.
@@ -849,7 +849,7 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
         It is safe to call this function for sessions that did not acquire mesoscope frames. It is designed to
         abort early if it cannot discover the cached mesoscope frames data for the target session on the ScanImagePC.
 
-        This function expects that the data acquisition runtime renames the generic mesoscope_frames ScanImagePC
+        This function expects that the data acquisition runtime renames the generic mesoscope_data ScanImagePC
         directory that stores the session's data to include the session name.
 
     Args:
@@ -888,11 +888,10 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     if missing_files:
         missing_files_listing = ", ".join(sorted(missing_files))
         message = (
-            f"Unable to pull the mesoscope-acquired data from the ScanImagePC to the VRPC. The "
-            f"'mesoscope_frames' ScanImage PC directory for the session {session_name} is missing the "
-            f"following required files: {missing_files_listing}. Ensure that all required files are stored in the "
-            f"session-specific 'mesoscope_frames' directory on the ScanImagePC and rerun the command that caused this "
-            f"error."
+            f"Unable to pull the mesoscope-acquired data from the ScanImagePC to the VRPC. The ScanImagePC directory "
+            f"for the session {session_name} is missing the following required files: {missing_files_listing}. "
+            f"Ensure that all required files are stored in the session-specific directory named after the session "
+            f"on the ScanImagePC and rerun the command that caused this error."
         )
         console.error(message=message, error=RuntimeError)
 
@@ -972,8 +971,8 @@ def _preprocess_mesoscope_directory(
             f"Unable to preprocess the mesoscope-acquired data for the session {session_data.session_name}. The "
             f"session's 'raw_mesoscope_frames' directory must store the MotionEstimator.me, fov.roi, and zstack.tiff "
             f"files pulled from the ScanImagePC, but the following files are missing: {missing_files_listing}. Remove "
-            f"the {image_directory} directory, restore the session's 'mesoscope_frames' directory on the ScanImagePC, "
-            f"and rerun the command that caused this error."
+            f"the {image_directory} directory, restore the session-specific ScanImagePC directory named after the "
+            f"session, and rerun the command that caused this error."
         )
         console.error(message=message, error=RuntimeError)
 
@@ -1035,7 +1034,7 @@ def _preprocess_mesoscope_directory(
     )
 
     # Uses partial to bind the constant arguments to the processing function.
-    process_func = partial(
+    process_stack_partial = partial(
         _process_stack,
         output_directory=output_directory,
         batch_size=100,
@@ -1047,7 +1046,7 @@ def _preprocess_mesoscope_directory(
     stack_metadata: dict[int, dict[str, NDArray[Any]]] = {}
     with ProcessPoolExecutor(max_workers=processes) as executor:
         futures = {
-            executor.submit(process_func, tiff_file, frame_number): frame_number
+            executor.submit(process_stack_partial, tiff_file, frame_number): frame_number
             for tiff_file, frame_number in valid_stacks
         }
 

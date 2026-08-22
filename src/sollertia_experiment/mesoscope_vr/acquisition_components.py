@@ -90,10 +90,6 @@ class _ResponseDelayTimer:
         self._timer: PrecisionTimer | None = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
         atexit.register(self._release)
 
-    def _release(self) -> None:
-        """Drops the wrapped PrecisionTimer so its C++ object is freed before the ataraxis_time extension teardown."""
-        self._timer = None
-
     def delay(self, delay: int, *, allow_sleep: bool = False, block: bool = False) -> None:
         """Delays for the requested number of milliseconds, forwarding to the wrapped PrecisionTimer."""
         if self._timer is None:
@@ -112,6 +108,10 @@ class _ResponseDelayTimer:
         if self._timer is None:
             return 0
         return self._timer.elapsed
+
+    def _release(self) -> None:
+        """Drops the wrapped PrecisionTimer so its C++ object is freed before the ataraxis_time extension teardown."""
+        self._timer = None
 
 
 RESPONSE_DELAY_TIMER: _ResponseDelayTimer = _ResponseDelayTimer()
@@ -209,8 +209,8 @@ class TrialState:
 
         Notes:
             The accessor indexes the per-trial puff duration array at the current trial position, so it is only valid
-            while that position is below the length of the array, which is what trial_completed() returning True
-            guarantees for the trial it just resolved.
+            while that position is below the length of the array. A trial_completed() call returning True guarantees
+            that bound for the trial it just resolved.
 
         Returns:
             True if the current trial stores a nonzero gas puff duration, False otherwise.
@@ -591,9 +591,9 @@ def setup_mesoscope(
     wait_for_enter(message="Press Enter to continue")
 
     # Once the operator confirms the mesoscope is configured, offers to replace the animal's persisted reference with
-    # the snapshot about to be generated. The prompt only appears when a reference already exists; the first reference
-    # for an animal is persisted automatically during preprocessing. The decision is captured here, before the lengthy
-    # generation, because the runtime proceeds directly into the session once the mesoscope is armed.
+    # the snapshot about to be generated. The prompt only appears when a reference already exists, because the first
+    # reference for an animal is persisted automatically during preprocessing. The decision is captured here, before
+    # the lengthy generation, because the runtime proceeds directly into the session once the mesoscope is armed.
     if (
         mesoscope_data.scanimagepc_data.motion_estimator_path.exists()
         or mesoscope_data.scanimagepc_data.roi_path.exists()
@@ -681,13 +681,13 @@ def finalize_session_descriptor(
     """Collects the supervising experimenter's session notes, writes the completed descriptor to the session's
     raw_data directory, and caches a copy to the animal's persistent directory.
 
-    The notes are entered through a blocking terminal prompt instead of by manually editing the session_descriptor.yaml
-    file, removing the filesystem round-trip previously required to annotate each session. For window checking
-    sessions, the experimenter is additionally prompted for the cranial window quality rating, which is otherwise left
-    at its default value. For the other session types, the experimenter is instead shown the session water summary and
-    prompted for the total water the animal should receive, and the additional volume to hand-deliver is recorded as
-    the experimenter-given water volume. The prompt defaults to the total water the animal received on the previous
-    session, falling back to a standard default when no prior session recorded a water intake.
+    The notes are entered through a blocking terminal prompt, so annotating a session takes no filesystem round-trip.
+    For window checking sessions, the experimenter is additionally prompted for the cranial window quality rating,
+    which is otherwise left at its default value. For the other session types, the experimenter is instead shown the
+    session water summary and prompted for the total water the animal should receive, and the additional volume to
+    hand-deliver is recorded as the experimenter-given water volume. The prompt defaults to the total water the animal
+    received on the previous session, falling back to a standard default when no prior session recorded a water
+    intake.
 
     Args:
         descriptor: The session_descriptor.yaml-convertible instance to complete and cache to the acquired session's
@@ -696,8 +696,8 @@ def finalize_session_descriptor(
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
     """
     # Window checking sessions additionally capture the experimenter's cranial window quality rating on a 0-3 scale.
-    # The rating is propagated to the surgery log Google Sheet during preprocessing; the other session types do not
-    # track a window quality rating.
+    # The rating is propagated to the surgery log Google Sheet during preprocessing, and the other session types do
+    # not track a window quality rating.
     if isinstance(descriptor, WindowCheckingDescriptor):
         descriptor.surgery_quality = collect_surgery_quality(session_name=session_data.session_name)
     else:
@@ -834,8 +834,8 @@ def _stage_reference_file(source: Path, destination: Path) -> Path:
     """Copies the source file into a temporary file beside its destination and flushes it to disk.
 
     Notes:
-        The temporary file is named after the destination and the writing process, so two runtimes publishing the same
-        destination cannot collide on it, and it is created in the destination's own directory so the rename that
+        The temporary file is named after the destination and the writing process, so two runtimes publishing the
+        same destination cannot collide on it. It is created in the destination's own directory, so the rename that
         publishes it stays within one filesystem.
 
     Args:

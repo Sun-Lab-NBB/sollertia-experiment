@@ -497,8 +497,8 @@ class RuntimeControlUI:
 def collect_experimenter_notes(session_name: str) -> str:
     """Prompts the supervising experimenter for the session's notes through a blocking terminal prompt.
 
-    The prompt runs during the session's teardown and re-asks until the experimenter submits a non-empty note,
-    preserving the mandatory annotation step that previously required editing the session_descriptor.yaml file by hand.
+    The prompt runs during the session's teardown and re-asks until the experimenter submits a non-empty note, which
+    keeps the session annotation step mandatory.
 
     Args:
         session_name: The name of the session being annotated, shown in the prompt so the experimenter can confirm
@@ -553,7 +553,7 @@ def collect_experimenter_given_water_volume(
 
     The prompt runs during a non-window-checking session's teardown. It first reports the animal's current and previous
     weights, the total water the animal received on the previous session, and the water delivered during this session,
-    then asks for the total water the animal should receive. Only session water counts toward that total; water
+    then asks for the total water the animal should receive. Only session water counts toward that total, so water
     dispensed while the system was paused is excluded.
 
     Args:

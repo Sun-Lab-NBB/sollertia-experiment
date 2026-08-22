@@ -28,8 +28,8 @@ _NEGATIVE_RESPONSES: frozenset[str] = frozenset({"n", "no"})
 def wait_for_enter(message: str = "Press Enter to continue") -> None:
     """Blocks runtime execution until the user presses the Enter key.
 
-    This replaces the single-key "press any key" prompt, which advanced on any keystroke and could consume key presses
-    buffered ahead of time. Requiring the Enter key ensures the user deliberately resumes the runtime.
+    Requiring the Enter key, rather than any keystroke, ensures the user deliberately resumes the runtime, because a
+    single-key prompt consumes key presses buffered ahead of time.
 
     Args:
         message: The message displayed to the user while the runtime waits for the Enter key.
@@ -43,7 +43,7 @@ def request_confirmation(message: str, *, default: bool = False) -> bool:
 
     Args:
         message: The yes-or-no question presented to the user.
-        default: The response used when the user submits an empty answer.
+        default: Determines whether an empty answer is treated as a confirmation.
 
     Returns:
         True if the user confirmed the action, False if the user declined it.
