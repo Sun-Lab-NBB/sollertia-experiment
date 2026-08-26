@@ -54,10 +54,10 @@ class ZaberMotors:
         (https://software.zaber.com/zaber-launcher/download) installed on the VRPC.
 
     Args:
-        zaber_positions: The ZaberPositions instance that stores the positions of Zaber motors used during a
-            previous runtime or None if there is no previous position data to use.
         zaber_configuration: The MesoscopeVRAssets instance that stores the configuration parameters for the
             managed Zaber devices.
+        zaber_positions: The ZaberPositions instance that stores the positions of Zaber motors used during a
+            previous runtime or None if there is no previous position data to use.
 
     Attributes:
         _headbar: The ZaberConnection instance that manages the headbar holder motor group.
@@ -74,7 +74,7 @@ class ZaberMotors:
             previous runtime or None if there is no previous position data to use.
     """
 
-    def __init__(self, zaber_positions: ZaberPositions | None, zaber_configuration: MesoscopeVRAssets) -> None:
+    def __init__(self, zaber_configuration: MesoscopeVRAssets, zaber_positions: ZaberPositions | None) -> None:
         # Initializes the ZaberConnection instances for all Zaber controller groups.
         self._headbar: ZaberConnection = ZaberConnection(port=zaber_configuration.headbar_port)
         self._wheel: ZaberConnection = ZaberConnection(port=zaber_configuration.wheel_port)
