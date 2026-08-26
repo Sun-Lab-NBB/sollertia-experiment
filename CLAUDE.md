@@ -119,9 +119,9 @@ Hardware discovery and configuration authoring are owned by different skills. Yo
 before helping users interact with the acquisition system.
 
 **For hardware discovery and health checks**, use the `experiment:acquisition-system-setup` and
-`experiment:system-health-check` skills. These drive this library's `sle get` commands together with the `video` and
-`communication` MCP servers, and the `assets` plugin does NOT expose hardware-discovery tools. Invoke them when users
-want to:
+`experiment:system-health-check` skills. These drive this library's `sle mcp` server and `sle get` commands together
+with read-only `slsa mcp` checks and the `axvs mcp` and `axci mcp` servers of the `video` and `communication` plugins.
+The `assets` plugin does NOT expose hardware-discovery tools. Invoke them when users want to:
 - Discover hardware (cameras, microcontrollers, Zaber motors, MQTT broker)
 - Verify hardware connectivity and storage mounts before running experiments
 - Troubleshoot hardware connectivity issues
@@ -153,6 +153,11 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 | `src/sollertia_experiment/cross_system/` | Cross-system utilities shared by all acquisition systems |
 | `src/sollertia_experiment/vr_task/`      | VR task driver: Unity MQTT coupling, trial decomposition |
 | `assets/mesoscope_vr/`                   | MATLAB assets deployed to the ScanImagePC, not packaged  |
+
+`experiment:vr-driver-interface` owns the host side of the Unity coupling alone. The Unity side lives in the
+`sollertia-virtual-reality` project and is owned by the unity plugin, through `unity:mqtt-contract` for the topic
+constants, `unity:play-mode` and `unity:task-scenes` for the editor bridge and scene activation, and
+`unity:gimbl-framework` for the VR framework itself.
 
 ### Architecture
 
@@ -194,7 +199,9 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
 4. Use the system's own configuration dataclasses for hardware parameters (`mesoscope_vr/system.py`)
 
-**Modifying CLI commands:** (see `mesoscope:mesoscope-vr-runtime`)
+**Modifying CLI commands:** (see `experiment:acquisition-system-setup` for the six `sle get` commands,
+`mesoscope:mesoscope-vr-runtime` for the `sle mesoscope` commands, and `experiment:library-extension` for the
+`_register_subcommands()` registration seam)
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
    `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`,

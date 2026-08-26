@@ -163,11 +163,14 @@ rewriting it. The reusable substrate spans this library and
 its own controller against the shared seams above rather than subclassing a common runtime.
 
 For the seam-by-seam catalog of everything a new acquisition system touches across this library and
-sollertia-micro-controllers, use the **experiment** plugin's `library-extension` skill. From there,
-`system-design-pipeline` orders the build phases, `acquisition-system-design` covers the configuration and binding
-layer, and `acquisition-system-runtime` covers the runtime layer. The `microcontroller-interface`, `zaber-interface`,
-and `vr-driver-interface` skills cover the individual hardware and Unity coupling seams. See
-[AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills) for the skill inventory.
+sollertia-micro-controllers, use the **experiment** plugin's `library-extension` skill. The **assets** plugin's
+`library-extension` skill owns the matching sollertia-shared-assets registry half, which is the `AcquisitionSystems`
+member, the `AcquisitionSystems`-keyed dispatch registries, the per-system record dataclasses, and the import-time
+contract checks. Both skills are required to land a new system. From there, `system-design-pipeline` orders the build
+phases, `acquisition-system-design` covers the configuration and binding layer, and `acquisition-system-runtime` covers
+the runtime layer. The `microcontroller-interface`, `zaber-interface`, and `vr-driver-interface` skills cover the
+individual hardware and Unity coupling seams. See [AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills) for the
+skill inventory.
 
 ___
 
@@ -316,8 +319,8 @@ Specific information about the cameras and related imaging hardware, as well as 
 parameters used by each camera, is available in the
 [camera configuration snapshot folder](https://drive.google.com/drive/folders/1l9dLT2s1ysdA3lLpYfLT1gQlTXotq79l?usp=sharing).
 
-***Note,*** for low-level camera configuration, use the **video** plugin's camera skills. For how the cameras integrate
-with the Mesoscope-VR system, use the **mesoscope** plugin's `mesoscope-vr` skill.
+***Note,*** for low-level camera configuration, use the **video** plugin's `camera-interface` and `camera-setup`
+skills. For how the cameras integrate with the Mesoscope-VR system, use the **mesoscope** plugin's `mesoscope-vr` skill.
 
 ### MicroControllers
 To interface with all other hardware components **other** than cameras and Zaber motors, the Mesoscope-VR system uses
@@ -330,8 +333,8 @@ code running on each microcontroller, see the
 [microcontroller repository](https://github.com/Sun-Lab-NBB/sollertia-micro-controllers).
 
 ***Note,*** for the registry of paired Module and ModuleInterface classes, use the **experiment** plugin's
-`microcontroller-interface` skill. The **communication** and **microcontroller** plugins cover the underlying base API
-and firmware side.
+`microcontroller-interface` skill. The **communication** plugin's `microcontroller-interface` skill covers the
+underlying base API, and the **microcontroller** plugin's `firmware-module` skill covers the firmware side.
 
 ### Virtual Reality Task Environment (Unity)
 The task environment used in all Mesoscope-VR experiments is rendered and controlled by the Unity game engine. To make
@@ -368,8 +371,8 @@ Virtual Reality task template (`vr_configuration.yaml`, the corridor cues, VR en
 renders). Together they capture both halves of the experiment.
 
 ***Note,*** for the MQTT topic contract, the editor bridge, and the cue-sequence decomposition, use the **experiment**
-plugin's `vr-driver-interface` skill. For authoring tasks, scenes, and task templates on the Unity side, use the
-**unity** plugin.
+plugin's `vr-driver-interface` skill. For authoring tasks and scenes on the Unity side, use the **unity** plugin. Task
+template authoring is owned by the **assets** plugin's `task-templates` skill.
 
 ### Google Sheets API Integration
 
@@ -407,7 +410,8 @@ the Google Sheets. Register it using the
 `slsa configure credentials -c google -f /path/to/downloaded_key.json`
 
 This copies the key into the platform credentials directory under its canonical name (`google_credentials.json`). Use
-`slsa get credentials -c google` to report the registered path.
+`slsa get credentials -c google` to report the registered path. The **assets** plugin's `working-directory` skill owns
+this registration path.
 
 ***Critical!*** If the key is not registered but a Google Sheet identifier is configured for the system, the
 preprocessing runtime aborts with a `FileNotFoundError` when it attempts to resolve the credentials. Register the key
@@ -641,6 +645,10 @@ following files and subdirectories:
     `experiment_configuration.yaml`, it contains the information necessary to fully replicate the Virtual Reality
     environment used during the experiment.
 
+***Note,*** the generic read, write, and validate surface for `session_descriptor.yaml` and `hardware_state.yaml` is
+owned by the **assets** plugin's `session-descriptors` and `session-hardware-state` skills, and the Mesoscope-VR field
+schemas of both files are owned by the **mesoscope** plugin's `mesoscope-vr-session-schema` skill.
+
 ### Shared Temporary Data
 The session data hierarchy additionally uses the following temporary marker files and directories which are cleared
 before the raw data is transmitted to the long-term storage destinations:
@@ -784,7 +792,8 @@ Sollertia platform-level setting shared across libraries. It is the directory un
 sessions are stored on the main acquisition machine. Set it on the main acquisition machine with the `slsa configure
 data-root` command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library)
 and view it with the `slsa get data-root` command. The data root must be configured before running data acquisition
-sessions. The root directories of any long-term storage destinations remain part of the system configuration.
+sessions. The root directories of any long-term storage destinations remain part of the system configuration. The
+**assets** plugin's `working-directory` skill owns the data root, the working directory, and the platform credentials.
 
 ***Note,*** Each acquisition system uses unique configuration parameters. Additionally, the sollertia-experiment library
 always assumes that any machine (PC) can only be used by a single data-acquisition system (is permanently a part of that
@@ -804,7 +813,7 @@ All data acquisition sessions require a valid project to run. To create a new pr
 command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This
 command can only be called on the main PC of a properly configured data-acquisition system (see Step 0 above). As part
 of its runtime, this command generates the root project directory on all machines that make up the data acquisition
-system.
+system. Use the **assets** plugin's `project-hierarchy` skill for project creation and for walking the project tree.
 
 ### Step 2: Creating an Experiment
 
@@ -826,9 +835,10 @@ five optional ones:
 | `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)  |
 | `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                      |
 
-For information about the available experiment configuration parameters in the precursor file, read the *API
-documentation* of the appropriate data-acquisition system available from the
-[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library.
+For information about the available experiment configuration parameters in the precursor file, use the **mesoscope**
+plugin's `mesoscope-vr-experiment-schema` skill, which owns the field schema, the trial classes, and the
+`from_task_template` seeding this command performs. The task template named by `-t`, `--template` is owned by the
+**assets** plugin's `task-templates` skill.
 
 **Mesoscope-VR Note:** Mesoscope-VR experiments also require a valid Virtual Reality environment generated through the
 [sollertia-virtual-reality](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality) package. The experiment
@@ -1155,19 +1165,20 @@ The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five
 of the library it targets. Installing a plugin registers its MCP server with compatible clients and makes its skills
 available:
 
-| Plugin       | Targets                   | MCP server | Role                                                                        |
-|--------------|---------------------------|------------|-----------------------------------------------------------------------------|
-| `assets`     | sollertia-shared-assets   | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
-| `unity`      | sollertia-virtual-reality | (relay)    | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
-| `experiment` | sollertia-experiment      | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
-| `mesoscope`  | sollertia-experiment      | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
-| `forging`    | sollertia-forgery         | `slf mcp`  | Downstream behavior processing and analysis                                 |
+| Plugin       | Targets                                                          | MCP server | Role                                                                        |
+|--------------|------------------------------------------------------------------|------------|-----------------------------------------------------------------------------|
+| `assets`     | sollertia-shared-assets                                          | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
+| `unity`      | sollertia-virtual-reality                                        | (relay)    | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
+| `experiment` | sollertia-experiment, sollertia-micro-controllers                | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
+| `mesoscope`  | sollertia-experiment, sollertia-shared-assets, sollertia-forgery | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
+| `forging`    | sollertia-forgery                                                | `slf mcp`  | Downstream behavior processing and analysis                                 |
 
 The **unity** plugin uses the Unity relay served by the assets plugin's `slsa` MCP server and the McpBridge editor
-plugin, and it requires the assets plugin. The **mesoscope** plugin requires both the experiment plugin's `sle mcp`
-server and the assets plugin's `slsa mcp` server. Low-level hardware work additionally draws on the ataraxis
-marketplace's **video** and **communication** plugins and their MCP servers. The `sle mcp` server intentionally omits
-the assets, video, and communication tools, which are served by those dependencies' own MCP servers.
+plugin, and it requires the assets plugin. The **mesoscope** plugin requires the experiment plugin's `sle mcp` server
+and the assets plugin's `slsa mcp` server, and it requires the forging plugin's `slf mcp` server for the processing and
+forging half. Low-level hardware work additionally draws on the ataraxis marketplace's **video** and **communication**
+plugins and their MCP servers. The `sle mcp` server intentionally omits the assets, video, and communication tools,
+which are served by those dependencies' own MCP servers.
 
 ### Skills
 
