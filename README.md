@@ -145,18 +145,29 @@ rewriting it. The reusable substrate spans this library and
   registries and reuses the rest of the hierarchy unchanged.
 - **The hardware-agnostic Virtual Reality task driver.** The `vr_task` driver encapsulates the MQTT contract with the
   Unity game engine, the editor bridge that drives scene activation and Play Mode, and the cue-sequence-to-trial
-  decomposition. The driver is hardware-agnostic: it surfaces typed Virtual Reality task events that any acquisition
-  system can dispatch against its own hardware.
+  decomposition. The driver is hardware-agnostic, surfacing typed Virtual Reality task events that any acquisition
+  system dispatches against its own hardware.
+- **The `interfaces/` registration seams.** A new system's MCP tools register themselves. `interfaces/mcp_server.py`
+  globs `*_tools.py` directly inside the `interfaces/` directory and imports every match, so adding
+  `interfaces/{system}_tools.py` is the whole edit. The CLI side carries no equivalent discovery. A command group
+  reaches the top-level `sle` group through two hand-written lines, one import and one `add_command()` call, inside
+  `_register_subcommands()` in `interfaces/entry_points.py`.
+- **The shared preprocessing primitives.** `cross_system/data_preprocessing.py` provides log archive assembly, video
+  renaming, surgery record snapshotting, storage push, session directory deletion, and project migration. Each system
+  names its behavior `DataLogger` after `BEHAVIOR_LOGGER_NAME`, which is how log assembly locates the log directory,
+  and resolves its own configuration into the system-agnostic `StorageDestinations` interface that the shared
+  utilities operate on.
 
 ***Note,*** the platform does not expose a generic runtime base class. `MesoscopeVRSystem` (in
 `mesoscope_vr/system_controller.py`) is currently the only acquisition-system controller, and each new system implements
 its own controller against the shared seams above rather than subclassing a common runtime.
 
-For the end-to-end process of designing and building a new acquisition system, use the **experiment** plugin's
-`system-design-pipeline` and `acquisition-system-design` skills (plus `acquisition-system-runtime` for the runtime
-layer). The `microcontroller-interface`, `zaber-interface`, and `vr-driver-interface` skills cover the individual
-hardware and Unity coupling seams. See [AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills) for the full skill
-inventory.
+For the seam-by-seam catalog of everything a new acquisition system touches across this library and
+sollertia-micro-controllers, use the **experiment** plugin's `library-extension` skill. From there,
+`system-design-pipeline` orders the build phases, `acquisition-system-design` covers the configuration and binding
+layer, and `acquisition-system-runtime` covers the runtime layer. The `microcontroller-interface`, `zaber-interface`,
+and `vr-driver-interface` skills cover the individual hardware and Unity coupling seams. See
+[AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills) for the skill inventory.
 
 ___
 
@@ -801,7 +812,19 @@ All projects that involve scientific experiments also need to define at least on
 Experiment configurations are unique for each data acquisition system and are stored inside .yaml files named after the
 experiment. To generate a new experiment configuration file, use the `sle mesoscope configure experiment` command. This
 command generates a **precursor** experiment configuration file inside the **configuration** subdirectory, stored under
-the root project directory on the main PC of the data acquisition system.
+the root project directory on the main PC of the data acquisition system. The command takes three required options and
+five optional ones:
+
+| Option                   | Description                                                                             |
+|--------------------------|-----------------------------------------------------------------------------------------|
+| `-p`, `--project`        | The project that receives the new experiment configuration file (required)              |
+| `-e`, `--experiment`     | The name given to the experiment and to its configuration file (required)               |
+| `-t`, `--template`       | The task template to build from, as the filename without the .yaml extension (required) |
+| `-sc`, `--state-count`   | The number of runtime states the experiment supports (default 1)                        |
+| `--reward-size`          | The default water reward volume for lick-type trials, in microliters (default 5.0)      |
+| `--reward-tone-duration` | The default reward tone duration for lick-type trials, in milliseconds (default 300)    |
+| `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)  |
+| `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                      |
 
 For information about the available experiment configuration parameters in the precursor file, read the *API
 documentation* of the appropriate data-acquisition system available from the
@@ -963,7 +986,11 @@ delete valid data***. This mode can be triggered using:
 
 `sle mesoscope delete -sp SESSION_PATH`
 
-***Warning!*** This command is not recommended for most users.
+***Warning!*** This command is not recommended for most users. The CLI form carries no command-line confirmation gate,
+so it reaches the purge as soon as it is invoked, while the `delete_session_tool` MCP tool refuses to act until the
+caller passes `confirm_deletion`. The purge itself still opens a blocking terminal confirmation prompt for any session
+that finished initialization, and skips that prompt only for a session that still carries the `nk.bin`
+uninitialized-session marker.
 
 #### Migrating Animal Data Between Projects
 
@@ -1047,10 +1074,10 @@ server tools and the skills described here.
 
 ### MCP Server
 
-This library provides a single MCP server that exposes the tools backing the `sle get` and `sle mesoscope` CLI layers
-for AI agent integration. The server intentionally does not re-expose assets owned by the sollertia-shared-assets,
-ataraxis-video-system, and ataraxis-communication-interface dependencies, which are available through the dependencies'
-own MCP servers.
+This library provides a single MCP server that exposes two tool sets for AI agent integration, the hardware-agnostic
+tools of `interfaces/get_tools.py` and the Mesoscope-VR tools of `interfaces/mesoscope_vr_tools.py`. The server
+intentionally does not re-expose assets owned by the sollertia-shared-assets, ataraxis-video-system, and
+ataraxis-communication-interface dependencies, which are available through the dependencies' own MCP servers.
 
 #### Starting the Server
 
@@ -1064,7 +1091,10 @@ The `-t/--transport` option selects the transport, either `stdio` (the default) 
 
 #### Available Tools
 
-The general, hardware-agnostic tools mirror the `sle get` CLI layer:
+The seven hardware-agnostic tools and the six `sle get` commands overlap on three pairs only, `get_zaber_devices_tool`
+with `sle get zaber`, `get_checksum_tool` with `sle get checksum`, and `check_unity_bridge_tool` with `sle get unity`.
+The camera, microcontroller, and serial port discovery commands have no tool, and the four tools that read, write, and
+validate Zaber non-volatile settings or probe a filesystem mount have no CLI command.
 
 | Tool                                | Description                                                      |
 |-------------------------------------|------------------------------------------------------------------|
@@ -1076,7 +1106,11 @@ The general, hardware-agnostic tools mirror the `sle get` CLI layer:
 | `check_mount_accessibility_tool`    | Verifies a filesystem path exists and is writable                |
 | `check_unity_bridge_tool`           | Checks whether the Unity Editor MCP Bridge is reachable          |
 
-The Mesoscope-VR-specific tools mirror the `sle mesoscope` CLI layer:
+The Mesoscope-VR tools cover a different surface from the `sle mesoscope` CLI layer. Four commands pair one to one
+with a tool, `check-bridge`, `preprocess`, `delete`, and `migrate`, and `configure system` shares the configuration
+write path with `write_system_configuration_tool`. The other six commands, `configure experiment`, `maintain`, and
+the four `run` subcommands, have no tool, and the ten configuration inspection and session snapshot tools have no
+CLI command.
 
 | Tool                                         | Description                                                      |
 |----------------------------------------------|------------------------------------------------------------------|
@@ -1095,6 +1129,10 @@ The Mesoscope-VR-specific tools mirror the `sle mesoscope` CLI layer:
 | `preprocess_session_tool`                    | Preprocesses a session's data on the host machine                |
 | `delete_session_tool`                        | Removes a session from all storage locations                     |
 | `migrate_animal_tool`                        | Transfers all sessions for an animal between projects            |
+
+***Warning!*** `set_zaber_device_setting_tool` and `delete_session_tool` refuse to act without an explicit confirmation
+argument. Calling either one without `confirm` or `confirm_deletion` returns an error that previews the pending change
+or spells out the consequences, so the calling agent asks the user before retrying with `yes` or `no`.
 
 #### Claude Desktop Configuration
 
@@ -1123,7 +1161,7 @@ available:
 | `unity`      | sollertia-virtual-reality | (relay)    | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
 | `experiment` | sollertia-experiment      | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
 | `mesoscope`  | sollertia-experiment      | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
-| `forging`    | sollertia-forgery         | `sl-mcp`   | Downstream behavior processing and analysis                                 |
+| `forging`    | sollertia-forgery         | `slf mcp`  | Downstream behavior processing and analysis                                 |
 
 The **unity** plugin uses the Unity relay served by the assets plugin's `slsa` MCP server and the McpBridge editor
 plugin, and it requires the assets plugin. The **mesoscope** plugin requires both the experiment plugin's `sle mcp`
@@ -1134,8 +1172,10 @@ the assets, video, and communication tools, which are served by those dependenci
 ### Skills
 
 The **experiment** plugin ships the system-agnostic core skills, and the **mesoscope** plugin ships the Mesoscope-VR
-system-specific skills. With the exception of `system-health-check`, which is user-invocable as a slash command, the
-skills are orchestrated by AI agents rather than invoked directly by operators.
+system-specific skills. The table below lists the skills that target this library. The mesoscope plugin also ships five
+downstream processing skills that target the sollertia-forgery library instead. With the exception of
+`system-health-check`, which is user-invocable as a slash command, the skills are orchestrated by AI agents rather than
+invoked directly by operators.
 
 | Plugin       | Skill                              | Purpose                                                                       |
 |--------------|------------------------------------|-------------------------------------------------------------------------------|
@@ -1144,6 +1184,7 @@ skills are orchestrated by AI agents rather than invoked directly by operators.
 | `experiment` | `acquisition-system-design`        | Design pattern: system configuration, binding classes, runtime orchestrator   |
 | `experiment` | `acquisition-system-runtime`       | Runtime pattern: per-mode logic, state machine, dispatch, control UI          |
 | `experiment` | `acquisition-system-setup`         | Discover and verify connected acquisition hardware                            |
+| `experiment` | `library-extension`                | Extension seams for a new acquisition system across sle and slmc              |
 | `experiment` | `system-health-check`              | Pre-flight checks of configuration, mounts, and hardware (user-invocable)     |
 | `experiment` | `zaber-interface`                  | Implement Zaber motor interfaces and binding classes                          |
 | `experiment` | `microcontroller-interface`        | Paired Module + ModuleInterface registry and conventions                      |

@@ -81,6 +81,7 @@ Configuration below).
 | `experiment:acquisition-system-design`        | Design a new acquisition system (config, bindings, runtime)          |
 | `experiment:acquisition-system-runtime`       | Runtime pattern: per-mode logic, state machine, dispatch             |
 | `experiment:acquisition-system-setup`         | Discover and verify connected acquisition hardware                   |
+| `experiment:library-extension`                | Extension seams for a new acquisition system across sle and slmc     |
 | `experiment:system-health-check`              | Pre-flight checks of configuration, mounts, and hardware             |
 | `experiment:zaber-interface`                  | Implement Zaber motor interfaces and binding classes                 |
 | `experiment:microcontroller-interface`        | Paired Module + ModuleInterface registry and conventions             |
@@ -97,12 +98,18 @@ Configuration below).
 ## MCP server
 
 The library ships one MCP server, started with `sle mcp` and selecting its transport through `-t/--transport`
-(`stdio` by default, `streamable-http` otherwise). It exposes the tools backing both CLI layers, with the
-hardware-agnostic tools in `interfaces/get_tools.py` and the Mesoscope-VR tools in `interfaces/mesoscope_vr_tools.py`.
-The README lists every tool with its purpose.
+(`stdio` by default, `streamable-http` otherwise). It exposes two tool sets, the hardware-agnostic tools in
+`interfaces/get_tools.py` and the Mesoscope-VR tools in `interfaces/mesoscope_vr_tools.py`. Neither set mirrors its
+`sle` CLI counterpart, and the README lists every tool with its purpose.
+
+`set_zaber_device_setting_tool` and `delete_session_tool` refuse to act until the caller passes an explicit `confirm`
+or `confirm_deletion` value. You MUST warn the user about the consequences and obtain a decision before retrying
+either tool with `yes`.
 
 `interfaces/mcp_server.py` discovers tool modules by their `*_tools.py` filename suffix and imports each one, so a new
 acquisition system registers its tools by adding `interfaces/{system}_tools.py` and needs no edit to the server module.
+The CLI side carries no equivalent discovery, so that system's command group reaches the top-level `sle` group only
+after one import and one `add_command()` call are added to `_register_subcommands()` in `interfaces/entry_points.py`.
 The server deliberately omits the assets, video, and communication tools, which the `slsa mcp`, `axvs mcp`, and
 `axci mcp` servers of those dependencies serve instead.
 
@@ -141,7 +148,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 
 | Directory                                | Purpose                                                  |
 |------------------------------------------|----------------------------------------------------------|
-| `src/sollertia_experiment/interfaces/`   | CLI entry points (consolidated under the `sle` command)  |
+| `src/sollertia_experiment/interfaces/`   | The `sle` CLI groups, the MCP server, and its tools      |
 | `src/sollertia_experiment/mesoscope_vr/` | Mesoscope-VR system implementation (current system)      |
 | `src/sollertia_experiment/cross_system/` | Cross-system utilities shared by all acquisition systems |
 | `src/sollertia_experiment/vr_task/`      | VR task driver: Unity MQTT coupling, trial decomposition |
@@ -149,9 +156,9 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 
 ### Architecture
 
-- A single `sle` CLI entry point delegates to two layers: a general, hardware-agnostic discovery group (`sle get`)
-  and a per-system group that combines configuration, acquisition, and data management for one system
-  (`sle mesoscope` for the Mesoscope-VR system)
+- A single `sle` CLI entry point delegates to two command groups, a general, hardware-agnostic discovery group
+  (`sle get`) and a per-system group that combines configuration, acquisition, and data management for one system
+  (`sle mesoscope` for the Mesoscope-VR system), alongside the `sle mcp` command that starts the MCP server
 - Hardware abstraction via binding classes (Zaber motors, cameras, microcontrollers)
 - Shared memory IPC for GUI-runtime communication
 - Session-based data management with distributed storage
@@ -167,7 +174,7 @@ the **Mesoscope-VR** two-photon imaging system, which combines brain imaging wit
 
 **Adding hardware to mesoscope-vr:** (see `experiment:acquisition-system-design` and `mesoscope:mesoscope-vr`)
 
-1. Add configuration dataclasses in `sollertia-shared-assets`
+1. Add or extend the per-subsystem configuration dataclass in `mesoscope_vr/system.py`
 2. Implement binding classes in `sollertia-experiment`
 3. Integrate the binding classes with the `MesoscopeVRSystem` lifecycle in `mesoscope_vr/system_controller.py`
 
@@ -185,7 +192,7 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `cross_system/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
 3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
-4. Use configuration dataclasses from `sollertia-shared-assets` for hardware parameters
+4. Use the system's own configuration dataclasses for hardware parameters (`mesoscope_vr/system.py`)
 
 **Modifying CLI commands:** (see `mesoscope:mesoscope-vr-runtime`)
 
@@ -195,13 +202,17 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
    `lick-training`, `run-training`, and `experiment` subcommands)
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
-4. Register commands with the appropriate Click group (the `get` and `mesoscope` groups are auto-registered on the
-   top-level `sle` group via `entry_points.py`)
+4. Register commands with the appropriate Click group. The `get` and `mesoscope` groups reach the top-level `sle`
+   group through two explicit imports and two `add_command()` calls inside `_register_subcommands()` in
+   `entry_points.py`, so a third group requires editing that function
 
-**Modifying sollertia-shared-assets (configuration dataclasses):**
+**Modifying sollertia-shared-assets (session records and registries):**
 
-Changes to system configuration require updates in `sollertia-shared-assets` (`../sollertia-shared-assets/`). Use the
-`assets:*` skills from the sollertia-shared-assets plugin for guidance.
+sollertia-shared-assets (`../sollertia-shared-assets/`) owns the session descriptor, hardware state, experiment
+configuration, and raw data classes, together with the registries in `registries.py` that key them by session type and
+by acquisition system. Use the `assets:library-extension` skill for the registry extension path and the other
+`assets:*` skills for authoring. System configuration is owned by this repository, in
+`cross_system/system_configuration.py` and each system's `system.py`.
 
 **Modifying sollertia-micro-controllers (hardware modules):**
 
@@ -214,3 +225,8 @@ base API, and the `microcontroller:firmware-module` skill for the firmware side.
 
 Use the `experiment:data-management` skill, which drives the `preprocess`, `migrate`, and `delete` operations exposed
 by the `sle mesoscope` CLI and the `sle mcp` server.
+
+**Adding a new acquisition system:**
+
+Invoke `experiment:library-extension` first for the catalog of seams a new system touches across this library and
+sollertia-micro-controllers, then `experiment:system-design-pipeline` for the build phase order.
