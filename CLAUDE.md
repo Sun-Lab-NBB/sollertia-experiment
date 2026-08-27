@@ -3,7 +3,7 @@
 ## Session start behavior
 
 At the beginning of each coding session, before making any code changes, you should build a comprehensive
-understanding of the codebase by invoking the `/explore-codebase` skill.
+understanding of the codebase by invoking the `automation:explore-codebase` skill.
 
 This ensures you:
 - Understand the project architecture before modifying code
@@ -29,13 +29,17 @@ Failure to invoke the appropriate skill results in style violations.
 
 ## Cross-referenced library verification
 
-Sollertia platform projects often depend on other `ataraxis-*` or `sollertia-*` libraries. These libraries may be stored
-locally in the same parent directory that holds this project's repository root.
+This library depends on `ataraxis-time`, `ataraxis-base-utilities`, `ataraxis-data-structures`,
+`ataraxis-transport-layer-pc`, `ataraxis-communication-interface`, `ataraxis-video-system`, and
+`sollertia-shared-assets`, each pinned to an exact version in `pyproject.toml`. It also drives the
+`sollertia-micro-controllers` firmware over serial, the `sollertia-virtual-reality` Unity project over MQTT, and the
+`sollertia-video-tracking` `slvt infer` command as a conda subprocess. Local clones of all of these typically live
+alongside this repository, in its parent directory.
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
 
-1. **Check for local version**: Look for the library in the parent directory (e.g., `../ataraxis-video-system/`,
-   `../sollertia-shared-assets/`).
+1. **Check for local version**: Look for the library in the parent directory (e.g.,
+   `../ataraxis-communication-interface/`, `../ataraxis-video-system/`, and `../sollertia-shared-assets/`).
 
 2. **Compare versions**: If a local copy exists, compare its version against the latest release or main branch on
    GitHub:
@@ -60,8 +64,8 @@ The sollertia marketplace ships two plugins that target this library directly: t
 plugin and the `mesoscope` plugin (Mesoscope-VR system-specific skills, layered on `experiment`). Both are backed by the
 `sollertia-experiment` MCP server (`sle mcp`). The ataraxis marketplace ships the `automation` plugin used across all
 Sollertia platform repositories. Low-level hardware work also draws on the `video`, `communication`, and
-`microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Acquisition System
-Configuration below).
+`microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Downstream library integration
+below).
 
 | Skill                                         | Description                                                          |
 |-----------------------------------------------|----------------------------------------------------------------------|
@@ -88,12 +92,14 @@ Configuration below).
 | `experiment:vr-driver-interface`              | VR task driver, Unity MQTT contract, trial decomposition             |
 | `experiment:data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`           |
 | `experiment:google-sheets-processing`         | Implement SurgeryLog / WaterLog Google Sheets processors             |
+| `experiment:cli-reference`                    | Document the `sle` root, `sle mcp`, and `sle get` CLI surface        |
 | `experiment:experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                        |
 | `mesoscope:mesoscope-vr`                      | Mesoscope-VR hardware inventory, configuration, and bindings         |
 | `mesoscope:mesoscope-vr-runtime`              | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
 | `mesoscope:mesoscope-vr-snapshots`            | Read/write per-session Zaber and Mesoscope position snapshots        |
 | `mesoscope:mesoscope-vr-session-schema`       | Mesoscope-VR session descriptor and hardware-state field schema      |
 | `mesoscope:mesoscope-vr-experiment-schema`    | Mesoscope-VR experiment configuration and trial-class field schema   |
+| `mesoscope:mesoscope-vr-cli-reference`        | Reference for the `sle mesoscope` commands and their options         |
 
 ## MCP server
 
@@ -113,7 +119,7 @@ after one import and one `add_command()` call are added to `_register_subcommand
 The server deliberately omits the assets, video, and communication tools, which the `slsa mcp`, `axvs mcp`, and
 `axci mcp` servers of those dependencies serve instead.
 
-## Acquisition system configuration
+## Downstream library integration
 
 Hardware discovery and configuration authoring are owned by different skills. You MUST invoke the appropriate skill
 before helping users interact with the acquisition system.
@@ -136,6 +142,24 @@ hardware and calibration parameters, also consult the `mesoscope:mesoscope-vr` s
 - Change system parameters (ports, calibration values, thresholds)
 
 Example triggers: "Set up the mesoscope system", "Change the lick threshold".
+
+## Companion library synchronization
+
+The companion `sollertia-micro-controllers` (`../sollertia-micro-controllers/`) C++ library is the firmware counterpart
+to this library, and parts of this codebase track it in lockstep. Any change to a firmware `Module` subclass's parameter
+structure, status codes, command codes, controller IDs, keepalive interval, or per-target module layout requires a
+matching change here: the system-agnostic `ModuleInterface` wrappers in `cross_system/module_interfaces.py`, the
+per-system binding classes in `mesoscope_vr/binding_classes.py`, and the `MesoscopeMicroControllers` configuration
+dataclass in `mesoscope_vr/system.py`. The `experiment:microcontroller-interface` skill owns the paired Module +
+ModuleInterface list, and `microcontroller:firmware-module` covers the firmware side.
+
+## Distribution model
+
+The package ships to PyPI as `sollertia-experiment` and installs the `sle` CLI. Its Claude Code skills ship separately,
+through the [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace, in its `experiment` and `mesoscope`
+plugins, and the `experiment` plugin also registers the `sle mcp` server. An agent asked to add or change a skill edits
+`sollertia/plugins/<plugin>/skills/<skill>/SKILL.md` in that repository rather than this one, and bumps that plugin's
+`version` in its `.claude-plugin/plugin.json` exactly once per branch.
 
 ## Project context
 
@@ -200,8 +224,8 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 4. Use the system's own configuration dataclasses for hardware parameters (`mesoscope_vr/system.py`)
 
 **Modifying CLI commands:** (see `experiment:acquisition-system-setup` for the six `sle get` commands,
-`mesoscope:mesoscope-vr-runtime` for the `sle mesoscope` commands, and `experiment:library-extension` for the
-`_register_subcommands()` registration seam)
+`mesoscope:mesoscope-vr-cli-reference` for the `sle mesoscope` command and option surface, and
+`experiment:library-extension` for the `_register_subcommands()` registration seam)
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
    `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`,
@@ -223,10 +247,7 @@ by acquisition system. Use the `assets:library-extension` skill for the registry
 
 **Modifying sollertia-micro-controllers (hardware modules):**
 
-Changes require updates in `sollertia-micro-controllers` (`../sollertia-micro-controllers/`) for firmware and
-`sollertia-experiment` for the PC interface. Use the `experiment:microcontroller-interface` skill for the paired
-Module + ModuleInterface registry and conventions, the `communication:microcontroller-interface` skill for the AXCI
-base API, and the `microcontroller:firmware-module` skill for the firmware side.
+See `## Companion library synchronization` above for the lockstep contract and the owning skills.
 
 **Managing session data (preprocess, migrate, delete):**
 
