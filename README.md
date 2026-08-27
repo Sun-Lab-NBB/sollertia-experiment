@@ -1183,8 +1183,8 @@ which are served by those dependencies' own MCP servers.
 ### Skills
 
 The **experiment** plugin ships the system-agnostic core skills, and the **mesoscope** plugin ships the Mesoscope-VR
-system-specific skills. The table below lists the skills that target this library. The mesoscope plugin also ships five
-downstream processing skills that target the sollertia-forgery library instead. With the exception of
+system-specific skills. The table below lists the skills that target this library. The mesoscope plugin also ships
+seven downstream processing skills that target the sollertia-forgery library instead. With the exception of
 `system-health-check`, which is user-invocable as a slash command, the skills are orchestrated by AI agents rather than
 invoked directly by operators.
 
@@ -1202,12 +1202,14 @@ invoked directly by operators.
 | `experiment` | `vr-driver-interface`              | VR task driver, Unity MQTT contract, and cue-sequence trial decomposition     |
 | `experiment` | `google-sheets-processing`         | Implement Google Sheets SurgeryLog / WaterLog processors                      |
 | `experiment` | `data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`                    |
+| `experiment` | `cli-reference`                    | Document the `sle` root, `sle mcp`, and `sle get` commands and options        |
 | `experiment` | `experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                                 |
 | `mesoscope`  | `mesoscope-vr`                     | Mesoscope-VR hardware inventory, configuration, and bindings                  |
 | `mesoscope`  | `mesoscope-vr-runtime`             | Mesoscope-VR state machine, orchestrator, UIs, and `sle mesoscope` CLI        |
 | `mesoscope`  | `mesoscope-vr-snapshots`           | Read/write per-session Zaber and Mesoscope position snapshots                 |
 | `mesoscope`  | `mesoscope-vr-session-schema`      | Mesoscope-VR session descriptor and hardware-state field schema               |
 | `mesoscope`  | `mesoscope-vr-experiment-schema`   | Mesoscope-VR experiment configuration and trial-class field schema            |
+| `mesoscope`  | `mesoscope-vr-cli-reference`       | Reference for the `sle mesoscope` commands, options, and MCP tool mapping     |
 
 #### Client Registration
 
