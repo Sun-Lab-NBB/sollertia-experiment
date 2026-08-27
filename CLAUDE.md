@@ -32,9 +32,9 @@ Failure to invoke the appropriate skill results in style violations.
 This library depends on `ataraxis-time`, `ataraxis-base-utilities`, `ataraxis-data-structures`,
 `ataraxis-transport-layer-pc`, `ataraxis-communication-interface`, `ataraxis-video-system`, and
 `sollertia-shared-assets`, each pinned to an exact version in `pyproject.toml`. It also drives the
-`sollertia-micro-controllers` firmware over serial, the `sollertia-virtual-reality` Unity project over MQTT, and the
-`sollertia-video-tracking` `slvt infer` command as a conda subprocess. Local clones of all of these typically live
-alongside this repository, in its parent directory.
+`sollertia-micro-controllers` firmware over serial and the `sollertia-virtual-reality` Unity project over MQTT. Local
+clones of all of these typically live alongside this repository, in its parent directory. The external tool bindings
+below are reached as subprocesses instead, so none of them is version-checked here.
 
 **Before writing code that interacts with a cross-referenced library, you MUST:**
 
@@ -93,6 +93,7 @@ below).
 | `experiment:data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`           |
 | `experiment:google-sheets-processing`         | Implement SurgeryLog / WaterLog Google Sheets processors             |
 | `experiment:cli-reference`                    | Document the `sle` root, `sle mcp`, and `sle get` CLI surface        |
+| `experiment:external-tool-bindings`           | Bind a tool that cannot be installed beside the stack                |
 | `experiment:experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                        |
 | `mesoscope:mesoscope-vr`                      | Mesoscope-VR hardware inventory, configuration, and bindings         |
 | `mesoscope:mesoscope-vr-runtime`              | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
@@ -148,10 +149,33 @@ Example triggers: "Set up the mesoscope system", "Change the lick threshold".
 The companion `sollertia-micro-controllers` (`../sollertia-micro-controllers/`) C++ library is the firmware counterpart
 to this library, and parts of this codebase track it in lockstep. Any change to a firmware `Module` subclass's parameter
 structure, status codes, command codes, controller IDs, keepalive interval, or per-target module layout requires a
-matching change here: the system-agnostic `ModuleInterface` wrappers in `cross_system/module_interfaces.py`, the
-per-system binding classes in `mesoscope_vr/binding_classes.py`, and the `MesoscopeMicroControllers` configuration
-dataclass in `mesoscope_vr/system.py`. The `experiment:microcontroller-interface` skill owns the paired Module +
-ModuleInterface list, and `microcontroller:firmware-module` covers the firmware side.
+matching change here. That change touches the system-agnostic `ModuleInterface` wrappers in
+`cross_system/module_interfaces.py`, the per-system binding classes in `mesoscope_vr/binding_classes.py`, and the
+`MesoscopeMicroControllers` configuration dataclass in `mesoscope_vr/system.py`. The
+`experiment:microcontroller-interface` skill owns the paired Module + ModuleInterface list, and
+`microcontroller:firmware-module` covers the firmware side.
+
+## External tool bindings
+
+An acquisition system may need a tool this stack cannot host, because its runtime, its dependency pins, its license, or
+its own launcher forbids installing or driving it beside the stack. Such a tool is bound rather than registered. It is
+invoked as a subprocess, it is never imported, and what it contributes is the artifact it writes into the session tree
+rather than an API. The `experiment:external-tool-bindings` skill owns the convention, the admission test that decides
+whether a dependency registers or binds, and the workflow for adding one. Invoke it before wiring any tool that cannot
+share this environment.
+
+This library carries the producer half of every binding. A binding declares the tool's address in identity fields on
+the acquisition system's configuration, and launches only when every one of them is set. It resolves that address at
+call time rather than at import time. It returns silently when the host has not configured the tool, and logs a warning
+and returns when the tool's input is missing, so preprocessing completes in both cases. The consumer half lives in
+`sollertia-forgery`, where a donated locator finds the artifact and decides whether the dependent job is possible for
+that session. `forging:processing-input-format` owns that half.
+
+One binding exists today. Mesoscope-VR preprocessing invokes `slvt infer` from `sollertia-video-tracking` through
+`conda run`, because DeepLabCut supports only Python 3.10 to 3.12 and the numpy 1.x series, against this stack's
+Python 3.14 and numpy 2. That inference runs alongside the other preprocessing stages and is joined before the
+checksum, so a failed run aborts the transfer and retains the local session copy. The `mesoscope:mesoscope-vr` skill
+documents the invocation and its configuration fields.
 
 ## Distribution model
 
