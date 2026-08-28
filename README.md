@@ -158,9 +158,12 @@ rewriting it. The reusable substrate spans this library and
   and resolves its own configuration into the system-agnostic `StorageDestinations` interface that the shared
   utilities operate on.
 
-***Note,*** the platform does not expose a generic runtime base class. `MesoscopeVRSystem` (in
-`mesoscope_vr/system_controller.py`) is currently the only acquisition-system controller, and each new system implements
-its own controller against the shared seams above rather than subclassing a common runtime.
+***Note,*** the platform does not expose a generic runtime base class, and that is a design decision rather than a
+missing abstraction. An acquisition system's engine is defined by a physical hardware inventory and by
+laboratory-local wiring conventions that no base class carries honestly. Each system therefore composes its controller
+from the shared seams above and scaffolds it from the worked example, settling the hardware-defined decisions with the
+engineer who owns the rig. `MesoscopeVRSystem` (in `mesoscope_vr/system_controller.py`) is currently the only
+acquisition-system controller, and it is that worked example.
 
 For the seam-by-seam catalog of everything a new acquisition system touches across this library and
 sollertia-micro-controllers, use the **experiment** plugin's `library-extension` skill. The **assets** plugin's
