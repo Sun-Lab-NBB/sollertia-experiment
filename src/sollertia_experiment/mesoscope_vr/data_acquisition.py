@@ -148,7 +148,7 @@ def window_checking_logic(
     # values when no previous data exists, so a re-check of a previously imaged animal does not clobber its positions.
     if mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
         # Loading and re-dumping the data updates the file contents to integrate any upstream changes in the
-        # sollertia-shared-assets MesoscopePositions structure.
+        # MesoscopePositions structure defined by this library's mesoscope_vr.system module.
         previous_positions = MesoscopePositions.from_yaml(file_path=mesoscope_data.vrpc_data.mesoscope_positions_path)
         previous_positions.to_yaml(file_path=session_data.system_raw_data.mesoscope_positions_path)
     else:
