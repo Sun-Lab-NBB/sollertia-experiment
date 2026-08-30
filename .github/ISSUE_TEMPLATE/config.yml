@@ -3,6 +3,9 @@ contact_links:
   - name: API documentation
     url: https://sollertia-experiment-api-docs.netlify.app/
     about: Consult the API documentation before opening an issue.
-  - name: AI development assets
+  - name: Sollertia AI development assets
+    url: https://github.com/Sun-Lab-NBB/sollertia/issues
+    about: Report issues with the assets, unity, experiment, mesoscope, and forging plugin skills.
+  - name: Ataraxis AI development assets
     url: https://github.com/Sun-Lab-NBB/ataraxis/issues
-    about: Report issues with Claude Code skills and other AI development assets in the ataraxis repository.
+    about: Report issues with the automation plugin skills in the ataraxis repository.
