@@ -250,8 +250,8 @@ class MesoscopeVRSystem:
             # coordinates with the positions loaded from the snapshot stored inside the persistent_data directory of
             # the animal.
             if self._mesoscope_data.vrpc_data.mesoscope_positions_path.exists():
-                # Loading and re-dumping the data updates the contents of the position's file to dynamically integrate
-                # any upstream changes in the sollertia-shared-assets into the file structure.
+                # Loading and re-dumping the data updates the file contents to integrate any upstream changes in the
+                # MesoscopePositions structure defined by this library's mesoscope_vr.system module.
                 previous_mesoscope_positions: MesoscopePositions = MesoscopePositions.from_yaml(
                     file_path=self._mesoscope_data.vrpc_data.mesoscope_positions_path
                 )
