@@ -87,9 +87,9 @@ two handles, the function accepts only two optional name-value arguments. The fi
 Mesoscope data root (default `F:\mesodata`), beneath which the function resolves the shared `mesoscope_data` output
 folder and the per-animal persistent reference hierarchy. The second is `broker`, the MQTT broker address described
 below. The VRPC system configuration owns all remaining acquisition parameters, such as the z-step, z-range, and
-exclusion zone, and delivers them over MQTT with each command that consumes them: the reference-generation command
-carries the full set, while the recovery command carries only the plane-geometry subset. Use
-`help runAcquisition` in the MATLAB Command Window for the full argument documentation.
+exclusion zone, and delivers them over MQTT with each command that consumes them. The reference-generation command
+carries the full set, while the recovery command carries only the plane-geometry subset. Use `help runAcquisition` in
+the MATLAB Command Window for the full argument documentation.
 
 ***Critical!*** `runAcquisition` is a **lock-in** function. It is launched **once** and then runs a persistent command
 loop that services VRPC commands continuously and **holds the MATLAB command line for the entire acquisition runtime**.
