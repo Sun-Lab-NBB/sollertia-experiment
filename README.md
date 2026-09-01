@@ -37,7 +37,8 @@ ___
   management.
 - Hardware abstraction through binding classes for Zaber motors, machine-vision cameras, and microcontrollers.
 - Session-based data management with distributed, redundant long-term storage.
-- An `sle mcp` MCP server and a Claude Code marketplace plugin for AI-assisted operation.
+- An `sle mcp` MCP server and two Claude Code marketplace plugins, **experiment** and **mesoscope**, for
+  AI-assisted operation.
 - Apache 2.0 License.
 
 ___
@@ -130,9 +131,9 @@ rewriting it. The reusable substrate spans this library and
   registers it at import time via `register_system_configuration()`. Registration is the only system-specific wiring
   the configuration file lifecycle requires, and resolution, creation, and loading of the on-disk YAML are all shared.
 - **The shared session data hierarchy and registries.** The 4-level root/project/animal/session hierarchy, the
-  `SessionData` model, and the per-system record registries (session descriptors, hardware states, and experiment
-  configurations) are owned by sollertia-shared-assets. A new system contributes its record schemas to those
-  registries and reuses the rest of the hierarchy unchanged.
+  `SessionData` model, and the record registries (session descriptors keyed by session type, hardware states and
+  experiment configurations keyed by acquisition system) are owned by sollertia-shared-assets. A new system
+  contributes its record schemas to those registries and reuses the rest of the hierarchy unchanged.
 - **The hardware-agnostic Virtual Reality task driver.** The `vr_task` driver encapsulates the MQTT contract with the
   Unity game engine, the editor bridge that drives scene activation and Play Mode, and the cue-sequence-to-trial
   decomposition. The driver is hardware-agnostic, surfacing typed Virtual Reality task events that any acquisition
@@ -213,7 +214,7 @@ library.
 - [Zaber Launcher](https://software.zaber.com/zaber-launcher/download) version **2025.12.30-1**.
 - [Unity Game Engine](https://unity.com/products/unity-engine) version **6000.3.23f1 LTS**.
 
-***Note,*** face-camera pose inference is an ***optional*** post-processing step, so the dependency below is required
+***Note,*** face-camera pose inference is an ***optional*** preprocessing step, so the dependency below is required
 only by projects that choose to run it. FFMPEG, MvImpactAcquire, and Zaber Launcher are required by every
 Mesoscope-VR session. The MQTT broker is required by window checking and experiment sessions, and the Unity Game
 Engine by experiment sessions alone.
@@ -230,8 +231,8 @@ Engine by experiment sessions alone.
 #### Hardware Dependencies
 
 ***Note,*** These dependencies only apply to the **VRPC**. Hardware dependencies for the **ScanImagePC** are determined
-and controlled by MBF and ThorLabs. This library benefits from the **ScanImagePC** being outfitted with a 10-GB network
-card, but this is not a strict requirement.
+and controlled by MBF and ThorLabs. This library benefits from the **ScanImagePC** being outfitted with a 10-Gigabit
+network card, but this is not a strict requirement.
 
 - [Nvidia GPU](https://www.nvidia.com/en-us/). This library uses GPU hardware acceleration to encode acquired video
   data. Any Nvidia GPU with hardware encoding chip(s) should work as expected. The library was tested with **RTX 4090**.
@@ -397,7 +398,7 @@ identifier (`surgery_sheet_id`, `water_log_sheet_id`) is set in the Mesoscope-VR
 
 ##### Setting up Google Sheets API Access
 
-**Skip to the next section if a service Google Sheets API account already exists.** Most lab members can safely ignore
+**Skip to the next section if a Google Sheets API service account already exists.** Most lab members can safely ignore
 this section, as service accounts are managed at the platform level rather than by individual lab members.
 
 1. Log into the [Google Cloud Console](https://console.cloud.google.com/welcome).
@@ -445,8 +446,8 @@ runtimes.
 
 ##### File System Access
 To support the sollertia-experiment runtime, the ScanImagePC's filesystem must be accessible to the **VRPC** via the
-Server Message Block version 3 (SMB3) or equivalent protocol. Since ScanImagePC uses Windows, it is advised to use the
-SMB3 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC
+Server Message Block version 3 (SMB3) or equivalent protocol. Since the ScanImagePC uses Windows, it is advised to use
+the SMB3 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC
 must be configured to share the root Mesoscope output directory with the VRPC over the local network. This is required
 to fetch the data acquired by the Mesoscope during preprocessing and to retrieve the desktop screenshot generated
 during session setup. The Mesoscope acquisition itself is controlled over MQTT, not through the shared directory (see
@@ -475,8 +476,8 @@ client require.
 Deployments on shared or untrusted networks should configure broker authentication instead.
 
 After updating the configuration, restart Mosquitto and ensure the VRPC firewall allows inbound connections on the
-broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when arming the Mesoscope, for
-example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
+broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when launching the Mesoscope
+control interface, for example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
 
 ##### Default Screenshot Directory
 During runtime, the sollertia-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop
@@ -497,8 +498,9 @@ user to call the **runAcquisition** MATLAB function on the ScanImagePC. This fun
 runtime-critical tasks, including setting up the acquisition, generating and applying the online motion correction, and
 servicing the acquisition commands the VRPC issues over MQTT. The function connects to the same MQTT broker as the Unity
 Virtual Reality task, using a dedicated *Mesoscope* topic namespace that does not overlap with the Unity topics, and
-reports command reception and progress back to the VRPC. Lick training and run training sessions never connect to the
-ScanImagePC, so they require neither runAcquisition nor the ScanImage GUI.
+reports command reception and progress back to the VRPC. Lick training and run training sessions never command the
+Mesoscope over MQTT, so they require neither runAcquisition nor the ScanImage GUI. They still resolve the shared
+ScanImagePC Mesoscope directory as part of their session data layout.
 
 The runAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
 [Mesoscope-VR ScanImage PC assets guide](assets/mesoscope_vr/README.md) for instructions on deploying the function to
@@ -674,8 +676,8 @@ before the raw data is transmitted to the long-term storage destinations:
    millions of .npy files at runtime, making it challenging for human operators to work with the data. During
    preprocessing, individual .npy files are grouped by their source (what made the log entry, e.g.: VideoSystem,
    MicroController, Data Acquisition System, etc.) and are compressed into .npz archives, one for each source. The .npz
-   archives are then moved to the *behavior_data* directory, and the *behavior_data_log* with the individual .npy files
-   is deleted to conserve disk space.
+   archives are written in place and the individual .npy files are removed to conserve disk space. The
+   *behavior_data_log* directory is then renamed to *behavior_data*.
 
 #### Mesoscope-VR System Data
 
@@ -862,16 +864,16 @@ command generates a **precursor** experiment configuration file inside the **con
 the root project directory on the main PC of the data acquisition system. The command takes three required options and
 five optional ones:
 
-| Option                   | Description                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------|
-| `-p`, `--project`        | The project that receives the new experiment configuration file (required)              |
-| `-e`, `--experiment`     | The name given to the experiment and to its configuration file (required)               |
-| `-t`, `--template`       | The task template to build from, as the filename without the .yaml extension (required) |
-| `-sc`, `--state-count`   | The number of runtime states the experiment supports (default 1)                        |
-| `--reward-size`          | The default water reward volume for lick-type trials, in microliters (default 5.0)      |
-| `--reward-tone-duration` | The default reward tone duration for lick-type trials, in milliseconds (default 300)    |
-| `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)  |
-| `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                      |
+| Option                   | Description                                                                              |
+|--------------------------|------------------------------------------------------------------------------------------|
+| `-p`, `--project`        | The project that receives the new experiment configuration file (required)               |
+| `-e`, `--experiment`     | The name given to the experiment and to its configuration file (required)                |
+| `-t`, `--template`       | The task template to instantiate, as the filename without the .yaml extension (required) |
+| `-sc`, `--state-count`   | The number of runtime states the experiment supports (default 1)                         |
+| `--reward-size`          | The default water reward volume for lick-type trials, in microliters (default 5.0)       |
+| `--reward-tone-duration` | The default reward tone duration for lick-type trials, in milliseconds (default 300)     |
+| `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)   |
+| `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                       |
 
 ***Note,*** the command resolves the template named by `-t`, `--template` through the host machine's configured **task
 templates directory**, which is a platform-level setting owned by sollertia-shared-assets rather than part of the system
@@ -965,10 +967,10 @@ The Mesoscope-VR system supports four types of runtime sessions:
 
 `sle mesoscope run -u USER -p PROJECT -a ANIMAL window-checking`
 
-This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
-zstack.tiff files for the checked animal. This session is typically used 2 to 3 weeks after the surgical intervention
-and before any training or experiment sessions to assess the quality of the intervention and the suitability of
-including the animal in experiment cohorts.
+This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me,
+fov.roi, and zstack.tiff files for the checked animal. This session is typically used 2 to 3 weeks after the surgical
+intervention and before any training or experiment sessions to assess the quality of the intervention and the
+suitability of including the animal in experiment cohorts.
 
 **2. Lick Training Session**
 
@@ -1070,7 +1072,7 @@ ___
 ### Recovering from Interruptions
 While it is not typical for the data acquisition or preprocessing pipelines to fail during runtime, it is possible. The
 library can recover or gracefully terminate the runtime for most code-generated errors, so this is usually not a
-concern. However, if a major interruption (i.e., power outage) occurs or one of the hardware assets malfunctions during
+concern. However, if a major interruption (e.g., power outage) occurs or one of the hardware assets malfunctions during
 runtime, manual intervention is typically required to recover the session's data and reset the acquisition system.
 
 #### Data acquisition interruption
@@ -1079,7 +1081,7 @@ Data acquisition can be interrupted in two main ways, the first being due to an 
 the ScanImagePC unexpectedly shuts down during Mesoscope-VR system runtime. In this case, the runtime pauses and
 instructs the user to troubleshoot the issue and then resume the runtime. This type of *soft* interruption is handled
 gracefully during runtime to exclude the data collected during the interruption from the output dataset. Generally, soft
-interruptions are supported for most external assets, which includes anything not managed directly by the
+interruptions are supported for most external assets, which include anything not managed directly by the
 sollertia-experiment library and the main data acquisition system PC. While inconvenient, these interruptions do not
 typically require specialized handling other than recovering and restoring the failed asset.
 
@@ -1099,7 +1101,7 @@ communication cables.
 If the VRPC runtime unexpectedly interrupts at any point without executing the graceful shutdown, follow these
 instructions:
 1. If the session involved Mesoscope imaging, shut down the Mesoscope acquisition process and make sure all required
-   files (frame stacks, motion estimator data, and cranial window screenshot) have been generated and saved to the
+   files (frame stacks, MotionEstimator.me, fov.roi, and zstack.tiff) have been generated and saved to the
    **mesoscope_data** directory.
 2. If necessary, **manually** edit the session_descriptor.yaml, the mesoscope_positions.yaml, and the
    zaber_positions.yaml files to include actual runtime information. Estimate the volume of water delivered at runtime
@@ -1110,9 +1112,9 @@ instructions:
    critical! If this is not done, the motor cannot home during the next session and instead collides with the movement
    guard, at best damaging the motor and, at worst, the Mesoscope.
 5. If the session involved Mesoscope imaging, **rename the mesoscope_data directory to use the session name**. For
-   example, from mesoscope_data → 2025-11-11-05-03-23-234123. ***Critical!*** if this is not done, the library may
-   **delete** any leftover Mesoscope files during the next runtime and cannot properly preprocess the frames for the
-   interrupted session during the next step.
+   example, from mesoscope_data → 2025-11-11-05-03-23-234123. ***Critical!*** The mesoscope_data directory is shared
+   by every session, so the next runtime clears it and **deletes** any leftover Mesoscope files it holds. Preprocessing
+   performs the same rename itself, but only while no later runtime has written to the shared directory.
 6. Call `sle mesoscope preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
    session. This preprocesses and transfers all collected data to the long-term storage destinations. This preserves any
    data acquired before the interruption and prepares the system for running the next session.
@@ -1124,8 +1126,9 @@ behavior, use the `mesoscope-vr-runtime` skill, and for safe manual motor positi
 
 #### Data preprocessing interruption
 To recover from an error encountered during preprocessing, call `sle mesoscope preprocess -sp SESSION_PATH` and provide
-the path to the session directory of the interrupted session. The preprocessing pipeline automatically resumes an
-interrupted runtime from the nearest checkpoint.
+the path to the session directory of the interrupted session. Re-running the command repeats the whole pipeline
+rather than resuming from a checkpoint, and each stage aborts early once its input has already been consumed. When the
+re-run stops with an error naming missing files, perform the cleanup that message requests before retrying.
 
 ___
 
@@ -1214,7 +1217,7 @@ MCP server registration and the system-agnostic Claude Code skill assets for thi
 only plugin that registers the `sle mcp` server. The Mesoscope-VR system-specific skills ship separately, in the
 **mesoscope** plugin. Install the experiment plugin from the marketplace to register the `sle mcp` server with
 compatible clients and make the core skills available, and install the mesoscope plugin alongside it to add the six
-Mesoscope-VR skills listed above.
+Mesoscope-VR skills listed below.
 
 ### Marketplace Plugins
 

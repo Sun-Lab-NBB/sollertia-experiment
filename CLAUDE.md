@@ -56,8 +56,8 @@ plugin and the `mesoscope` plugin (Mesoscope-VR system-specific skills, layered 
 `sollertia-experiment` MCP server (`sle mcp`). The ataraxis marketplace ships the `automation` plugin used across all
 Sollertia platform repositories. Low-level hardware work also draws on the `video`, `communication`, and
 `microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Downstream library integration
-below). The table lists the `automation`, `experiment`, and `mesoscope` skills alone, and the cross-plugin skills this
-file directs to are named at their point of use.
+below). The table lists the `automation`, `experiment`, and `mesoscope` skills alone, and this file names each
+cross-plugin skill at its point of use.
 
 | Skill                                           | Description                                                          |
 |-------------------------------------------------|----------------------------------------------------------------------|
