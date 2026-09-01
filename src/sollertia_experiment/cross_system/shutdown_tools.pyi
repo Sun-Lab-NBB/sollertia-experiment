@@ -1,0 +1,3 @@
+from collections.abc import Callable as Callable
+
+def run_shutdown_step(description: str, step: Callable[[], None]) -> None: ...

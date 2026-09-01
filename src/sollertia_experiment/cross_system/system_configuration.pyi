@@ -1,0 +1,19 @@
+from pathlib import Path
+from dataclasses import dataclass
+
+from sollertia_shared_assets import AcquisitionSystems
+from ataraxis_data_structures import YamlConfig
+
+_SYSTEM_CONFIGURATION_CLASSES: dict[AcquisitionSystems, type[SystemConfiguration]]
+
+@dataclass
+class SystemConfiguration(YamlConfig):
+    def save(self, path: Path) -> None: ...
+
+def register_system_configuration(
+    system: AcquisitionSystems | str, configuration_class: type[SystemConfiguration]
+) -> None: ...
+def create_system_configuration_file(system: AcquisitionSystems | str) -> None: ...
+def get_system_configuration_path() -> Path: ...
+def get_system_configuration_data() -> SystemConfiguration: ...
+def _system_configuration_filename(system: AcquisitionSystems) -> str: ...
