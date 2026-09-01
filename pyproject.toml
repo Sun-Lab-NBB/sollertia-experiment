@@ -50,7 +50,7 @@ dependencies = [
     "ataraxis-video-system==5.1.1",
 
     # Sollertia Libraries
-    "sollertia-shared-assets==10.0.0rc4",
+    "sollertia-shared-assets==10.0.0rc5",
 
     # Hardware Control
     "zaber-motion==10.0.0",
@@ -121,7 +121,11 @@ dev = [
 
 # Specifies files that should not be included in the source-code distribution.
 [tool.hatch.build.targets.sdist]
-exclude = [".github", "recipe"]
+exclude = [
+    ".github",
+    ".codegraph",
+    "recipe",
+]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
@@ -218,7 +222,7 @@ extra_checks = true
 pretty = true
 
 exclude = [
-    "sollertia-experiment-\\d+",  # The temporary folder created when building the sdist
+    "sollertia_experiment-\\d+",  # The temporary folder created when building the sdist
     "venv.*/",
     "build/",
     "dist/",
@@ -226,4 +230,43 @@ exclude = [
     "stubs/",                     # stubgen output target
     "recipe/",                    # grayskull output target
     "tests/",
+]
+
+# Lists the source files excluded from coverage measurement in full. The interface modules are thin wrappers over the
+# logic they call, and the suite exercises that logic directly rather than through the CLI and MCP entry points.
+[tool.coverage.run]
+omit = [
+    "*/sollertia_experiment/interfaces/get.py",
+    "*/sollertia_experiment/interfaces/mesoscope_vr.py",
+    "*/sollertia_experiment/interfaces/entry_points.py",
+    "*/sollertia_experiment/interfaces/get_tools.py",
+    "*/sollertia_experiment/interfaces/mesoscope_vr_tools.py",
+    "*/sollertia_experiment/interfaces/mcp_server.py",
+    "*/sollertia_experiment/interfaces/mcp_instance.py",
+]
+
+# Maps the source tree and the installed tox environment copies onto one another, so coverage combines their data.
+[tool.coverage.paths]
+source = [
+    "src/",
+    ".tox/*/lib/python*/site-packages/",
+    ".tox/*/Lib/site-packages/",
+]
+
+# Specifies the output directory for the HTML coverage report.
+[tool.coverage.html]
+directory = "reports/coverage_html"
+
+# Configures the terminal coverage report and the minimum coverage the suite has to reach.
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    '^\s*pass$',
 ]

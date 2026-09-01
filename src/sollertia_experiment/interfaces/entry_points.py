@@ -1,13 +1,12 @@
-"""Provides the consolidated 'sle' CLI entry point for the sollertia-experiment library.
-
-The warning filter is applied at module level before any other imports to ensure deprecation warnings from
-dependencies are suppressed during the import phase.
-"""
+"""Provides the consolidated 'sle' CLI entry point for the sollertia-experiment library."""
 
 import os
 from typing import Literal
 import warnings
 
+# Replaces the warning emitters with no-ops, silencing the deprecation warnings that the library's dependencies
+# raise. A dependency raises its warnings while it is being imported, so this replacement precedes the import block
+# below to take effect during the import phase.
 warnings.warn_explicit = warnings.warn = lambda *_, **__: None
 
 # Silences the benign Qt teardown warnings (e.g., "QObject::killTimer: Timers cannot be stopped from another thread")
@@ -19,13 +18,13 @@ os.environ.setdefault("QT_LOGGING_RULES", "default.warning=false")
 import click  # noqa: E402
 from ataraxis_base_utilities import LogLevel, console  # noqa: E402
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
-@click.group("sle", context_settings=CONTEXT_SETTINGS)
-def sle_cli() -> None:  # pragma: no cover
-    """Top-level entry point for the sollertia-experiment library.
+@click.group("sle", context_settings=_CONTEXT_SETTINGS)
+def sle_cli() -> None:
+    """Serves as the consolidated entry point for the sollertia-experiment command-line interface.
 
     Exposes two operational command groups: 'get' for general, hardware-agnostic acquisition system discovery, and
     'mesoscope' for configuring, running, and managing the Mesoscope-VR data acquisition system. The 'mcp' command
@@ -33,7 +32,7 @@ def sle_cli() -> None:  # pragma: no cover
     """
 
 
-@sle_cli.command("mcp", context_settings=CONTEXT_SETTINGS)
+@sle_cli.command("mcp", context_settings=_CONTEXT_SETTINGS)
 @click.option(
     "-t",
     "--transport",
@@ -42,7 +41,7 @@ def sle_cli() -> None:  # pragma: no cover
     show_default=True,
     help="The MCP transport type to use.",
 )
-def mcp(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no cover
+def mcp(transport: Literal["stdio", "streamable-http"]) -> None:
     """Starts the MCP server for agentic access to the 'sle get' and 'sle mesoscope' tools."""
     from .mcp_server import run_server  # noqa: PLC0415
 
@@ -63,8 +62,9 @@ def mcp(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no c
 def _register_subcommands() -> None:
     """Imports and registers all subcommand groups on the top-level 'sle' Click group.
 
-    The imports are deferred to this helper to keep the module's import surface minimal when only metadata is
-    needed by the wheel build or by tools like importlib.metadata.
+    The imports live in this helper rather than in the module's top-level import block so that the group
+    registration is expressed in one place. The helper runs unconditionally at the end of this module, so importing
+    the module always imports both subcommand groups.
     """
     from .get import get  # noqa: PLC0415
     from .mesoscope_vr import mesoscope  # noqa: PLC0415

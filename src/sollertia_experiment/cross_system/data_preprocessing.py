@@ -11,7 +11,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest, resolve_camera_video_path
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from sollertia_shared_assets import RAW_DATA_DIRECTORY, SessionData, RawDataFiles
+from sollertia_shared_assets import (
+    RAW_DATA_DIRECTORY,
+    CHECKSUM_EXCLUDED_FILES,
+    SessionData,
+    RawDataFiles,
+)
 from ataraxis_data_structures import (
     LOG_DIRECTORY_SUFFIX,
     delete_directory,
@@ -50,12 +55,7 @@ class StorageDestination:
 
 @dataclass(frozen=True, slots=True)
 class StorageDestinations:
-    """Defines the ordered collection of long-term storage destinations resolved for a data acquisition session.
-
-    This is the system-agnostic interface used by the cross-system preprocessing utilities. Each acquisition system
-    resolves its own destinations from its configuration and passes the resulting collection to the utilities, which
-    only ever operate on the resolved paths.
-    """
+    """Defines the ordered collection of long-term storage destinations resolved for a data acquisition session."""
 
     destinations: tuple[StorageDestination, ...] = ()
     """The storage destinations to which the session's data is transferred and from which it can be removed."""
@@ -128,8 +128,7 @@ def rename_session_videos(session_data: SessionData) -> None:
 
     Notes:
         The mapping between source IDs and human-friendly names is resolved from the camera manifest written by the
-        ataraxis-video-system library during acquisition. Therefore, this function does not require any acquisition
-        system to provide a static source-ID-to-name mapping.
+        ataraxis-video-system library during acquisition.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -167,9 +166,9 @@ def snapshot_surgery_data(
     surgery_metadata.yaml file.
 
     Notes:
-        Returns the SurgeryLog handle so callers can reuse the established Google Sheets connection for follow-up
-        operations, such as updating the surgery quality assessment. The caller owns the returned handle and must
-        close it (typically from a try/finally block) once it is no longer needed to release the underlying SSL socket.
+        Returns the SurgeryLog handle so callers can reuse the established Google Sheets connection. The caller owns the
+        returned handle and must close it (typically from a try/finally block) once it is no longer needed to release
+        the underlying SSL socket.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -187,7 +186,7 @@ def snapshot_surgery_data(
         sheet_id=surgery_sheet_id,
     )
     surgery_data: SurgeryData = surgery_log.extract_animal_data()
-    surgery_data.to_yaml(session_data.raw_data.surgery_metadata_path)
+    surgery_data.to_yaml(file_path=session_data.raw_data.surgery_metadata_path)
     console.echo(message="Surgery data snapshot: Saved.", level=LogLevel.SUCCESS)
     return surgery_log
 
@@ -202,7 +201,7 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         all destinations.
 
         If the input collection contains no storage destinations, the function aborts early with a warning and leaves
-        the local copy of the session's data intact, since there is no destination to back the data up to.
+        the local copy of the session's data intact, since there is no destination to which the data can be backed up.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -226,10 +225,18 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
     targets = tuple(destination.session_path.joinpath(source.name) for destination in destinations.destinations)
 
     for target in targets:
-        ensure_directory_exists(target)
+        ensure_directory_exists(path=target)
 
     # Computes the xxHash3-128 checksum for the source directory before moving it to the target directories.
-    calculate_directory_checksum(directory=source, num_processes=None, save_checksum=True, progress=True)
+    # Excludes the same non-record files sollertia-forgery excludes when it verifies this digest, so a checksum
+    # computed over a session that already carries a checksum tracker stays reproducible downstream.
+    calculate_directory_checksum(
+        directory=source,
+        num_processes=None,
+        save_checksum=True,
+        progress=True,
+        excluded_files=CHECKSUM_EXCLUDED_FILES,
+    )
 
     # Parallelizes the data transfer to fully saturate the communication channels to the destination machines.
     with ProcessPoolExecutor(max_workers=max(1, len(targets))) as executor:
@@ -265,8 +272,8 @@ def delete_session_directories(candidates: tuple[Path, ...], session_name: str, 
         user explicitly confirms or aborts the deletion.
 
     Args:
-        candidates: The directories to remove. Typically, includes the session's directories on the host machine and
-            all long-term storage destinations.
+        candidates: The directories to remove, typically the session's directory on the host machine and on every
+            long-term storage destination.
         session_name: The name of the session whose data is being removed, used in the confirmation prompt.
         require_confirmation: Determines whether to prompt the user to confirm the deletion before proceeding.
 
@@ -317,7 +324,7 @@ def migrate_session_directory(
         The reloaded SessionData instance that reflects the session's reassignment to the target project.
     """
     # Pulls the session to the host machine. The data is pulled into the target project's directory structure.
-    ensure_directory_exists(local_session_path.parent)
+    ensure_directory_exists(path=local_session_path.parent)
     transfer_directory(
         source=remote_session_path, destination=local_session_path, num_threads=threads, verify_integrity=False
     )
@@ -326,7 +333,7 @@ def migrate_session_directory(
     # directory. This is then used to remove the old session data from all destinations.
     new_session_data_path = local_session_path.joinpath(RAW_DATA_DIRECTORY, RawDataFiles.SESSION_DATA)
     # Since preprocessing removes the raw_data directory, recreates it.
-    ensure_directory_exists(old_session_data_path)
+    ensure_directory_exists(path=old_session_data_path)
     shutil.copy2(src=new_session_data_path, dst=old_session_data_path)
 
     session_data = SessionData.load(session_path=local_session_path)

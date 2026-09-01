@@ -27,7 +27,7 @@ carry an unsafe motor outside the range from which it can be homed.
 
 
 @dataclass(frozen=True, slots=True)
-class ZaberDeviceSettings:
+class _ZaberDeviceSettings:
     """Stores configuration settings read from a Zaber device's non-volatile memory."""
 
     device_label: str
@@ -55,7 +55,7 @@ class ZaberDeviceSettings:
 
 
 @dataclass(frozen=True, slots=True)
-class ZaberValidationResult:
+class _ZaberValidationResult:
     """Stores the results of validating a Zaber device's configuration."""
 
     is_valid: bool
@@ -85,7 +85,8 @@ class _ZaberDeviceData:
     """Stores the identification data about a Zaber device."""
 
     device_number: int
-    """The positional index of the device in the daisy-chain of devices connected to the same serial port."""
+    """The 1-based positional number of the device in the daisy-chain of devices connected to the same serial
+    port. This equals the device_index used by the configuration functions plus one."""
     device_id: int
     """The unique identifier code of the device."""
     label: str
@@ -111,6 +112,8 @@ class _ZaberPortData:
         return bool(self.devices)
 
 
+# slots=True is omitted because every field is read through the class itself rather than through an instance, and
+# slot descriptors shadow the class-level defaults that access relies on.
 @dataclass(frozen=True)
 class _ZaberSettings:
     """Defines the set of codes used to access Zaber settings stored in each interfaced device's non-volatile memory."""
@@ -148,8 +151,8 @@ def discover_zaber_devices() -> None:
     """Scans all available serial ports and displays information about connected Zaber devices.
 
     Notes:
-        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt
-        the discovery process. Ports that cannot be connected are listed as having "No Devices".
+        Connection errors encountered during scanning are logged at DEBUG level and do not interrupt the discovery
+        process. Ports the scan cannot open are listed as having "No Devices".
     """
     port_info_list = _scan_active_ports()
     formatted_info = _format_device_info(port_info_list=port_info_list)
@@ -175,7 +178,7 @@ def get_zaber_devices_info() -> str:
     return _format_device_info(port_info_list=port_info_list)
 
 
-def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettings:
+def get_zaber_device_settings(port: str, device_index: int) -> _ZaberDeviceSettings:
     """Reads configuration settings from a Zaber device's non-volatile memory.
 
     Args:
@@ -183,8 +186,8 @@ def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettin
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A ZaberDeviceSettings instance containing the device configuration including labels, positions,
-        flags, and motion limits.
+        The device's labels, park, maintenance and mount positions, shutdown and unsafe flags, motion limits, and
+        current position, read from its non-volatile memory.
 
     Raises:
         ConnectionError: If unable to connect to the specified port.
@@ -205,7 +208,7 @@ def get_zaber_device_settings(port: str, device_index: int) -> ZaberDeviceSettin
             axis = device.get_axis(axis_number=1)
 
             # Reads all configuration settings from non-volatile memory.
-            return ZaberDeviceSettings(
+            return _ZaberDeviceSettings(
                 device_label=device.label or "",
                 axis_label=axis.label or "",
                 checksum=int(device.settings.get(setting=SettingConstants.USER_DATA_0)),
@@ -248,7 +251,9 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         ConnectionError: If unable to connect to the specified port.
         IndexError: If device_index is out of range for the connected devices.
         TypeError: If the value type does not match the setting (a non-string label, or a non-integer position or flag).
-        ValueError: If the setting name is invalid or the value is out of range.
+        ValueError: If the setting name is invalid, if the value is out of range, or if a device_label write
+            succeeded but the matching USER_DATA_0 checksum write failed, leaving the label and the checksum
+            possibly out of agreement.
     """
     valid_settings = {
         "park_position",
@@ -380,7 +385,7 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         console.error(message=message, error=ConnectionError)
 
 
-def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberValidationResult:
+def validate_zaber_device_configuration(port: str, device_index: int) -> _ZaberValidationResult:
     """Validates a Zaber device's configuration for use with the binding library.
 
     Notes:
@@ -392,7 +397,7 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A ZaberValidationResult instance containing validation status, error messages, and warnings.
+        The pass or fail outcome of the check, together with the error and warning messages it produced.
 
     Raises:
         ConnectionError: If unable to connect to the specified port.
@@ -450,7 +455,7 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> ZaberVa
 
     is_valid = checksum_valid and positions_valid and not errors
 
-    return ZaberValidationResult(
+    return _ZaberValidationResult(
         is_valid=is_valid,
         checksum_valid=checksum_valid,
         positions_valid=positions_valid,
@@ -490,9 +495,9 @@ class CRCCalculator:
         return self._calculator.checksum(data=bytes(string, "ASCII"))
 
 
-# Initializes a shared CRCCalculator instance used by the ZaberDevice class instances to verify the interfaced device's
-# configuration.
-_crc_calculator = CRCCalculator()
+_CRC_CALCULATOR: CRCCalculator = CRCCalculator()
+"""The shared checksum calculator used by every _ZaberDevice instance to verify that the interfaced device is
+configured to work with the bindings exposed by this library."""
 
 
 class ZaberAxis:
@@ -513,9 +518,9 @@ class ZaberAxis:
         _mount_position: The absolute position, in native motor units, where the motor should be moved before mounting
             the animal into the system's enclosure.
         _maximum_limit: The maximum absolute position relative to the home sensor position, in native motor units,
-            the motor hardware can reach.
+            the motor is allowed to reach during runtime. Read from the configurable 'limit.max' axis setting.
         _minimum_limit: The minimum absolute position relative to the home sensor position, in native motor units,
-            the motor hardware can reach.
+            the motor is allowed to reach during runtime. Read from the configurable 'limit.min' axis setting.
         _shutdown_flag: Tracks whether the motor has been shut down.
         _pacing_guard: A Timeout class instance that is used to ensure that communication with the motor is carried
             out at a pace that does not overwhelm the connection interface with too many successive calls.
@@ -575,7 +580,7 @@ class ZaberAxis:
         """Returns a string representation of the ZaberAxis instance."""
         return (
             f"ZaberAxis(name={self._motor.label}, homed={self.is_homed}, parked={self.is_parked}, busy={self.is_busy}, "
-            f"position={self.get_position()})."
+            f"position={self.get_position()})"
         )
 
     def get_position(self) -> float:
@@ -664,8 +669,9 @@ class ZaberAxis:
             This method can be called to interrupt other currently running methods, which is primarily used in the case
             of an emergency.
 
-            Calling this method once instructs the motor to decelerate and stop. Calling this method twice in a row
-            instructs the motor to stop immediately (without deceleration).
+            Calling this method once instructs the motor to decelerate and stop. Per the Zaber ASCII protocol
+            manual, a second stop command issued while the motor is still decelerating halts it immediately. That
+            is controller firmware behavior and is not implemented by this wrapper.
 
             This command does not block until the motor stops to allow stopping multiple motors (axes) in rapid
             succession.
@@ -733,7 +739,7 @@ class ZaberAxis:
         return result
 
 
-class ZaberDevice:
+class _ZaberDevice:
     """Manages a Zaber controller (device) that manages one or more motors (axes).
 
     Notes:
@@ -759,14 +765,14 @@ class ZaberDevice:
     """
 
     def __init__(self, device: Device) -> None:
-        # Extracts and records the necessary ID information about the device
+        # Extracts and records the necessary ID information about the device.
         self._controller: Device = device
 
         # Ensures that the device is managing a single axis.
         if device.axis_count != 1:
             message = (
                 f"Unexpected value encountered when checking the number of axes (motors) managed by the device "
-                f"{self._controller.label}. Currently, ZaberDevice instances only work with devices (controllers) that "
+                f"{self._controller.label}. Currently, this library only works with devices (controllers) that "
                 f"manage a single Axis (motor). Instead, the device has {device.axis_count} axes, which indicates that "
                 f"it manages multiple motors."
             )
@@ -778,13 +784,13 @@ class ZaberDevice:
         # Uses the CRC calculator to generate the checksum for the device's label. It is expected that the
         # device_code (USER_DATA_0) non-volatile variable of the device is set to this checksum for any
         # correctly configured device.
-        device_check: int = _crc_calculator.string_checksum(string=self._controller.label)
+        device_check: int = _CRC_CALCULATOR.string_checksum(string=self._controller.label)
         device_code: int = int(device.settings.get(setting=_ZaberSettings.checksum))
         if device_code != device_check:
             message = (
-                f"Unable to verify that the ZaberDevice instance for the {self._controller.label} "
-                f"({self._controller.name}) device is configured to work with ZaberDevice instances. Based on the "
-                f"device's label '{self._controller.label}', expected the validation checksum of {device_check}, but "
+                f"Unable to verify that the {self._controller.label} ({self._controller.name}) device is configured "
+                f"to work with this library. Based on the device's label '{self._controller.label}', expected the "
+                f"validation checksum of {device_check}, but "
                 f"read {device_code}. The non-volatile memory variable used to store this data is USER_DATA_0."
             )
             console.error(message=message, error=ValueError)
@@ -822,9 +828,9 @@ class ZaberDevice:
         self._shutdown_flag = False
 
     def __repr__(self) -> str:
-        """Returns a string representation of the ZaberDevice instance."""
+        """Returns a string representation of the _ZaberDevice instance."""
         return (
-            f"ZaberDevice(name='{self._controller.name}', label={self._controller.label}, "
+            f"_ZaberDevice(name='{self._controller.name}', label={self._controller.label}, "
             f"id={self._controller.device_id})"
         )
 
@@ -877,13 +883,13 @@ class ZaberConnection:
         establish connection before calling other class methods.
 
     Args:
-        port: The name of the USB port to connect to.
+        port: The name of the USB port the connection targets.
 
     Attributes:
-        _port: Stores the name of the serial port to connect to.
+        _port: The name of the target serial port.
         _connection: The Connection class instance that manages the specified serial port and all Zaber devices using
             the port.
-        _devices: The tuple of ZaberDevice instances used to interface with Zaber devices available through the
+        _devices: The tuple of _ZaberDevice instances used to interface with Zaber devices available through the
             connected port.
         _is_connected: Tracks whether the instance is currently connected to the managed serial port.
 
@@ -901,7 +907,7 @@ class ZaberConnection:
 
         self._port: str = port
         self._connection: Connection | None = None
-        self._devices: tuple[ZaberDevice, ...] = ()
+        self._devices: tuple[_ZaberDevice, ...] = ()
         self._is_connected: bool = False
 
     def __repr__(self) -> str:
@@ -933,18 +939,18 @@ class ZaberConnection:
         # Gets the list of all connected Zaber devices.
         devices: list[Device] = connection.detect_devices()
 
-        # Packages each discovered Device into a ZaberDevice class instance and builds the internal device interface
+        # Packages each discovered Device into a _ZaberDevice class instance and builds the internal device interface
         # tuple. The tuple is rebuilt after every successful construction, so a failure partway through the daisy chain
         # leaves the already-constructed devices reachable for the release below.
-        initialized_devices: list[ZaberDevice] = []
+        initialized_devices: list[_ZaberDevice] = []
         try:
             for device in devices:
-                initialized_devices.append(ZaberDevice(device=device))
+                initialized_devices.append(_ZaberDevice(device=device))
                 self._devices = tuple(initialized_devices)
         except Exception, KeyboardInterrupt:
             # Releases the port without shutting the constructed devices down. The shutdown sequence parks the motor,
             # which commits its current position to non-volatile memory and blocks every motion command until it is
-            # unparked, so a failed connect must not reach it: the operator may need the Zaber Launcher to move the
+            # unparked. A failed connect must not reach it: the operator may need the Zaber Launcher to move the
             # HeadBar and free a head-fixed animal. The devices keep their zeroed shutdown tracker, which honestly
             # records that this runtime aborted before it could shut them down.
             self._release_runtime_assets(shutdown_devices=False)
@@ -970,12 +976,12 @@ class ZaberConnection:
                 # Otherwise, the connection is broken.
                 self._is_connected = False
             else:
-                self._is_connected = True  # If device check succeeded the connection is active.
+                self._is_connected = True
                 return True
         return self._is_connected
 
-    def get_device(self, index: int) -> ZaberDevice:
-        """Returns the ZaberDevice instance for the requested Zaber controller (device).
+    def get_device(self, index: int) -> _ZaberDevice:
+        """Returns the _ZaberDevice instance for the requested Zaber controller (device).
 
         Args:
             index: The index of the controller for which to retrieve the interface. The controllers are indexed based
@@ -983,7 +989,7 @@ class ZaberConnection:
                 directly connected to the port having an index of 0.
 
         Returns:
-            A ZaberDevice instance that interfaces with the specified controller.
+            The interface to the controller occupying the requested position in the daisy-chain.
 
         Raises:
             ConnectionError: If the instance is not connected to the managed serial port.
@@ -1032,10 +1038,12 @@ def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
         port: The name of the USB port to scan for Zaber devices.
 
     Returns:
-        A list of _ZaberDeviceData instances, one for each discovered device or an empty list if none are discovered.
+        The identification data for each device discovered on the port, in daisy-chain order, or an empty list when
+        the port carries no Zaber devices.
     """
-    # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
-    # device, this statement opens the connection. Otherwise, the statement raises an exception.
+    # Uses 'with' to automatically close the connection at the end of the runtime. This statement opens the serial
+    # port without testing it for Zaber devices. The detect_devices() call below raises NoDeviceFoundException when
+    # the port carries no Zaber devices, which the caller catches.
     with Connection.open_serial_port(port_name=port, direct=False) as connection:
         # Parses each detected device and its axes into _ZaberDeviceData instances.
         return [
@@ -1060,7 +1068,8 @@ def _scan_active_ports() -> list[_ZaberPortData]:
     """Scans all available serial ports for Zaber devices and parses their identification data.
 
     Returns:
-        A list of _ZaberPortData objects, one for each scanned port.
+        The name of every scanned serial port, each paired with the identification data for the devices discovered
+        on it.
     """
     port_info_list = []
 

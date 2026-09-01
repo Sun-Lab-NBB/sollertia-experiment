@@ -22,7 +22,7 @@ register_system_configuration(), called from each acquisition system's configura
 
 @dataclass
 class SystemConfiguration(YamlConfig):
-    """Base class for Sollertia data acquisition system configurations.
+    """Defines the shared type and save behavior of every Sollertia data acquisition system configuration.
 
     Each acquisition system defines a concrete subclass (e.g. MesoscopeSystemConfiguration) that composes its
     per-subsystem configuration sections and registers it via register_system_configuration(). Subclassing provides
@@ -37,7 +37,7 @@ class SystemConfiguration(YamlConfig):
         (e.g., to convert a calibration tuple to a mapping for a stable on-disk layout).
 
         Args:
-            path: The path to the .yaml file to save the configuration data to.
+            path: The destination .yaml file path.
         """
         self.to_yaml(file_path=path)
 
@@ -52,7 +52,7 @@ def register_system_configuration(
     file lifecycle requires, and everything else is shared.
 
     Args:
-        system: The acquisition system the configuration class belongs to.
+        system: The acquisition system that owns the configuration class.
         configuration_class: The system's SystemConfiguration subclass.
     """
     _SYSTEM_CONFIGURATION_CLASSES[AcquisitionSystems(str(system))] = configuration_class
@@ -66,9 +66,11 @@ def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
     file in that folder is removed once the write succeeds, so the machine belongs to exactly one acquisition system.
 
     Args:
-        system: The acquisition system to create the configuration file for.
+        system: The acquisition system whose configuration file is created.
 
     Raises:
+        FileNotFoundError: If the local Sollertia platform working directory has not been configured for the
+            host-machine or no longer exists.
         ValueError: If the requested acquisition system is not registered.
     """
     resolved = AcquisitionSystems(str(system))
@@ -89,9 +91,9 @@ def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
     # Removes the configuration files of all other acquisition systems only after the replacement is written, so that
     # a failed write leaves the host-machine with its previous acquisition system identity instead of none.
     for existing in tuple(directory.glob("*_system_configuration.yaml")):
-        # Identifies the file the save above wrote by its inode rather than by its name, because a case-insensitive
-        # filesystem keeps a differently-cased directory entry for it and neither a name comparison nor a resolved
-        # path comparison recognizes that entry, which would delete the configuration this call just created.
+        # Identifies the file that the save above wrote by its inode rather than by its name, because a case-insensitive
+        # filesystem keeps a differently-cased directory entry for it. Neither a name comparison nor a resolved path
+        # comparison recognizes that entry, which would delete the configuration this call just created.
         if existing.samefile(configuration_path):
             continue
         console.echo(message=f"Removing the existing configuration file {existing.name}...", level=LogLevel.INFO)
@@ -139,9 +141,7 @@ def get_system_configuration_data() -> SystemConfiguration:
     for its acquisition system, and returns the loaded instance.
 
     Notes:
-        The return type is the shared ``SystemConfiguration`` base. Callers that need a specific system's concrete type
-        use that system's typed wrapper (e.g. ``sollertia_experiment.mesoscope_vr.get_system_configuration``), which
-        validates the loaded configuration's type and narrows it.
+        The return type is the shared ``SystemConfiguration`` base.
 
     Returns:
         The loaded SystemConfiguration instance.

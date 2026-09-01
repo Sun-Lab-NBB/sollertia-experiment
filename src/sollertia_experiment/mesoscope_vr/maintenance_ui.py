@@ -174,8 +174,9 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Does not disconnect the trackers here. They are owned by their respective interfaces, and disconnecting
-        # them would break access to delivered_volume when generating the session descriptor during shutdown.
+        # Does not disconnect the trackers here. They are owned by the WaterValveInterface and GasPuffValveInterface
+        # instances, which are still live when this method runs and disconnect their own buffers during the
+        # microcontroller teardown that follows.
 
         self._started = False
 
@@ -298,7 +299,11 @@ class MaintenanceControlUI:
             app.setOrganizationName("Sollertia")
             app.setStyle("Fusion")
 
-            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
+            window = _MaintenanceUIWindow(
+                data_array=self._data_array,
+                valve_tracker=self._valve_tracker,
+                gas_puff_tracker=self._gas_puff_tracker,
+            )
             window.show()
 
             app.exec()
@@ -316,6 +321,14 @@ class MaintenanceControlUI:
 
 class _MaintenanceUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's maintenance GUI application window.
+
+    Args:
+        data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
+        gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff data
+            to other processes during runtime.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
@@ -391,8 +404,8 @@ class _MaintenanceUIWindow(QMainWindow):
             event: The Qt-generated window shutdown event instance.
         """
         # Closing the window terminates the maintenance runtime, so an operator-initiated close is confirmed first.
-        # An accidental click on the window close control, or an Escape keypress, would otherwise end the runtime
-        # outright. A close the runtime itself drives carries no prompt, as the decision is already made.
+        # An accidental click on the window close control would otherwise end the runtime outright. A close the
+        # runtime itself drives carries no prompt, as the decision is already made.
         if not self._close_confirmed:
             confirmation = QMessageBox.question(
                 self,
@@ -892,7 +905,6 @@ class _MaintenanceUIWindow(QMainWindow):
     def _check_external_state(self) -> None:
         """Checks for external termination signal and updates valve, calibration, and gas puff status."""
         try:
-            # Checks for termination.
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
                 self._close_confirmed = True
                 self.close()

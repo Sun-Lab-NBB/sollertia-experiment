@@ -1,4 +1,6 @@
-"""Provides MCP tools wrapping the general, hardware-agnostic 'sle get' acquisition system discovery utilities."""
+"""Provides the general, hardware-agnostic MCP tools for acquisition system discovery, Zaber device inspection and
+configuration, and mount and Unity-bridge health checks.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +47,7 @@ def get_checksum_tool(input_string: str) -> str:
         input_string: The string for which to compute the checksum.
 
     Returns:
-        The computed CRC32-XFER checksum value.
+        The computed CRC32-XFER checksum value, or an error description on failure.
     """
     try:
         calculator = CRCCalculator()
@@ -65,7 +67,8 @@ def get_zaber_device_settings_tool(port: str, device_index: int) -> str:
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A formatted string containing device settings including labels, positions, flags, and motion limits.
+        A formatted string containing device settings including labels, positions, flags, and motion limits, or an
+        error description when the device cannot be read.
     """
     try:
         settings = get_zaber_device_settings(port=port, device_index=device_index)
@@ -111,8 +114,8 @@ def set_zaber_device_setting_tool(
         fails. An unspecified policy instead returns a refusal carrying the previewed change and the accepted values,
         and a declining policy returns an abandonment notice.
     """
-    # Resolves the write policy before the device is touched, so an unspecified policy cannot reach the write through
-    # a falsy default. The preview read is the material the calling agent shows the user.
+    # Resolves the write policy before the device is touched, so a falsy default cannot carry an unspecified policy
+    # into the write. The preview read is the material the calling agent shows the user.
     if confirm is None:
         try:
             settings = get_zaber_device_settings(port=port, device_index=device_index)
@@ -139,7 +142,8 @@ def set_zaber_device_setting_tool(
         return f"Zaber setting write abandoned: {setting} on device {device_index} of port {port}"
 
     try:
-        # Converts value to appropriate type based on setting.
+        # The MCP transport delivers every value as a string, while the binding rejects a non-integer position or flag,
+        # so those five settings are coerced before the write and the two label settings are passed as written.
         if setting in {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "shutdown_flag"}:
             typed_value: int | str = int(value)
         else:
@@ -159,13 +163,13 @@ def set_zaber_device_setting_tool(
 
 @mcp.tool()
 def check_mount_accessibility_tool(path: str) -> str:
-    """Verifies that a filesystem path exists and is writable.
+    """Verifies that a filesystem directory exists and is writable.
 
-    Probes the path by writing and removing a temporary file to confirm write access. Useful for verifying
-    that a mounted storage location is reachable before invoking acquisition or transfer operations.
+    Probes the directory by writing and removing a temporary file inside it to confirm write access. Useful for
+    verifying that a mounted storage location is reachable before invoking acquisition or transfer operations.
 
     Args:
-        path: The absolute filesystem path to verify.
+        path: The absolute path to the directory (such as a mount point) to verify.
 
     Returns:
         A formatted string reporting existence, mount status, and writability, or an error description.
@@ -212,7 +216,8 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A validation report including checksum verification, position bounds checking, and any errors or warnings.
+        A validation report including checksum verification, position bounds checking, and any errors or warnings,
+        or an error description when the device cannot be reached.
     """
     try:
         result = validate_zaber_device_configuration(port=port, device_index=device_index)

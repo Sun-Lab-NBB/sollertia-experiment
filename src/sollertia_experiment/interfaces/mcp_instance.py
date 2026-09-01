@@ -210,7 +210,7 @@ def _unknown_payload_keys(payload: dict[str, Any], cls: type) -> list[str]:
 
     Args:
         payload: The mapping intended to build an instance of the target dataclass.
-        cls: The dataclass type the payload is checked against.
+        cls: The dataclass type against which the payload is checked.
 
     Returns:
         The dotted name of every payload key the dataclass does not declare, in payload order.
@@ -250,7 +250,8 @@ def _field_type_mismatches(instance: Any, prefix: str) -> list[str]:
 
     Args:
         instance: The dataclass instance whose field values are checked.
-        prefix: The dotted path that locates the instance inside the payload it was built from, empty for the root.
+        prefix: The dotted path that locates the instance within the payload from which it was built, empty for the
+            root.
 
     Returns:
         One description per violating field, naming the dotted field path, the type of the stored value, and the
@@ -279,14 +280,15 @@ def _annotation_matches(value: Any, annotation: Any) -> bool:
     """Determines whether the value satisfies the declared type annotation.
 
     Notes:
-        A parameterized tuple, list, or mapping annotation is checked against its origin type and its element types,
-        and every other parameterized annotation is checked against its origin type alone. An integer satisfies a float
-        annotation, following the numeric tower the typing specification defines. An annotation the runtime cannot
-        reduce to a type is treated as satisfied, since rejecting it would refuse a value the dataclass itself accepts.
+        A parameterized tuple, list, or mapping annotation is checked against its origin type and its element types, and
+        every other parameterized annotation is checked against its origin type alone. An integer satisfies a float
+        annotation, following the numeric tower the typing specification defines, except a boolean, which is rejected
+        despite subclassing int. An annotation the runtime cannot reduce to a type is treated as satisfied, since
+        rejecting it would refuse a value the dataclass itself accepts.
 
     Args:
         value: The value to check.
-        annotation: The declared annotation the value is checked against.
+        annotation: The declared annotation against which the value is checked.
 
     Returns:
         True when the value satisfies the annotation.

@@ -18,12 +18,14 @@ from .data_acquisition import (
 )
 from .mesoscope_driver import check_mesoscope_bridge
 from .data_preprocessing import (
+    EYE_TRACKING_PROJECT_NAME,
     purge_session,
     preprocess_session_data,
     migrate_animal_between_projects,
 )
 
 __all__ = [
+    "EYE_TRACKING_PROJECT_NAME",
     "MesoscopePositions",
     "MesoscopeSystemConfiguration",
     "ZaberPositions",

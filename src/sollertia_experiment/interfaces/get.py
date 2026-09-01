@@ -3,7 +3,13 @@ host-machine.
 """
 
 import click
-from ataraxis_video_system import CameraInterfaces, discover_camera_ids
+from ataraxis_video_system import (
+    GENICAM_UNAVAILABLE_REASON,
+    CameraInterfaces,
+    check_cti_file,
+    discover_camera_ids,
+    genicam_runtime_available,
+)
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface import discover_microcontrollers
@@ -11,15 +17,15 @@ from ataraxis_communication_interface import discover_microcontrollers
 from ..vr_task import UnityBridgeClient
 from ..cross_system import CRCCalculator, discover_zaber_devices
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
-"""Ensures that displayed Click help messages are formatted according to the lab standard."""
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+"""The Click help-message width applied to every command in this group."""
 
 _MICROCONTROLLER_BAUDRATE: int = 115200
 """The baud rate used to communicate with the data acquisition system's microcontrollers during discovery."""
 
 
-@click.group("get", context_settings=CONTEXT_SETTINGS)
-def get() -> None:  # pragma: no cover
+@click.group("get", context_settings=_CONTEXT_SETTINGS)
+def get() -> None:
     """Evaluates the composition of the data acquisition system managed by the host-machine."""
 
 
@@ -38,7 +44,6 @@ def get_cameras() -> None:
     opencv_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.OPENCV]
     harvesters_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.HARVESTERS]
 
-    # Displays OpenCV camera information.
     if not opencv_cameras:
         console.echo(message="No OpenCV-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
@@ -60,9 +65,26 @@ def get_cameras() -> None:
                 )
             )
 
-    # Displays Harvesters camera information.
     if not harvesters_cameras:
-        console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
+        # An empty Harvesters listing has four causes, so each branch below names the one that applies, instead of
+        # sending the operator to inspect camera cabling and power in every case. The runtime is evaluated first,
+        # because check_cti_file() also returns None where the runtime is absent. The check_cti_file() branch covers two
+        # of the four causes, an unconfigured .cti path and a configured path that no longer loads.
+        if not genicam_runtime_available():
+            console.echo(
+                message=f"Harvesters camera discovery skipped. {GENICAM_UNAVAILABLE_REASON}", level=LogLevel.WARNING
+            )
+        elif check_cti_file() is None:
+            console.echo(
+                message=(
+                    "Harvesters camera discovery skipped. No GenTL Producer interface (.cti) file is configured. Use "
+                    "the 'axvs cti set' CLI command or the 'AXVS_CTI_PATH' environment variable to configure the file "
+                    "before discovering GenICam cameras."
+                ),
+                level=LogLevel.WARNING,
+            )
+        else:
+            console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
         # The Harvesters interface exposes the camera model and serial number, which makes it easy to map discovered
         # indices to physical hardware.

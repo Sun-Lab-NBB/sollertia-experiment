@@ -31,17 +31,16 @@ class DecomposedTrials:
     cumulative_distances: NDArray[np.float64]
     """The cumulative distance, in centimeters, the animal must travel to reach the end of each decomposed trial."""
     trial_names: tuple[str, ...]
-    """Name of each decomposed trial. Acquisition systems use these names to join the decomposed sequence with their
-    own per-trial hardware parameters."""
+    """Name of each decomposed trial."""
 
 
 class CachedMotifDecomposer:
     """Caches the flattened trial cue sequence motif data between successive decomposition runs.
 
     Attributes:
-        _cached_motifs: Stores the original trial motifs used for decomposition.
-        _cached_flat_data: Stores the flattened motif data structure, optimized for numba-accelerated computations.
-        _cached_distances: Stores the distances of each trial motif, in centimeters.
+        _cached_motifs: The original trial motifs used for decomposition.
+        _cached_flat_data: The flattened motif data structure, optimized for numba-accelerated computations.
+        _cached_distances: The distance of each trial motif, in centimeters.
     """
 
     def __init__(self) -> None:
@@ -51,7 +50,12 @@ class CachedMotifDecomposer:
         ) = None
         self._cached_distances: NDArray[np.float32] | None = None
 
-    def prepare_motif_data(
+    def __repr__(self) -> str:
+        """Returns a string representation of the CachedMotifDecomposer instance."""
+        cached_motif_count = len(self._cached_motifs) if self._cached_motifs is not None else 0
+        return f"CachedMotifDecomposer(cached_motif_count={cached_motif_count})"
+
+    def _prepare_motif_data(
         self, trial_motifs: list[NDArray[np.uint8]], trial_distances: list[float]
     ) -> tuple[NDArray[np.uint8], NDArray[np.int32], NDArray[np.int32], NDArray[np.int32], NDArray[np.float32]]:
         """Prepares and caches the flattened motif data for faster cue sequence-to-trial decomposition.
@@ -71,10 +75,9 @@ class CachedMotifDecomposer:
             that stores the original indices of motifs before sorting. The fifth element is the array of trial
             distances in centimeters.
         """
-        # Returns cached data when the input motifs are unchanged across successive calls.
         if self._cached_motifs is not None and len(self._cached_motifs) == len(trial_motifs):
             all_equal = all(
-                np.array_equal(cached, current)
+                np.array_equal(a1=cached, a2=current)
                 for cached, current in zip(self._cached_motifs, trial_motifs, strict=True)
             )
             if all_equal and self._cached_flat_data is not None and self._cached_distances is not None:
@@ -169,7 +172,8 @@ def decompose_cue_sequence(
         )
         console.error(message=message, error=ValueError)
 
-    motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer.prepare_motif_data(
+    # The decomposer is module-private state, so reaching its cache builder here stays inside the defining module.
+    motifs_flat, motif_starts, motif_lengths, motif_indices, distances_array = motif_decomposer._prepare_motif_data(  # noqa: SLF001
         trial_motifs=trial_motifs, trial_distances=trial_distances
     )
 
@@ -238,7 +242,7 @@ def _find_ambiguous_motif(trial_motifs: list[NDArray[np.uint8]]) -> int | None:
                     continue
                 if offset + motif_length > candidate_length:
                     continue
-                if np.array_equal(motif, candidate[offset : offset + motif_length]):
+                if np.array_equal(a1=motif, a2=candidate[offset : offset + motif_length]):
                     reachable[offset + motif_length] = True
 
         if reachable[candidate_length]:
@@ -266,8 +270,7 @@ def _decompose_sequence_numba_flat(
         motifs_flat: All trial type motifs supported by the acquired session, concatenated into a single 1D array.
         motif_starts: The starting index of each unique motif in the motifs_flat array.
         motif_lengths: The length of each unique motif in the motifs_flat array.
-        motif_indices: Stores the original trial type motif indices before they are sorted to optimize the lookup
-            speed.
+        motif_indices: The original trial type motif indices before they are sorted to optimize the lookup speed.
         max_trials: The maximum number of trials that can make up the entire cue sequence.
 
     Returns:

@@ -51,11 +51,12 @@ function runAcquisition(hSI, hSICtl, arguments)
     % 'tcp://192.168.0.13:1883', which matches the broker listener configured on the VRPC's local network interface.
     % Override this only if the broker host address or listener port changes.
     %
-    % The remaining acquisition parameters - the z-step, z-range, exclusion zone, acquisition order, registration
-    % channel, field curvature correction, reference frame averaging, and z-stack scale factor - are owned by the
-    % MesoscopeAcquisition section of the VRPC system configuration. The VRPC delivers each command's required subset in
-    % the command's MQTT payload: the reference-generation command carries the full set, while the recovery command
-    % carries only the plane-geometry parameters needed to re-derive the imaging planes.
+    % The remaining acquisition parameters - the z-step, z-range, exclusion zone, registration channel, field curvature
+    % correction, reference frame averaging, and z-stack scale factor - are owned by the MesoscopeAcquisition section of
+    % the VRPC system configuration. The VRPC delivers each command's required subset in the command's MQTT payload: the
+    % reference-generation command carries the full set, while the recovery command carries only the plane-geometry
+    % parameters needed to re-derive the imaging planes. The payload also carries the configured acquisition order,
+    % which this script ignores, because every reference and z-stack grab uses the single sweep described below.
 
     % Limited argument validation and default value assignment support. May not
     % work on older MatLab versions, but good for R2022b+.
@@ -198,8 +199,7 @@ function config = buildAcquisitionConfig(payload, root, full)
     %   and from which the recovery command reloads the session estimator.
 
     params = jsondecode(payload);
-    [nzhalf, centerZs, refZs] = computeReferencePlanes( ...
-        params.z_step_um, params.z_range_um, params.z_exclusion_um, params.acquisition_order);
+    [nzhalf, centerZs, refZs] = computeReferencePlanes(params.z_step_um, params.z_range_um, params.z_exclusion_um);
 
     config = struct('root', root, 'nzhalf', nzhalf, 'centerZs', centerZs, 'refZs', refZs);
 
@@ -212,13 +212,18 @@ function config = buildAcquisitionConfig(payload, root, full)
 end
 
 
-function [nzhalf, centerZs, refZs] = computeReferencePlanes(zStep, zRange, zExclusion, order)
+function [nzhalf, centerZs, refZs] = computeReferencePlanes(zStep, zRange, zExclusion)
     % COMPUTEREFERENCEPLANES Resolves the target and reference imaging planes from the acquisition geometry.
     %
     %   Converts the imaging z-range and the optional two-plane exclusion zone into the sorted set of target imaging
     %   planes (centerZs) and the surrounding reference sub-planes (refZs) used to build the motion estimator. The
     %   z-range arrives as [minimum, maximum], where equal boundaries image a single plane. The exclusion zone arrives
     %   as [minimum, maximum], where equal boundaries disable two-plane imaging.
+    %
+    %   refZs is returned with one row per target plane and one column per reference sub-plane offset. The callers
+    %   linearize and sort it into a single ascending sweep of every reference plane, which they program into the stack
+    %   manager. Because consecutive per-plane windows never overlap, that sweep visits each target plane's sub-planes
+    %   as one contiguous block of 2*nzhalf+1 slices per acquired volume.
 
     zRange = double(zRange(:)');
     zExclusion = double(zExclusion(:)');
@@ -243,13 +248,8 @@ function [nzhalf, centerZs, refZs] = computeReferencePlanes(zStep, zRange, zExcl
     end
     centerZs = sort(centerZs);
 
-    % Reference sub-planes above and below each target plane.
+    % Reference sub-planes above and below each target plane, laid out as one row per target plane.
     refZs = centerZs(:) + (-nzhalf:nzhalf);
-
-    % 'smooth' order acquires all frames at a plane before advancing (Z1-Z1-Z2-Z2); the default interleaves planes.
-    if strcmp(order, 'smooth')
-        refZs = refZs';
-    end
 end
 
 
@@ -345,6 +345,8 @@ function generateReference(hSI, config, mqttClient, topics)
     hSI.hStackManager.stackMode = 'fast';  % Enables fast-z (voice-coil)
     hSI.hStackManager.stackFastWaveformType = 'step';  % Step mode is required for volumetric averaging
     hSI.hStackManager.stackDefinition = "arbitrary";  % Stack has to be in arbitrary mode.
+    % Sweeps every reference plane once per volume, in ascending depth order. numVolumes below repeats the whole sweep,
+    % so each plane receives one frame per volume and the acquired slice order matches this vector exactly.
     hSI.hStackManager.arbitraryZs = sort(refZs(:));
     hSI.hStackManager.numVolumes = naverage;
     hSI.hStackManager.enable = true;
@@ -420,6 +422,9 @@ function generateReference(hSI, config, mqttClient, topics)
 
         % Finds reference planes for each target imaging position
         for iz = 1:numel(centerZs)
+            % Transposing refZs reproduces the frame order the stack manager acquired, because the column-major
+            % linearization of the transpose is the same ascending sweep programmed above. That maps each target plane
+            % onto a contiguous block of frames.
             id = find(ismember(refZs', centerZs(iz) + (-nzhalf:nzhalf)));
 
             % Extracts the data for relevant reference z-planes.

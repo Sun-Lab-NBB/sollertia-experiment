@@ -15,7 +15,9 @@ except ImportError:  # The termios module is only available on POSIX platforms.
     termios = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
+
+    from prompt_toolkit.validation import Validator
 
 
 _AFFIRMATIVE_RESPONSES: frozenset[str] = frozenset({"y", "yes"})
@@ -58,8 +60,6 @@ def request_required_confirmation(message: str) -> bool:
 
     Unlike request_confirmation, this prompt has no default response. Submitting an empty or unrecognized answer
     re-displays the question instead of falling back to a default, which forces the user to make a deliberate choice.
-    This suits high-stakes actions, such as Zaber motor positioning, where an accidental Enter keypress must not
-    silently select an outcome.
 
     Args:
         message: The yes-or-no question presented to the user.
@@ -72,7 +72,13 @@ def request_required_confirmation(message: str) -> bool:
     return response.strip().lower() in _AFFIRMATIVE_RESPONSES
 
 
-def request_text(message: str, *, default: str = "", multiline: bool = False, validate: Any = None) -> str:
+def request_text(
+    message: str,
+    *,
+    default: str = "",
+    multiline: bool = False,
+    validate: Callable[[str], bool | str] | Validator | type[Validator] | None = None,
+) -> str:
     """Prompts the user to enter free-form text, requiring the Enter key to submit the response.
 
     Args:
@@ -96,7 +102,7 @@ def request_selection(message: str, choices: Sequence[questionary.Choice | str])
 
     Args:
         message: The instruction presented to the user.
-        choices: The options the user can select from, provided as questionary choices or plain strings.
+        choices: The options offered to the user, provided as questionary choices or plain strings.
 
     Returns:
         The value associated with the option selected by the user.

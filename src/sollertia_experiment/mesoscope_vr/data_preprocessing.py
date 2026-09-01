@@ -4,8 +4,10 @@ session's runtime and moving it to the long-term storage destinations.
 
 from __future__ import annotations
 
+import os
 import json
 import shutil
+import signal
 from typing import TYPE_CHECKING, Any, cast
 from pathlib import Path
 from datetime import UTC, datetime
@@ -34,7 +36,13 @@ from sollertia_shared_assets import (
     get_credentials,
     iter_animal_sessions,
 )
-from ataraxis_data_structures import direct_write, delete_directory, transfer_directory
+from ataraxis_data_structures import (
+    direct_write,
+    delete_directory,
+    transfer_directory,
+    limit_worker_threads,
+    initialize_worker_threads,
+)
 
 from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
 from ..cross_system import (
@@ -59,6 +67,9 @@ if TYPE_CHECKING:
     from .system import MesoscopeGoogleSheets, MesoscopeVideoTracking
     from ..cross_system import SurgeryLog
 
+type _MetadataArray = NDArray[np.int32] | NDArray[np.float64] | NDArray[np.uint64]
+"""The union of per-key array types produced by the frame-variant ScanImage metadata schema."""
+
 _METADATA_SCHEMA: dict[str, tuple[type, type]] = {
     "frameNumbers": (np.int32, int),
     "acquisitionNumbers": (np.int32, int),
@@ -70,17 +81,24 @@ _METADATA_SCHEMA: dict[str, tuple[type, type]] = {
     "endOfAcquisitionMode": (np.int32, int),
     "dcOverVoltage": (np.int32, int),
 }
-"""Defines the schema for the frame-variant ScanImage metadata expected by the _process_stack() function
-when parsing mesoscope-generated metadata. This schema is statically written to match the ScanImage version currently
-used by the Mesoscope-VR system."""
+"""The schema for the frame-variant ScanImage metadata. The schema is statically written to match the ScanImage
+version currently used by the Mesoscope-VR system."""
 
 _IGNORED_METADATA_FIELDS: set[str] = {"auxTrigger0", "auxTrigger1", "auxTrigger2", "auxTrigger3", "I2CData"}
-"""Stores the frame-variant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
+"""The frame-variant ScanImage metadata fields that are currently not used by the Mesoscope-VR system."""
+
+_MONOCHROME_PAGE_RANK: int = 2
+"""The number of dimensions a monochrome mesoscope frame page occupies, which separates a frame stack from the
+multi-channel and color-coded TIFF layouts the preprocessing pipeline does not accept."""
+
+_EMPTY_MATLAB_VECTOR_LENGTH: int = 2
+"""The number of characters an empty MATLAB vector serializes to in the frame-variant ScanImage metadata, which is the
+opening and closing bracket pair alone."""
 
 _PREPROCESSING_WORKER_COUNT: int = resolve_worker_count(reserved_cores=1)
 """The number of parallel processes and threads used for the compute- and disk-bound preprocessing steps (log
 assembly, mesoscope data pulling, and mesoscope frame compression). Reserves one logical core for the host system, so
-the count tracks the acquisition machine the preprocessing runs on."""
+the count tracks the acquisition machine on which the preprocessing runs."""
 
 _STORAGE_TRANSFER_THREAD_COUNT: int = 15
 """The number of parallel threads used to push the preprocessed session data to the configured long-term storage
@@ -89,6 +107,12 @@ destinations."""
 _FACE_CAMERA_NAME: str = "face_camera"
 """The colloquial name of the camera whose video is analyzed by the DeepLabCut eye-tracking model. It matches the name
 assigned to the camera during acquisition, which rename_session_videos uses to build the video's final filename."""
+
+EYE_TRACKING_PROJECT_NAME: str = "eye_tracking"
+"""The DeepLabCut project name token that has to appear in the eye-tracking prediction filename. DeepLabCut names each
+prediction after the analyzed video's stem followed by its scorer string, and the scorer embeds the project's 'Task'
+field verbatim. The project that the acquisition system is configured to use therefore has to carry this name for
+sollertia-forgery's locate_mesoscope_pose_predictions to resolve the prediction downstream."""
 
 _INFERENCE_LOG_TAIL_CHARACTERS: int = 2000
 """The number of trailing characters of the eye-tracking inference log surfaced when reporting an inference failure."""
@@ -100,8 +124,8 @@ files during shutdown."""
 
 
 def preprocess_session_data(session_data: SessionData) -> None:
-    """Aggregates all session's data on VRPC, compresses it for efficient network transmission, transfers the data to
-    all configured long-term storage destinations, and removes the local data copy from the VRPC.
+    """Aggregates the session's data on the VRPC, compresses it for efficient network transmission, transfers the data
+    to all configured long-term storage destinations, and removes the local data copy from the VRPC.
 
     Notes:
         If no long-term storage destinations are configured for the host-machine, the data transfer and the local data
@@ -129,10 +153,7 @@ def preprocess_session_data(session_data: SessionData) -> None:
     message = f"Initializing session {session_data.session_name} data preprocessing..."
     console.echo(message=message, level=LogLevel.INFO)
 
-    # Resolves the configuration parameters for the Mesoscope-VR data acquisition system.
     system_configuration = get_system_configuration()
-
-    # Resolves the filesystem configuration for the Mesoscope-VR data acquisition system.
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
 
     # Warns about any long-term storage destinations that are not configured for the host-machine. The session's data
@@ -148,10 +169,7 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # name.
     rename_mesoscope_directory(mesoscope_data=mesoscope_data)
 
-    # Assembles all log .npy entries into archive .npz files.
     assemble_session_logs(session_data=session_data, processes=_PREPROCESSING_WORKER_COUNT)
-
-    # Renames all videos to use human-friendly names.
     rename_session_videos(session_data=session_data)
 
     # Launches asynchronous face-camera eye-tracking inference on the rig's otherwise-idle GPU so that it overlaps the
@@ -167,22 +185,16 @@ def preprocess_session_data(session_data: SessionData) -> None:
     # Groups the preprocessing steps that run while the inference is in flight, so an abort that skips the join below
     # still reaps the inference child that holds the rig's GPU.
     try:
-        # Pulls mesoscope-acquired data from the ScanImagePC to the VRPC.
         _pull_mesoscope_data(
             session_data=session_data,
             mesoscope_data=mesoscope_data,
             threads=_PREPROCESSING_WORKER_COUNT,
         )
-
-        # Compresses all mesoscope-acquired frames and extracts their metadata.
         _preprocess_mesoscope_directory(
             session_data=session_data,
             mesoscope_data=mesoscope_data,
             processes=_PREPROCESSING_WORKER_COUNT,
         )
-
-        # Extracts and saves the animal's surgery data to the session's data directory and updates the water
-        # restriction log to reflect the processed session.
         _preprocess_google_sheet_data(session_data=session_data, sheets_data=system_configuration.sheets)
 
         # Window checking runs the face camera only as a live monitor of the animal, so it does not intentionally
@@ -204,7 +216,6 @@ def preprocess_session_data(session_data: SessionData) -> None:
     if face_tracking_process is not None:
         _join_face_tracking(process=face_tracking_process, session_data=session_data)
 
-    # Sends preprocessed data to all configured long-term storage destinations.
     push_session_data(
         session_data=session_data,
         destinations=mesoscope_data.destinations,
@@ -233,7 +244,7 @@ def rename_mesoscope_directory(mesoscope_data: MesoscopeData) -> None:
     if not session_specific_path.exists() and general_path.exists() and list(general_path.glob("*")):
         general_path.rename(session_specific_path)
         # Generates a new empty mesoscope_data directory to support future runtimes.
-        ensure_directory_exists(general_path)
+        ensure_directory_exists(path=general_path)
 
 
 def purge_session(session_data: SessionData) -> None:
@@ -292,9 +303,12 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         stored session to the target project directory and reassigns it. The persistent data relocation and the cleanup
         of redundant directories apply to both modes.
 
-        The migration fails with an error if any session cannot be preprocessed or migrated. Each session is handled as
-        an isolated unit that cleans up after itself on failure, so re-running the migration after resolving the error
-        resumes from the failed session without manual intervention.
+        The migration fails with an error if any session cannot be preprocessed or migrated. In the destination-backed
+        mode, each session is handled as an isolated unit that removes its in-flight source-project directory on
+        failure, so re-running the migration after resolving the error resumes from the failed session without manual
+        intervention. The on-premises mode relocates each session with a move that is not rolled back. A failure after
+        the move leaves that session under the target project while its record still names the source project, and a
+        re-run no longer sees it. That case requires manual repair.
 
     Args:
         animal: The animal for which to migrate the data.
@@ -327,7 +341,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         console.error(message=message, error=FileNotFoundError)
 
     # Ensures that the root directory for the processed animal exists on the local machine.
-    ensure_directory_exists(destination_local_root)
+    ensure_directory_exists(path=destination_local_root)
 
     # Resolves the configured long-term storage destinations in preference order (configuration order). The first
     # configured destination is treated as the source of truth from which the session data is pulled.
@@ -362,7 +376,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     new_path = filesystem.mesoscope_directory.joinpath(target_project, animal)
     if filesystem.mesoscope_directory != Path() and old_path.exists():
         if new_path.exists():
-            shutil.rmtree(new_path)
+            delete_directory(directory_path=new_path)
         shutil.move(src=old_path, dst=new_path)
 
     # Also moves the VRPC persistent data for the animal between projects. Skips the move when the source persistent
@@ -371,7 +385,7 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
     new_path = destination_animal.persistent_data_path
     if old_path.exists():
         if new_path.exists():
-            shutil.rmtree(new_path)
+            delete_directory(directory_path=new_path)
         shutil.move(src=old_path, dst=new_path)
 
     # Removes the old animal directory from the acquisition host machine and all configured long-term storage
@@ -467,7 +481,9 @@ def _launch_face_tracking(
     # long-running child fills an unread pipe buffer, and preserves DeepLabCut's output for diagnosing a failure.
     log_file = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log").open("wb")
     try:
-        return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT)
+        # Places the child in its own process group, so an aborted preprocessing run signals the whole 'conda run' ->
+        # 'slvt' -> inference worker tree rather than the wrapper process alone.
+        return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
     finally:
         # The child process holds its own duplicated descriptor, so the parent's handle is no longer needed.
         log_file.close()
@@ -477,22 +493,27 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
     """Waits for the face-camera eye-tracking inference to finish and verifies it produced predictions.
 
     Notes:
-        This runs immediately before the session is checksummed and transferred, so a failed or missing inference
-        aborts the transfer and leaves the local session copy intact for a manual retry, rather than shipping the
-        session without its eye-tracking predictions. A successful run leaves the DeepLabCut '.h5' (and its companion
-        pickle files) beside the face-camera video in raw camera_data, where the checksum and transfer then capture
-        them. The transient inference log is removed on success and retained on failure for inspection.
+        A failed or missing inference aborts the transfer and leaves the local session copy intact for a manual retry,
+        rather than shipping the session without its eye-tracking predictions. A successful run leaves the DeepLabCut
+        '.h5' (and its companion pickle files) beside the face-camera video in raw camera_data, where the checksum and
+        transfer then capture them. The transient inference log is removed on success and retained on failure for
+        inspection.
+
+        The prediction is accepted only when its name carries the EYE_TRACKING_PROJECT_NAME token, on which the
+        downstream sollertia-forgery locator matches. A run driven by a DeepLabCut project under a different name
+        therefore fails here, rather than shipping a session whose predictions the downstream pipeline skips.
 
     Args:
         process: The running inference subprocess returned by _launch_face_tracking.
         session_data: The SessionData instance that defines the processed session.
 
     Raises:
-        RuntimeError: If the inference subprocess exits with a non-zero status or writes no prediction file.
+        RuntimeError: If the inference subprocess exits with a non-zero status or writes no prediction file named
+            after the eye-tracking project.
     """
     return_code = process.wait()
     face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
-    predictions = list(face_video.parent.glob(f"{face_video.stem}*.h5"))
+    predictions = list(face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.h5"))
     log_path = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log")
 
     if return_code != 0 or not predictions:
@@ -513,8 +534,12 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
     """Stops the face-camera eye-tracking inference subprocess and waits for it to exit.
 
     Notes:
-        The wait on the terminated child is bounded and escalates to a kill, so an unresponsive child never stalls the
-        abort that triggers this cleanup.
+        The 'conda run' wrapper the inference launches under does not forward signals to the tool it wraps, so the
+        signal goes to the whole process group the child heads. The group is interrupted rather than terminated,
+        because slvt reaps its GPU worker processes from the KeyboardInterrupt handler of its inference pipeline.
+
+        The wait on the interrupted child is bounded and escalates to a kill of the same group, so an unresponsive
+        child never stalls the abort that triggers this cleanup.
 
     Args:
         process: The inference subprocess returned by _launch_face_tracking.
@@ -529,12 +554,15 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
     )
     console.echo(message=message, level=LogLevel.WARNING)
 
-    process.terminate()
+    # Suppresses the lookup error for the race where the group exits between the poll above and the signal below.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(os.getpgid(pid=process.pid), signal.SIGINT)
     try:
         process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
     except subprocess.TimeoutExpired:
-        # A child that ignores the termination signal keeps the GPU reserved, so it is killed and reaped outright.
-        process.kill()
+        # A group that ignores the interrupt keeps the GPU reserved, so it is killed and the child is reaped outright.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(os.getpgid(pid=process.pid), signal.SIGKILL)
         process.wait()
 
 
@@ -560,8 +588,6 @@ def _purge_window_checking_behavior_data(session_data: SessionData) -> None:
         any camera or behavior data. The acquisition camera stack nonetheless leaves behind a truncated video, an
         acquisition-onset log, and a camera manifest inside the camera_data and behavior_data directories. This
         function deletes both directories so the session retains only its metadata and mesoscope reference snapshot.
-        ``preprocess_session_data`` invokes it before ``push_session_data`` so the removal is reflected in the data
-        integrity checksum and propagated to every long-term storage destination.
 
     Args:
         session_data: The SessionData instance that defines the processed window checking session.
@@ -590,7 +616,11 @@ def _verify_and_get_stack_size(file: Path) -> int:
         # Considers all files with more than one page, a 2-dimensional (monochrome) image layout, and ScanImage metadata
         # a candidate stack for further processing. For these stacks, returns the discovered stack size
         # (number of frames).
-        if frame_count > 1 and len(tiff.pages[0].shape) == 2 and tiff.scanimage_metadata is not None:  # noqa: PLR2004
+        if (
+            frame_count > 1
+            and len(tiff.pages[0].shape) == _MONOCHROME_PAGE_RANK
+            and tiff.scanimage_metadata is not None
+        ):
             return frame_count
         # Otherwise, returns 0 to indicate that the file is not a valid mesoscope frame stack.
         return 0
@@ -603,8 +633,6 @@ def _process_stack(
     scheme and extracts its frame-variant ScanImage metadata.
 
     Notes:
-        This function is designed to be parallelized to work on multiple TIFF files at the same time.
-
         As part of its runtime, the function strips the extracted metadata from the recompressed frame stack to reduce
         its size.
 
@@ -626,7 +654,7 @@ def _process_stack(
         stack_size = len(stack.pages)
 
         # Initializes arrays for storing the extracted metadata using the schema.
-        arrays: dict[str, NDArray[Any]] = {
+        arrays: dict[str, _MetadataArray] = {
             key: np.zeros(stack_size, dtype=dtype) for key, (dtype, _) in _METADATA_SCHEMA.items()
         }
 
@@ -657,13 +685,13 @@ def _process_stack(
                     # the UTC onset.
                     epoch_values = [float(component) for component in value[1:-1].split()]
                     epoch_seconds = datetime(
-                        int(epoch_values[0]),
-                        int(epoch_values[1]),
-                        int(epoch_values[2]),
-                        int(epoch_values[3]),
-                        int(epoch_values[4]),
-                        int(epoch_values[5]),
-                        int((epoch_values[5] % 1) * 1_000_000),
+                        year=int(epoch_values[0]),
+                        month=int(epoch_values[1]),
+                        day=int(epoch_values[2]),
+                        hour=int(epoch_values[3]),
+                        minute=int(epoch_values[4]),
+                        second=int(epoch_values[5]),
+                        microsecond=int((epoch_values[5] % 1) * 1_000_000),
                         tzinfo=UTC,
                     ).timestamp()
                     timestamp = int(
@@ -673,7 +701,7 @@ def _process_stack(
                 elif key in _IGNORED_METADATA_FIELDS:
                     # These fields are known but not currently used by the system. This section ensures these fields are
                     # empty to prevent accidental data loss.
-                    if len(value) > 2:  # noqa: PLR2004
+                    if len(value) > _EMPTY_MATLAB_VECTOR_LENGTH:
                         message = (
                             f"Non-empty unsupported field '{key}' found in the frame-variant ScanImage metadata "
                             f"associated with the tiff file {tiff_path}. Update the _process_stack() function with the "
@@ -700,7 +728,7 @@ def _process_stack(
         # Reuses one batch buffer across every chunk and decodes each page directly into its slot. Building the batch
         # from a list of per-page arrays instead would allocate the batch twice and hold both copies at once.
         first_page = stack.pages[0]
-        batch_buffer: NDArray[Any] = np.empty(shape=(batch_size, *first_page.shape), dtype=first_page.dtype)
+        batch_buffer: NDArray[np.int16] = np.empty(shape=(batch_size, *first_page.shape), dtype=first_page.dtype)
 
         # Creates a TiffWriter to iteratively process and append each batch to the output file. Note, if the file
         # already exists, it will be overwritten.
@@ -753,7 +781,6 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
     # below to work for this acquisition mode.
     rois = [si_rois] if isinstance(si_rois, dict) else si_rois
 
-    # Extracts the ROI dimensions for each ROI.
     roi_number = len(rois)
     roi_heights = np.array([roi["scanfields"]["pixelResolutionXY"][1] for roi in rois], dtype=np.int64)
     roi_widths = np.array([roi["scanfields"]["pixelResolutionXY"][0] for roi in rois], dtype=np.int64)
@@ -767,14 +794,13 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
     roi_centers -= np.min(roi_centers, axis=0)
     # Calculates the pixels-per-unit scaling factor from ROI dimensions.
     scale_factor = np.median(np.column_stack([roi_heights, roi_widths]) / roi_sizes, axis=0)
-    # Converts ROI positions to pixel coordinates.
     min_positions = np.ceil(roi_centers * scale_factor)
 
     # Calculates the total number of rows across all ROIs (rows of pixels acquired while imaging ROIs).
     total_rows = np.sum(roi_heights)
 
     # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
-    # between frames.
+    # between consecutive ROIs within a frame.
     flyback_pixels = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))
 
     # Creates an array that stores the start and end row indices for each ROI.
@@ -875,16 +901,11 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     extensions = {"*.me", "*.tiff", "*.tif", "*.roi"}
     required_mesoscope_files = {"MotionEstimator.me", "fov.roi", "zstack.tiff"}
 
-    # Verifies that all required files are present in the source directory.
-
-    # Extracts the names of files stored in the source directory.
     files: tuple[Path, ...] = tuple(path for extension in extensions for path in source.glob(extension))
     file_names: set[str] = {file.name for file in files}
 
-    # Checks which required files are missing.
     missing_files = required_mesoscope_files - file_names
 
-    # Raises a runtime error if any required files are missing.
     if missing_files:
         missing_files_listing = ", ".join(sorted(missing_files))
         message = (
@@ -903,7 +924,7 @@ def _pull_mesoscope_data(session_data: SessionData, mesoscope_data: MesoscopeDat
     # Creates the VRPC's destination directory only after the source directory passes verification. An empty directory
     # left behind by an aborted pull looks like a completed transfer to the frame preprocessing step below.
     destination = session_data.raw_data_path.joinpath("raw_mesoscope_frames")
-    ensure_directory_exists(destination)
+    ensure_directory_exists(path=destination)
 
     # Transfers the mesoscope frames data from the ScanImagePC to the local machine and removes the source directory
     # after the transfer is complete.
@@ -928,9 +949,6 @@ def _preprocess_mesoscope_directory(
     Notes:
         This function is specifically calibrated to work with the data produced by the ScanImage matlab software and
         expects specific file formatting and metadata fields to be present in each processed .TIFF file.
-
-        To optimize runtime efficiency, this function employs multiple processes to work with multiple TIFFs at the
-        same time.
 
         This function is purposefully designed to combine the data from multiple acquisitions stored inside the same
         directory into the same output volume. This implementation supports processing sessions that feature mesoscope
@@ -985,7 +1003,7 @@ def _preprocess_mesoscope_directory(
 
     # Copies all files to the session's mesoscope_data (preprocessed) directory.
     output_directory = session_data.system_raw_data.mesoscope_data_path
-    ensure_directory_exists(output_directory)
+    ensure_directory_exists(path=output_directory)
     shutil.copy2(src=motion_estimator_file, dst=output_directory.joinpath("MotionEstimator.me"))
     shutil.copy2(src=fov_roi_file, dst=output_directory.joinpath("fov.roi"))
     shutil.copy2(src=zstack_file, dst=output_directory.joinpath("zstack.tiff"))
@@ -996,14 +1014,14 @@ def _preprocess_mesoscope_directory(
     cindra_parameters_path = output_directory.joinpath("cindra_parameters.json")
 
     # Pre-creates the dictionary to store frame-variant metadata extracted from all TIFF frames.
-    all_metadata: defaultdict[str, list[NDArray[Any]]] = defaultdict(list)
+    all_metadata: defaultdict[str, list[_MetadataArray]] = defaultdict(list)
 
     # Finds all TIFF files in the input directory (deliberately non-recursive).
     tiff_files = list(chain(image_directory.glob("*.tif"), image_directory.glob("*.tiff")))
 
     # Sorts files naturally. Since all files use the _acquisition#_stack# format, this procedure should naturally
     # sort the data in the order of acquisition.
-    tiff_files = natsorted(tiff_files, key=lambda path: path.name)
+    tiff_files = natsorted(seq=tiff_files, key=lambda path: path.name)
 
     # Validates and prepares TIFF stacks for processing. Filters out invalid files and determines frame numbering.
     valid_stacks: list[tuple[Path, int]] = []  # List of (file_path, starting_frame_number) tuples
@@ -1013,7 +1031,7 @@ def _preprocess_mesoscope_directory(
         # All valid mesoscope data files acquired in the lab are named with the 'session' marker.
         if "session" not in file.name:
             continue
-        stack_size = _verify_and_get_stack_size(file)
+        stack_size = _verify_and_get_stack_size(file=file)
         if stack_size > 0:
             # Records the file and its starting frame number.
             valid_stacks.append((file, starting_frame))
@@ -1033,7 +1051,6 @@ def _preprocess_mesoscope_directory(
         metadata_path=frame_invariant_metadata_path,
     )
 
-    # Uses partial to bind the constant arguments to the processing function.
     process_stack_partial = partial(
         _process_stack,
         output_directory=output_directory,
@@ -1043,14 +1060,21 @@ def _preprocess_mesoscope_directory(
     # Processes each tiff stack in parallel. The results are keyed by the stack's starting frame number, because
     # completion order is arbitrary and the metadata rows must be concatenated in acquisition order to line up with
     # the frames written to the output stacks.
-    stack_metadata: dict[int, dict[str, NDArray[Any]]] = {}
-    with ProcessPoolExecutor(max_workers=processes) as executor:
+    stack_metadata: dict[int, dict[str, _MetadataArray]] = {}
+
+    # Pins the numeric backends of each worker to a single thread. Without this, every worker opens a core-count-wide
+    # decode and compression pool of its own, oversubscribing the host by the square of the core count. The limit
+    # reaches a spawned worker through the environment it inherits, so it has to enclose the pool's whole lifetime,
+    # and the initializer covers the backends that read their width after the worker has started.
+    with (
+        limit_worker_threads(),
+        ProcessPoolExecutor(max_workers=processes, initializer=initialize_worker_threads) as executor,
+    ):
         futures = {
             executor.submit(process_stack_partial, tiff_file, frame_number): frame_number
             for tiff_file, frame_number in valid_stacks
         }
 
-        # Displays a progress bar that tracks the frame processing.
         progress_path = Path(*image_directory.parts[-6:])
         with console.progress(
             total=len(valid_stacks),
@@ -1079,8 +1103,8 @@ def _preprocess_mesoscope_directory(
     # isolates every boundary regardless of the increment the counter uses. Pairing it with the elapsed-time step
     # covers a counter that does not reset, keeping the detection at least as sensitive as the timestamps alone.
     restarts = np.union1d(
-        np.flatnonzero(np.diff(metadata_dict["frameNumberAcquisition"]) <= 0),
-        np.flatnonzero(np.diff(elapsed_seconds) < 0),
+        ar1=np.flatnonzero(np.diff(metadata_dict["frameNumberAcquisition"]) <= 0),
+        ar2=np.flatnonzero(np.diff(elapsed_seconds) < 0),
     )
 
     metadata_dict["frameNumberAcquisition"] = np.arange(1, frame_count + 1, dtype=np.int32)
@@ -1107,7 +1131,6 @@ def _preprocess_mesoscope_directory(
         metadata_dict["acquisitionNumbers"] = np.cumsum(acquisition, dtype=np.int32) + 1
     metadata_dict["frameTimestamps_sec"] = elapsed_seconds
 
-    # Saves concatenated metadata as an uncompressed numpy archive.
     np.savez(frame_variant_metadata_path, **metadata_dict)  # type: ignore[arg-type]
 
     # Removes the now-redundant directory that stores unprocessed files.
@@ -1191,7 +1214,7 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             )
             console.echo(message=message, level=LogLevel.WARNING)
 
-        # Handles window checking sessions differently - updates surgery quality instead of the water restriction log.
+        # Window checking sessions update the surgery quality assessment rather than the water restriction log.
         if is_window_checking:
             # Updating the surgery quality requires the surgery log Google Sheet connection established above. Skips the
             # update with a warning if the surgery log Google Sheet is not configured.
@@ -1230,7 +1253,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             "LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor", descriptor
         )
 
-        # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
+        # Calculates the volume of water, in ml, the animal received during the active portion of the session's
+        # runtime plus any water the experimenter gave afterwards. Water dispensed while the runtime was paused is
+        # tracked separately and is excluded from this total.
         training_water = round(water_descriptor.dispensed_water_volume_ml, ndigits=3)
         experimenter_water = round(water_descriptor.experimenter_given_water_volume_ml, ndigits=3)
         total_water = training_water + experimenter_water
@@ -1281,8 +1306,7 @@ def _migrate_sessions_via_destination(
         so the resumed migration continues from the failed session.
 
     Args:
-        destination_name: The name of the long-term storage destination used as the source of truth, used in status
-            messages.
+        destination_name: The name of the long-term storage destination used as the source of truth.
         storage_animal: The animal view resolving the source-project directory on the long-term storage destination.
         source_animal: The animal view resolving the source-project directory on the acquisition host machine.
         destination_animal: The animal view resolving the target-project directory on the acquisition host machine.

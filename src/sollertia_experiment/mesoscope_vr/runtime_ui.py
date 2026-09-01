@@ -35,12 +35,12 @@ from .visualizer import VisualizerMode
 from ..cross_system import request_text, request_selection
 
 _SPEED_THRESHOLD_SCALE: int = 100
-"""Converts between centimeters per second and the hundredths-of-a-centimeter-per-second integer units used to store
-the runtime-driven speed threshold inside the integer shared memory array.
+"""The factor that converts between centimeters per second and the hundredths-of-a-centimeter-per-second integer units
+used to store the runtime-driven speed threshold inside the integer shared memory array.
 """
 _DURATION_THRESHOLD_SCALE: int = 1000
-"""Converts between seconds and the millisecond integer units used to store the runtime-driven duration threshold
-inside the integer shared memory array.
+"""The factor that converts between seconds and the millisecond integer units used to store the runtime-driven
+duration threshold inside the integer shared memory array.
 """
 _MODIFIER_STEP: float = 0.01
 """The resolution represented by a single increment of the threshold modifiers: 0.01 cm/s for the speed modifier and
@@ -148,7 +148,7 @@ class RuntimeControlUI:
         _has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference regeneration
             button.
         _ui_process: The Process instance running the GUI cycle.
-        _started: Tracks whether the UI process is running.
+        _started: Determines whether the UI process is running.
     """
 
     def __init__(self, valve_tracker: SharedMemoryArray, gas_puff_tracker: SharedMemoryArray) -> None:
@@ -205,11 +205,13 @@ class RuntimeControlUI:
 
         Args:
             mode: The VisualizerMode that determines which UI elements are enabled. Speed and duration threshold
-                controls are only enabled for RUN_TRAINING mode. Must be a valid VisualizerMode enumeration member.
+                controls are only enabled for RUN_TRAINING mode, and the guidance and gas puff controls only for
+                EXPERIMENT mode. Must be a valid VisualizerMode enumeration member.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
-                When True, the UI shows the reinforcing guidance toggle button.
-            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True,
-                the UI shows the aversive guidance toggle button and the gas puff valve control group.
+                When True and the mode is EXPERIMENT, the UI shows the reinforcing guidance toggle button.
+            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True and
+                the mode is EXPERIMENT, the UI shows the aversive guidance toggle button and the gas puff valve
+                control group.
             has_mesoscope: Determines whether the runtime uses the mesoscope. When True, the UI shows the reference
                 regeneration button.
         """
@@ -301,7 +303,7 @@ class RuntimeControlUI:
 
         Notes:
             Once setup is complete, the water and gas valve open/close buttons are permanently disabled for the
-            remainder of the runtime. This method should be called after the initial checkpoint loop exits.
+            remainder of the runtime.
         """
         self._data_array[_DataArrayIndex.SETUP_COMPLETE] = 1
 
@@ -471,9 +473,9 @@ class RuntimeControlUI:
             app.setStyle("Fusion")
 
             window = _ControlUIWindow(
-                self._data_array,
-                self._valve_tracker,
-                self._gas_puff_tracker,
+                data_array=self._data_array,
+                valve_tracker=self._valve_tracker,
+                gas_puff_tracker=self._gas_puff_tracker,
                 mode=mode,
                 has_reinforcing_trials=has_reinforcing_trials,
                 has_aversive_trials=has_aversive_trials,
@@ -497,8 +499,7 @@ class RuntimeControlUI:
 def collect_experimenter_notes(session_name: str) -> str:
     """Prompts the supervising experimenter for the session's notes through a blocking terminal prompt.
 
-    The prompt runs during the session's teardown and re-asks until the experimenter submits a non-empty note, which
-    keeps the session annotation step mandatory.
+    Re-asks until the experimenter submits a non-empty note, which keeps the session annotation step mandatory.
 
     Args:
         session_name: The name of the session being annotated, shown in the prompt so the experimenter can confirm
@@ -519,8 +520,7 @@ def collect_experimenter_notes(session_name: str) -> str:
 def collect_surgery_quality(session_name: str) -> int:
     """Prompts the supervising experimenter for the cranial window quality rating through a blocking terminal prompt.
 
-    The prompt runs during a window checking session's teardown and records the experimenter's assessment of the
-    cranial window and surgical intervention. The rating is propagated to the surgery log during preprocessing.
+    Records the experimenter's assessment of the cranial window and surgical intervention.
 
     Args:
         session_name: The name of the session being rated, shown in the prompt so the experimenter can confirm they
@@ -551,10 +551,9 @@ def collect_experimenter_given_water_volume(
 ) -> float:
     """Reports the session water summary and prompts for the total water, returning the volume to hand-deliver.
 
-    The prompt runs during a non-window-checking session's teardown. It first reports the animal's current and previous
-    weights, the total water the animal received on the previous session, and the water delivered during this session,
-    then asks for the total water the animal should receive. Only session water counts toward that total, so water
-    dispensed while the system was paused is excluded.
+    First reports the animal's current and previous weights, the total water the animal received on the previous
+    session, and the water delivered during this session, then asks for the total water the animal should receive. Only
+    session water counts toward that total, so water dispensed while the system was paused is excluded.
 
     Args:
         current_weight_g: The animal's weight at the start of the session, in grams.
@@ -616,6 +615,22 @@ def _validate_water_volume_response(response: str) -> bool | str:
 class _ControlUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's runtime GUI application window.
 
+    Args:
+        data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
+        gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff data
+            to other processes during runtime.
+        mode: The VisualizerMode that determines which UI elements are enabled. Speed and duration threshold controls
+            are enabled in RUN_TRAINING mode, and the guidance and gas puff controls in EXPERIMENT mode.
+        has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials, which
+            adds the reinforcing guidance toggle button in EXPERIMENT mode.
+        has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials, which adds the
+            aversive guidance toggle button and the gas puff valve control group in EXPERIMENT mode.
+        has_mesoscope: Determines whether the runtime uses the mesoscope, which adds the reference regeneration
+            button.
+
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
             and other runtime processes.
@@ -628,19 +643,19 @@ class _ControlUIWindow(QMainWindow):
         _has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials.
         _has_mesoscope: Determines whether the runtime uses the mesoscope, which enables the reference regeneration
             button.
-        _is_paused: Tracks whether the runtime is paused.
-        _close_confirmed: Tracks whether the pending window close was decided by the runtime or by the monitoring
+        _is_paused: Determines whether the runtime is paused.
+        _close_confirmed: Determines whether the pending window close was decided by the runtime or by the monitoring
             cycle, which bypasses the operator confirmation prompt.
-        _setup_complete: Tracks whether the initial setup phase is complete. Once True, valve open/close buttons
+        _setup_complete: Determines whether the initial setup phase is complete. Once True, valve open/close buttons
             are permanently disabled.
-        _reference_generation_enabled: Tracks whether the reference regeneration button is currently enabled, so the
-            button is toggled only when the runtime-driven state changes.
-        _reinforcing_guidance_enabled: Tracks whether reinforcing trial guidance is enabled.
-        _aversive_guidance_enabled: Tracks whether aversive trial guidance is enabled.
-        _reward_in_progress: Tracks whether a reward delivery is in progress.
+        _reference_generation_enabled: Determines whether the reference regeneration button is currently enabled, so
+            the button is toggled only when the runtime-driven state changes.
+        _reinforcing_guidance_enabled: Determines whether reinforcing trial guidance is enabled.
+        _aversive_guidance_enabled: Determines whether aversive trial guidance is enabled.
+        _reward_in_progress: Determines whether a reward delivery is in progress.
         _reward_baseline_volume: The cumulative dispensed water volume recorded when the current reward delivery was
             requested, against which its completion is detected.
-        _puff_in_progress: Tracks whether a gas puff delivery is in progress.
+        _puff_in_progress: Determines whether a gas puff delivery is in progress.
         _puff_baseline_count: The cumulative delivered gas puff count recorded when the current gas puff delivery was
             requested, against which its completion is detected.
         _last_auto_speed: Tracks the most recently displayed runtime-driven running speed threshold, in hundredths of
@@ -751,7 +766,7 @@ class _ControlUIWindow(QMainWindow):
             return
 
         # Closing the window aborts the runtime, so an operator-initiated close is confirmed first. An accidental
-        # click on the window close control, or an Escape keypress, would otherwise abort the session outright.
+        # click on the window close control would otherwise abort the session outright.
         confirmation = QMessageBox.question(
             self,
             "Abort Runtime",
@@ -774,7 +789,6 @@ class _ControlUIWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        # Generates the central bounding box (the bounding box around all UI elements).
         main_layout = QVBoxLayout(central_widget)
         main_layout.setSpacing(12)
         main_layout.setContentsMargins(15, 15, 15, 15)
@@ -840,7 +854,6 @@ class _ControlUIWindow(QMainWindow):
             runtime_control_layout.addWidget(generate_reference_button)
             self._generate_reference_button = generate_reference_button
 
-        # Adds runtime status tracker to the same box.
         self._runtime_status_label = QLabel("Runtime Status: ⏸️ Paused")
         self._runtime_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         runtime_status_font = QFont()
@@ -850,7 +863,6 @@ class _ControlUIWindow(QMainWindow):
         self._runtime_status_label.setStyleSheet("QLabel { color: #f39c12; font-weight: bold; }")
         runtime_control_layout.addWidget(self._runtime_status_label)
 
-        # Adds the runtime control box to the UI widget.
         main_layout.addWidget(runtime_control_group)
 
         # Reward Valve Control Group.
@@ -858,7 +870,6 @@ class _ControlUIWindow(QMainWindow):
         valve_layout = QVBoxLayout(valve_group)
         valve_layout.setSpacing(6)
 
-        # Arranges valve control buttons in a horizontal layout.
         valve_buttons_layout = QHBoxLayout()
 
         self._valve_open_button = QPushButton("🔓 Open")
@@ -884,11 +895,11 @@ class _ControlUIWindow(QMainWindow):
 
         valve_layout.addLayout(valve_buttons_layout)
 
-        # Valve status and volume control section, arranged in a horizontal layout.
+        # Widgets enter a horizontal layout in the order they are added, so the volume controls sit at the left edge
+        # and the valve status label at the right.
         valve_status_layout = QHBoxLayout()
         valve_status_layout.setSpacing(6)
 
-        # Volume control on the left.
         volume_label = QLabel("Reward volume:")
         volume_label.setObjectName("volumeLabel")
 
@@ -901,11 +912,9 @@ class _ControlUIWindow(QMainWindow):
         self._volume_spinbox.setMinimumHeight(30)
         self._volume_spinbox.valueChanged.connect(self._update_reward_volume)
 
-        # Adds volume controls to the left side.
         valve_status_layout.addWidget(volume_label)
         valve_status_layout.addWidget(self._volume_spinbox)
 
-        # Adds the valve status tracker on the right.
         self._valve_status_label = QLabel("Valve: 🔒 Closed")
         self._valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         valve_status_font = QFont()
@@ -915,10 +924,8 @@ class _ControlUIWindow(QMainWindow):
         self._valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
         valve_status_layout.addWidget(self._valve_status_label)
 
-        # Adds the horizontal status layout to the main valve layout.
         valve_layout.addLayout(valve_status_layout)
 
-        # Adds the valve control box to the UI widget.
         main_layout.addWidget(valve_group)
 
         # Gas Puff Valve Control Group (only shown in EXPERIMENT mode with aversive trials).
@@ -933,7 +940,6 @@ class _ControlUIWindow(QMainWindow):
             gas_valve_layout = QVBoxLayout(gas_valve_group)
             gas_valve_layout.setSpacing(6)
 
-            # Arranges gas valve control buttons in a horizontal layout.
             gas_valve_buttons_layout = QHBoxLayout()
 
             gas_valve_open_button = QPushButton("🔓 Open")
@@ -959,11 +965,11 @@ class _ControlUIWindow(QMainWindow):
 
             gas_valve_layout.addLayout(gas_valve_buttons_layout)
 
-            # Gas valve status and duration control section, arranged in a horizontal layout.
+            # Widgets enter a horizontal layout in the order they are added, so the duration controls sit at the left
+            # edge and the gas valve status label at the right.
             gas_valve_status_layout = QHBoxLayout()
             gas_valve_status_layout.setSpacing(6)
 
-            # Duration control on the left.
             gas_duration_label = QLabel("Puff duration:")
             gas_duration_label.setObjectName("volumeLabel")
 
@@ -976,11 +982,9 @@ class _ControlUIWindow(QMainWindow):
             gas_duration_spinbox.setMinimumHeight(30)
             gas_duration_spinbox.valueChanged.connect(self._update_gas_puff_duration)
 
-            # Adds duration controls to the left side.
             gas_valve_status_layout.addWidget(gas_duration_label)
             gas_valve_status_layout.addWidget(gas_duration_spinbox)
 
-            # Adds the gas valve status tracker on the right.
             gas_valve_status_label = QLabel("Valve: 🔒 Closed")
             gas_valve_status_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             gas_valve_status_font = QFont()
@@ -990,10 +994,8 @@ class _ControlUIWindow(QMainWindow):
             gas_valve_status_label.setStyleSheet("QLabel { color: #e67e22; font-weight: bold; }")
             gas_valve_status_layout.addWidget(gas_valve_status_label)
 
-            # Adds the horizontal status layout to the main gas valve layout.
             gas_valve_layout.addLayout(gas_valve_status_layout)
 
-            # Adds the gas valve control box to the UI widget.
             main_layout.addWidget(gas_valve_group)
 
             # Caches the widget references accessed by the monitoring and signal-handler methods.
@@ -1010,7 +1012,7 @@ class _ControlUIWindow(QMainWindow):
         self._duration_spinbox: QDoubleSpinBox | None = None
 
         if self._mode == VisualizerMode.RUN_TRAINING:
-            # Bounds the target spin boxes to the same threshold limits the run training loop clamps to.
+            # Bounds the target spin boxes to the same threshold limits to which the run training loop clamps.
             limits = RUN_TRAINING_THRESHOLD_LIMITS
 
             controls_layout = QHBoxLayout()
@@ -1021,7 +1023,8 @@ class _ControlUIWindow(QMainWindow):
             speed_layout = QVBoxLayout(speed_group)
 
             # Speed threshold. The spinbox shows the current effective threshold in absolute units and lets the user
-            # request an absolute target, which the runtime converts into a modifier offset.
+            # request an absolute target, which the GUI converts into a modifier offset the run training loop
+            # consumes.
             speed_spinbox = QDoubleSpinBox()
             speed_spinbox.setRange(limits.minimum_speed_cm_s, limits.maximum_speed_cm_s)
             speed_spinbox.setSingleStep(0.01)
@@ -1038,7 +1041,8 @@ class _ControlUIWindow(QMainWindow):
             duration_layout = QVBoxLayout(duration_group)
 
             # Duration threshold. The spinbox shows the current effective threshold in absolute units and lets the
-            # user request an absolute target, which the runtime converts into a modifier offset.
+            # user request an absolute target, which the GUI converts into a modifier offset the run training loop
+            # consumes.
             duration_spinbox = QDoubleSpinBox()
             duration_spinbox.setRange(limits.minimum_duration_s, limits.maximum_duration_s)
             duration_spinbox.setSingleStep(0.01)
@@ -1049,12 +1053,12 @@ class _ControlUIWindow(QMainWindow):
             duration_spinbox.valueChanged.connect(self._update_duration_modifier)
             duration_layout.addWidget(duration_spinbox)
 
-            # Adds speed and duration threshold modifiers to the main UI widget.
             controls_layout.addWidget(speed_group)
             controls_layout.addWidget(duration_group)
             main_layout.addLayout(controls_layout)
 
-            # Caches the widget references accessed by the modifier-update handler methods.
+            # Caches the threshold group boxes and the spinbox references read by the monitoring and modifier-update
+            # methods.
             self._speed_group = speed_group
             self._duration_group = duration_group
             self._speed_spinbox = speed_spinbox
@@ -1471,7 +1475,8 @@ class _ControlUIWindow(QMainWindow):
 
     def _setup_monitoring(self) -> None:
         """Sets up a QTimer that periodically polls the externally addressable shared-memory state (termination, pause,
-        guidance, setup-complete, run-training thresholds, and valve states) to refresh the GUI.
+        guidance, setup-complete, run-training thresholds, reference-button enable state, and valve states) to refresh
+        the GUI.
         """
         self._monitor_timer = QTimer(self)
         self._monitor_timer.timeout.connect(self._check_external_state)
@@ -1628,8 +1633,8 @@ class _ControlUIWindow(QMainWindow):
         if self._speed_spinbox is None:
             return
         # The modifier is the difference between the requested absolute threshold and the runtime-driven component,
-        # expressed in units of 0.01 cm/s. The run training loop adds it back on top of the runtime component to
-        # recover the requested value, so the offset is preserved as the runtime component progresses.
+        # expressed in units of 0.01 cm/s. On top of the runtime component, the run training loop adds the modifier
+        # back to recover the requested value, so the offset is preserved as the runtime component progresses.
         target_speed = self._speed_spinbox.value()
         auto_speed = int(self._data_array[_DataArrayIndex.RUNTIME_SPEED_THRESHOLD]) / _SPEED_THRESHOLD_SCALE
         self._data_array[_DataArrayIndex.SPEED_MODIFIER] = round((target_speed - auto_speed) / _MODIFIER_STEP)
@@ -1641,8 +1646,8 @@ class _ControlUIWindow(QMainWindow):
         if self._duration_spinbox is None:
             return
         # The modifier is the difference between the requested absolute threshold and the runtime-driven component,
-        # expressed in units of 0.01 s (10 ms). The run training loop adds it back on top of the runtime component to
-        # recover the requested value, so the offset is preserved as the runtime component progresses.
+        # expressed in units of 0.01 s (10 ms). On top of the runtime component, the run training loop adds the
+        # modifier back to recover the requested value, so the offset is preserved as the runtime component progresses.
         target_duration = self._duration_spinbox.value()
         auto_duration = int(self._data_array[_DataArrayIndex.RUNTIME_DURATION_THRESHOLD]) / _DURATION_THRESHOLD_SCALE
         self._data_array[_DataArrayIndex.DURATION_MODIFIER] = round((target_duration - auto_duration) / _MODIFIER_STEP)
@@ -1685,7 +1690,7 @@ class _ControlUIWindow(QMainWindow):
 
     @staticmethod
     def _refresh_button_style(button: QPushButton) -> None:
-        """Refreshes button styles after object name change."""
+        """Reapplies the stylesheet to the button after its object name changes."""
         button.style().unpolish(button)
         button.style().polish(button)
         button.update()

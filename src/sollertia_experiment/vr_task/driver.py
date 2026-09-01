@@ -11,7 +11,7 @@ import threading
 from dataclasses import field, dataclass
 
 import numpy as np
-from ataraxis_time import Timeout, PrecisionTimer, TimerPrecisions
+from ataraxis_time import Timeout, TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_communication_interface import MQTTCommunication
 
@@ -97,7 +97,7 @@ class StimulusCause(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class VRTaskEvent:
+class _VRTaskEvent:
     """Stores the parsed Unity message produced by VRTaskDriver.cycle() during a single runtime cycle."""
 
     kind: VRTaskEventKind
@@ -114,13 +114,8 @@ class VRTaskEvent:
     STIMULUS_TRIGGERED event."""
 
 
-_NO_EVENT: VRTaskEvent = VRTaskEvent(kind=VRTaskEventKind.NONE)
-"""The shared event returned by every cycle that produces no dispatchable Unity event. The type is frozen, so the
-runtime cycle reuses this instance instead of building an identical one on each of its many iterations."""
-
-
 @dataclass(slots=True)
-class VRTaskState:
+class _VRTaskState:
     """Tracks the runtime state of the Virtual Reality task environment managed by the Unity game engine.
 
     Notes:
@@ -135,12 +130,12 @@ class VRTaskState:
     """The sequence of Virtual Reality environment wall cues used by the session's task environment. This array defines
     the visual cues displayed to the animal as it progresses through the virtual track."""
     terminated: bool = False
-    """Tracks whether the system has detected that the Unity game engine has unexpectedly terminated its runtime. When
-    True, the runtime enters an emergency pause state to allow the user to restart Unity."""
+    """Determines whether the system has detected that the Unity game engine has unexpectedly terminated its runtime.
+    When True, the runtime enters an emergency pause state to allow the user to restart Unity."""
     reinforcing_guidance_enabled: bool = False
-    """Tracks the state of the reinforcing trial guidance mode."""
+    """Determines whether the reinforcing trial guidance mode is enabled."""
     aversive_guidance_enabled: bool = False
-    """Tracks the state of the aversive trial guidance mode."""
+    """Determines whether the aversive trial guidance mode is enabled."""
 
 
 class _VRTaskMQTTTopics(StrEnum):
@@ -148,7 +143,7 @@ class _VRTaskMQTTTopics(StrEnum):
     task environment.
 
     Notes:
-        The catalog mirrors the flat PascalCase contract published by sollertia-virtual-reality' MQTTTopics constant
+        The catalog mirrors the flat PascalCase contract published by sollertia-virtual-reality's MQTTTopics constant
         set.
     """
 
@@ -185,12 +180,17 @@ class _VRTaskMQTTTopics(StrEnum):
     """Wait-requirement toggle published by the acquisition runtime (BoolMessage with bool value)."""
 
 
+_NO_EVENT: _VRTaskEvent = _VRTaskEvent(kind=VRTaskEventKind.NONE)
+"""The shared event returned by every cycle that produces no dispatchable Unity event. The type is frozen, so the
+runtime cycle reuses this instance instead of building an identical one on each of its many iterations."""
+
+
 class VRTaskDriver:
     """Drives the Unity game engine that runs the Virtual Reality task implemented in sollertia-virtual-reality.
 
     Encapsulates the MQTT contract with Unity: connection lifecycle, scene handshake, VR display verification, wall
     cue sequence retrieval, per-cycle stimulus pump, guidance toggling, and resume-after-Unity-restart. The driver
-    is hardware-agnostic, and per-cycle Unity events are surfaced as typed VRTaskEvent values that the caller
+    is hardware-agnostic, and per-cycle Unity events are surfaced as typed _VRTaskEvent values that the caller
     dispatches to acquisition system hardware.
 
     Args:
@@ -204,7 +204,7 @@ class VRTaskDriver:
         _task_template: The VR TaskTemplate consumed during cue sequence decomposition.
         _expected_scene_name: The Unity scene name enforced during the setup handshake.
         _mqtt: The MQTTCommunication instance that bidirectionally transfers data between this driver and Unity.
-        _state: The VRTaskState instance that tracks the Virtual Reality task environment state.
+        _state: The _VRTaskState instance that tracks the Virtual Reality task environment state.
         _motif_decomposer: The CachedMotifDecomposer used to flatten and cache trial motif data between decomposition
             runs.
         _decomposed_trials: The DecomposedTrials produced by the most recent cue sequence decomposition.
@@ -239,7 +239,7 @@ class VRTaskDriver:
             monitored_topics=monitored_topics,
         )
 
-        self._state: VRTaskState = VRTaskState()
+        self._state: _VRTaskState = _VRTaskState()
         self._motif_decomposer: CachedMotifDecomposer = CachedMotifDecomposer()
         self._decomposed_trials: DecomposedTrials = DecomposedTrials(
             cumulative_distances=np.zeros(0, dtype=np.float64),
@@ -256,7 +256,7 @@ class VRTaskDriver:
         )
 
     @property
-    def state(self) -> VRTaskState:
+    def state(self) -> _VRTaskState:
         """Returns the current Virtual Reality task state tracked by the driver."""
         return self._state
 
@@ -358,16 +358,14 @@ class VRTaskDriver:
         self._mqtt.send_data(topic=_VRTaskMQTTTopics.REQUIRE_WAIT, payload=payload)
         self._state.aversive_guidance_enabled = enabled
 
-    def cycle(self) -> VRTaskEvent:
+    def cycle(self) -> _VRTaskEvent:
         """Consumes the next pending Unity message and returns it as a typed event.
 
         Notes:
-            During each runtime cycle, the driver consumes at most one message from the MQTT buffer per cycle.
-            Callers dispatch the returned event to their own hardware (water valve, gas puff, brake) and runtime
-            state (trial advancement, emergency pause).
+            The driver consumes at most one message from the MQTT buffer per cycle.
 
         Returns:
-            The VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
+            The _VRTaskEvent describing the Unity message that was just parsed. When the MQTT buffer is empty, the
             event kind is NONE. The event kind is also NONE when the consumed message is on a non-surfaced
             (handshake) topic, such as SESSION_START, SCENE_NAME, or CUE_SEQUENCE.
         """
@@ -392,7 +390,7 @@ class VRTaskDriver:
                     if stimulus_payload.get("cause") == StimulusCause.GUIDANCE.value
                     else StimulusCause.BEHAVIOR
                 )
-            return VRTaskEvent(
+            return _VRTaskEvent(
                 kind=VRTaskEventKind.STIMULUS_TRIGGERED,
                 trial_name=trial_name,
                 delivered=delivered,
@@ -402,11 +400,11 @@ class VRTaskDriver:
         if topic == _VRTaskMQTTTopics.DELAY:
             delay_payload = json.loads(payload.decode("utf-8"))
             delay_ms = int(delay_payload.get("delayMilliseconds", 0))
-            return VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
+            return _VRTaskEvent(kind=VRTaskEventKind.TRIGGER_DELAY_REQUESTED, delay_ms=delay_ms)
 
         if topic == _VRTaskMQTTTopics.SESSION_STOP:
             self._state.terminated = True
-            return VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
+            return _VRTaskEvent(kind=VRTaskEventKind.UNITY_TERMINATED)
 
         return _NO_EVENT
 
@@ -415,11 +413,18 @@ class VRTaskDriver:
 
         Notes:
             An emergency pause occurs when Unity reports that its runtime terminated. This method ensures the editor
-            is reachable, re-arms Unity via the bridge, re-queries the regenerated wall cue sequence so the animal's
-            Virtual Reality position is tracked accurately after the reset, and clears the termination flag.
+            is reachable, re-arms Unity via the bridge, re-publishes the tracked guidance modes, re-queries the
+            regenerated wall cue sequence so the animal's Virtual Reality position is tracked accurately after the
+            reset, and clears the termination flag.
+
+            A fresh Play Mode session reloads Unity's interaction and wait requirements from the values serialized
+            into the task prefab, and Unity never queries the driver for them. Re-publishing both guidance modes
+            restores the requirements the operator selected for the session.
         """
         self._require_bridge()
         self._arm_unity()
+        self.set_reinforcing_guidance(enabled=self._state.reinforcing_guidance_enabled)
+        self.set_aversive_guidance(enabled=self._state.aversive_guidance_enabled)
         self._refresh_cue_sequence()
         self._state.terminated = False
 
@@ -428,8 +433,7 @@ class VRTaskDriver:
 
         Notes:
             The bridge starts automatically when the Unity Editor loads, so an unreachable bridge means the editor is
-            not running. The method enforces that Unity is open before the session proceeds instead of falling back
-            to manual scene and Play Mode control.
+            not running. The method blocks until Unity is open before the session proceeds.
         """
         while not self._bridge.is_reachable():
             message = (
@@ -521,15 +525,19 @@ class VRTaskDriver:
 
         Notes:
             Draining the SessionStop published when the scene's MQTT client disconnects prevents it from later being
-            misread by cycle() as an unexpected Unity termination during the runtime.
+            misread by cycle() as an unexpected Unity termination during the runtime. An editor that is already out
+            of Play Mode publishes no SessionStop, so the drain is skipped when the bridge reports the 'edit' state.
         """
         try:
-            self._bridge.exit_play_mode()
+            state = self._bridge.exit_play_mode()
         except UnityBridgeError as exception:
             message = f"Unable to stop Unity through the bridge. {exception}"
             console.echo(message=message, level=LogLevel.WARNING)
             return
-        self._wait_for_topic_bounded(expected_topic=_VRTaskMQTTTopics.SESSION_STOP, timeout_ms=_SESSION_STOP_TIMEOUT_MS)
+        if state != "edit":
+            self._wait_for_topic_bounded(
+                expected_topic=_VRTaskMQTTTopics.SESSION_STOP, timeout_ms=_SESSION_STOP_TIMEOUT_MS
+            )
 
     def _refresh_cue_sequence(self) -> None:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
@@ -583,10 +591,15 @@ class VRTaskDriver:
             if received:
                 return
 
+            timeout_seconds = int(
+                convert_time(
+                    time=_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND
+                )
+            )
             message = (
                 f"The Virtual Reality task driver sent a cue sequence request to Unity via the "
                 f"'{_VRTaskMQTTTopics.CUE_SEQUENCE_TRIGGER}' topic but received no response within "
-                f"{_CUE_SEQUENCE_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
+                f"{timeout_seconds} seconds. Ensure Unity is armed and the task is running."
             )
             console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter to retry")
@@ -596,8 +609,8 @@ class VRTaskDriver:
 
         Notes:
             The driver opens the expected scene through the bridge before arming Unity, so a mismatch indicates a
-            configuration error, such as a scene whose embedded name disagrees with its file name. The SceneName
-            reply also confirms the scene's MQTT client is responsive.
+            configuration error, such as the operator switching the active scene in the editor during one of the arming
+            retry prompts. The SceneName reply also confirms the scene's MQTT client is responsive.
 
         Raises:
             RuntimeError: If the active Unity scene does not match the expected scene name.
@@ -631,10 +644,15 @@ class VRTaskDriver:
                 console.echo(message="Unity scene configuration: Confirmed.", level=LogLevel.SUCCESS)
                 return
 
+            timeout_seconds = int(
+                convert_time(
+                    time=_SCENE_NAME_RESPONSE_TIMEOUT_MS, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND
+                )
+            )
             message = (
                 f"The Virtual Reality task driver sent a scene name request to Unity via the "
                 f"'{_VRTaskMQTTTopics.SCENE_NAME_TRIGGER}' topic but received no response within "
-                f"{_SCENE_NAME_RESPONSE_TIMEOUT_MS // 1000} seconds. Ensure Unity is armed and the task is running."
+                f"{timeout_seconds} seconds. Ensure Unity is armed and the task is running."
             )
             console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter to retry")
@@ -648,7 +666,7 @@ class VRTaskDriver:
             the background animation. Pressing Enter signals that the display renders correctly, so the operator is
             responsible for fixing any issues before confirming. The driver then reads the current play state through
             the bridge and cycles the scene off and back on so the session begins from a fresh Virtual Reality origin
-            regardless of the state the operator left the editor in.
+            regardless of the state in which the operator left the editor.
         """
         self._polling_timer.delay(delay=_DISPLAY_SCREENS_WARMUP_DELAY_MS, block=False)
 
@@ -660,7 +678,7 @@ class VRTaskDriver:
         console.echo(message=message, level=LogLevel.INFO)
         self._animate_until_satisfied()
 
-        # Regardless of the play state the operator left Unity in, cycles the scene off and back on so the session
+        # Regardless of the play state in which the operator left Unity, cycles the scene off and back on so the session
         # starts from a fresh, armed Virtual Reality origin.
         try:
             state, _ = self._bridge.get_play_state()
@@ -704,7 +722,7 @@ class VRTaskDriver:
         """Polls the Unity MQTT buffer for a message on the given topic until the timeout elapses.
 
         Args:
-            expected_topic: The MQTT topic to wait for.
+            expected_topic: The MQTT topic awaited by the poll.
             timeout_ms: The maximum time, in milliseconds, to wait before giving up.
 
         Returns:

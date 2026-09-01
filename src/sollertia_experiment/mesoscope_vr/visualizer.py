@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import matplotlib as mpl
 
-mpl.use("QtAgg")  # Uses the Qt backend for performance and compatibility with Linux.
+# Selects the Qt backend for performance and compatibility with Linux. The backend binds when matplotlib.pyplot is
+# first imported below, so this call has to stay above the imports for the selection to take effect.
+mpl.use("QtAgg")
 
-from ataraxis_time import PrecisionTimer, TimerPrecisions
+from ataraxis_time import TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, FixedLocator, FixedFormatter
 from matplotlib.patches import Rectangle
@@ -39,8 +41,6 @@ _FONTDICT_TITLE: dict[str, str | int] = {"family": "Arial", "weight": "normal", 
 _FONTDICT_LEGEND: dict[str, str | int] = {"family": "Arial", "weight": "normal", "size": 14}
 """The font properties used for annotation text."""
 
-_LINE_STYLE_DICT: dict[str, str] = {"solid": "-", "dashed": "--", "dotdashed": "-.", "dotted": ":"}
-"""Maps colloquial line style names to pyplot linestyle string-codes."""
 _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
     "green": (0.000, 0.639, 0.408),
     "blue": (0.000, 0.525, 0.749),
@@ -53,7 +53,7 @@ _PALETTE_DICT: dict[str, tuple[float, float, float]] = {
     "white": (1.000, 1.000, 1.000),
     "gray": (0.500, 0.500, 0.500),
 }
-"""Maps colloquial color names to RGB color codes."""
+"""The mapping from colloquial color names to RGB color codes."""
 
 _TRIAL_HISTORY_SIZE: int = 20
 """The number of trials to display in the trial performance panel."""
@@ -130,7 +130,7 @@ class BehaviorVisualizer:
             sessions.
         _running_speed: The current running speed of the animal, in cm / s, averaged over the speed-calculation window.
         _once: Limits certain visualizer setup operations to only be called once during runtime.
-        _is_open: Tracks whether the visualizer plot has been created.
+        _is_open: Determines whether the visualizer plot has been created.
         _blit_manager: The _BlitManager that performs partial figure redraws during runtime updates.
         _speed_threshold_text: The text object that communicates the speed threshold value to the user.
         _duration_threshold_text: The text object that communicates the running epoch duration value to the user.
@@ -162,7 +162,10 @@ class BehaviorVisualizer:
 
         # Pre-creates the structures used to store the displayed data during visualization runtime.
         self._timestamps: NDArray[np.float32] = np.arange(
-            0 - self._time_window, self._time_step / 1000, self._time_step / 1000, dtype=np.float32
+            0 - self._time_window,
+            stop=convert_time(time=self._time_step, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND),
+            step=convert_time(time=self._time_step, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND),
+            dtype=np.float32,
         )
         self._lick_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
         self._valve_data: NDArray[np.uint8] = np.zeros_like(a=self._timestamps, dtype=np.uint8)
@@ -249,11 +252,10 @@ class BehaviorVisualizer:
         self._has_reinforcing_trials = has_reinforcing_trials
         self._has_aversive_trials = has_aversive_trials
 
-        # Creates the figure with a mode-dependent subplot layout.
         if mode == VisualizerMode.LICK_TRAINING:
             self._figure, (self._lick_axis, self._valve_axis) = plt.subplots(
-                2,
-                1,
+                nrows=2,
+                ncols=1,
                 figsize=(10, 2.9),
                 sharex=True,
                 num="Runtime Behavior Visualizer",
@@ -270,8 +272,8 @@ class BehaviorVisualizer:
             self._trial_axis = None
         elif mode == VisualizerMode.RUN_TRAINING:
             self._figure, (self._lick_axis, self._valve_axis, self._speed_axis) = plt.subplots(
-                3,
-                1,
+                nrows=3,
+                ncols=1,
                 figsize=(10, 6),
                 sharex=True,
                 num="Runtime Behavior Visualizer",
@@ -326,7 +328,6 @@ class BehaviorVisualizer:
                 bottom=bottom_margin,
             )
 
-            # Creates axes based on layout configuration.
             self._lick_axis = self._figure.add_subplot(grid_spec[0])
             self._valve_axis = self._figure.add_subplot(grid_spec[1])
             if has_aversive_trials:
@@ -450,9 +451,9 @@ class BehaviorVisualizer:
                 # panel regardless of the speed-axis data range. Pinning them in data units couples their position
                 # to _SPEED_AXIS_YLIM, which silently misaligns the labels whenever the axis is rescaled.
                 self._speed_threshold_text = self._speed_axis.text(
-                    0.05,  # x position: axes fraction, just inside the left edge.
-                    0.954,  # y position: axes fraction, near the top.
-                    f"Target speed: {0:.2f} cm/s",
+                    x=0.05,
+                    y=0.954,
+                    s=f"Target speed: {0:.2f} cm/s",
                     transform=self._speed_axis.transAxes,
                     fontdict=_FONTDICT_LEGEND,
                     verticalalignment="top",
@@ -460,9 +461,9 @@ class BehaviorVisualizer:
                 )
 
                 self._duration_threshold_text = self._speed_axis.text(
-                    0.05,  # x position: axes fraction, just inside the left edge.
-                    0.852,  # y position: axes fraction, below the speed text.
-                    f"Target duration: {0:.2f} s",
+                    x=0.05,
+                    y=0.852,
+                    s=f"Target duration: {0:.2f} s",
                     transform=self._speed_axis.transAxes,
                     fontdict=_FONTDICT_LEGEND,
                     verticalalignment="top",
@@ -539,14 +540,13 @@ class BehaviorVisualizer:
         if not self._is_open or self._speed_threshold_line is None:
             return
 
-        # Converts from milliseconds to seconds.
-        duration_threshold /= 1000
+        duration_threshold = np.float64(
+            convert_time(time=duration_threshold, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND)
+        )
 
-        # Updates line positions.
         self._speed_threshold_line.set_ydata([speed_threshold, speed_threshold])
         self._duration_threshold_line.set_xdata([-duration_threshold, -duration_threshold])  # type: ignore[union-attr]
 
-        # Updates text annotations with current threshold values.
         self._speed_threshold_text.set_text(f"Target speed: {speed_threshold:.2f} cm/s")  # type: ignore[union-attr]
         self._duration_threshold_text.set_text(  # type: ignore[union-attr]
             f"Target duration: {duration_threshold:.2f} s"
@@ -592,7 +592,6 @@ class BehaviorVisualizer:
         if self._trial_axis is None:
             return
 
-        # Increments total trial count for x-axis labeling.
         self._total_trials += 1
 
         # Maps the boolean outcome flags to a trial-outcome code with failure taking priority: a failed trial did
@@ -609,18 +608,15 @@ class BehaviorVisualizer:
         self._trial_types[-1] = np.int8(1) if is_aversive else np.int8(0)
         self._trial_outcomes[-1] = outcome
 
-        # Redraws all rectangles based on the arrays. Newest trial is at the rightmost index.
         for index in range(_TRIAL_HISTORY_SIZE):
             trial_type = self._trial_types[index]
             trial_outcome = self._trial_outcomes[index]
             if trial_type == -1:
-                # Empty slot, hides rectangles for enabled trial types.
                 if self._has_reinforcing_trials:
                     self._reinforcing_rectangles[index].set_visible(False)
                 if self._has_aversive_trials:
                     self._aversive_rectangles[index].set_visible(False)
             elif trial_type == 1:
-                # Aversive trial.
                 if self._has_reinforcing_trials:
                     self._reinforcing_rectangles[index].set_visible(False)
                 if self._has_aversive_trials:
@@ -628,7 +624,6 @@ class BehaviorVisualizer:
                         rectangles=self._aversive_rectangles, index=index, outcome=trial_outcome
                     )
             else:
-                # Reinforcing trial.
                 if self._has_aversive_trials:
                     self._aversive_rectangles[index].set_visible(False)
                 if self._has_reinforcing_trials:
@@ -636,7 +631,6 @@ class BehaviorVisualizer:
                         rectangles=self._reinforcing_rectangles, index=index, outcome=trial_outcome
                     )
 
-        # Updates x-axis labels. Empty positions get empty labels, filled positions get trial numbers.
         displayed_trial_count = min(self._total_trials, _TRIAL_HISTORY_SIZE)
         start_trial_number = self._total_trials - displayed_trial_count + 1
         labels: list[str] = []
@@ -687,11 +681,12 @@ class BehaviorVisualizer:
                 self._puff_data[-1] = self._event_tick_true
             else:
                 self._puff_data[-1] = self._event_tick_false
-            self._puff_event = False  # Resets the puff event flag.
+            self._puff_event = False
 
         # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
         # update cycle the last speed point is overwritten with the previous speed point. This generates a
-        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
+        # sequence of at most 4 identical speed readouts, as the ~50 ms speed window spans roughly three 16 ms plot
+        # updates, and is not noticeable to the user. Only updates if speed axis
         # exists (not in LICK_TRAINING mode).
         if self._speed_axis is not None:
             self._speed_data = np.roll(a=self._speed_data, shift=-1)
@@ -714,7 +709,6 @@ class BehaviorVisualizer:
         self._trial_axis.set_xticks(ticks=range(1, _TRIAL_HISTORY_SIZE + 1))
         self._trial_axis.set_xticklabels(labels=[""] * _TRIAL_HISTORY_SIZE)
 
-        # Configures the Y-axis layout based on which trial types are enabled.
         if self._has_reinforcing_trials and self._has_aversive_trials:
             # Two-row layout: reinforcing on bottom, aversive on top.
             self._trial_axis.set_ylim(bottom=-0.1, top=1.0)
@@ -741,7 +735,6 @@ class BehaviorVisualizer:
             aversive_y = 0.15
             rectangle_height = 0.6
 
-        # Adds color legend for trial outcomes.
         legend_elements = [
             Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="green"), label="Succeeded"),
             Rectangle(xy=(0, 0), width=1, height=1, facecolor=_plt_palette(color="red"), label="Failed"),
@@ -757,7 +750,6 @@ class BehaviorVisualizer:
             bbox_to_anchor=(1.0, -0.02),
         )
 
-        # Creates the reinforcing trial rectangles if reinforcing trials are enabled.
         self._reinforcing_rectangles = []
         if self._has_reinforcing_trials:
             for index in range(_TRIAL_HISTORY_SIZE):
@@ -773,7 +765,6 @@ class BehaviorVisualizer:
                 self._trial_axis.add_patch(rectangle)
                 self._reinforcing_rectangles.append(rectangle)
 
-        # Creates the aversive trial rectangles if aversive trials are enabled.
         self._aversive_rectangles = []
         if self._has_aversive_trials:
             for index in range(_TRIAL_HISTORY_SIZE):
@@ -838,29 +829,6 @@ def _plt_palette(color: str) -> tuple[float, float, float]:
         console.error(message=message, error=KeyError)
 
 
-def _plt_line_styles(line_style: str) -> str:
-    """Converts colloquial line style names to pyplot's 'linestyle' string-codes.
-
-    Args:
-        line_style: The colloquial name for the line style to be used. Available options are: 'solid', 'dashed',
-            'dotdashed' and 'dotted'.
-
-    Returns:
-        The string-code for the requested line style.
-
-    Raises:
-        KeyError: If the input line style is not recognized.
-    """
-    try:
-        return str(_LINE_STYLE_DICT[line_style])
-    except KeyError:
-        message = (
-            f"Unable to convert the colloquial line style name to the pyplot linestyle string. The line style must "
-            f"be one of the supported options ({', '.join(_LINE_STYLE_DICT.keys())}), but got '{line_style}'."
-        )
-        console.error(message=message, error=KeyError)
-
-
 class _BlitManager:
     """Renders the real-time behavior plots using blitting to minimize the per-update rendering cost.
 
@@ -887,9 +855,9 @@ class _BlitManager:
     """
 
     def __init__(self, canvas: FigureCanvasAgg, animated_artists: list[Line2D]) -> None:
-        self._canvas = canvas
-        self._figure = canvas.figure
-        self._animated_artists = animated_artists
+        self._canvas: FigureCanvasAgg = canvas
+        self._figure: Figure = canvas.figure
+        self._animated_artists: list[Line2D] = animated_artists
         self._background: Any = None
 
         # Marks each data line as animated so full canvas redraws exclude it from the cached background, leaving the
@@ -897,7 +865,7 @@ class _BlitManager:
         for artist in self._animated_artists:
             artist.set_animated(True)
 
-        self._connection_id = canvas.mpl_connect("draw_event", self._on_draw)
+        self._connection_id: int = canvas.mpl_connect("draw_event", self._on_draw)
 
     def update(self) -> None:
         """Restores the cached background, redraws the data lines on top, and blits the result to the canvas."""

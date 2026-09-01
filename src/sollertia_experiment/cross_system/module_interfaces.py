@@ -30,15 +30,28 @@ _ZERO_UINT32: np.uint32 = np.uint32(0)
 """A pre-created uint32 zero, reused across the module to avoid unnecessary object recreation."""
 _FALSE: np.bool_ = np.bool_(0)
 """A pre-created boolean False, reused across the module to avoid unnecessary object recreation."""
+_TRUE: np.bool_ = np.bool_(1)
+"""A pre-created boolean True, reused across the module to avoid unnecessary object recreation."""
 
 _MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
-"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves, kept below the 500 ms firmware
-keepalive interval."""
+"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves and for the reward tone, kept below
+the 500 ms firmware keepalive interval."""
 _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 """The maximum valve pulse duration, in microseconds."""
 
 _MAXIMUM_BRAKING_STRENGTH: np.uint8 = np.uint8(255)
 """The braking strength sent to the BrakeModule for pulse commands, set to the maximum value (255)."""
+
+_CCW_ROTATION_CODE: int = 51
+"""The EncoderModule event code (kRotatedCCW) that reports rotation in the counterclockwise, positive direction."""
+_TTL_ON_CODE: int = 51
+"""The TTLModule event code (kInputOn) that reports a detected HIGH TTL pulse edge."""
+_VALVE_OPEN_CODE: int = 51
+"""The ValveModule event code (kOpen) that reports the valve transitioning to the open state."""
+_VALVE_CLOSED_CODE: int = 52
+"""The ValveModule event code (kClosed) that reports the valve transitioning to the closed state."""
+_VALVE_CALIBRATED_CODE: int = 53
+"""The ValveModule event code (kCalibrated) that reports the completion of a calibration cycle."""
 
 
 class EncoderInterface(ModuleInterface):
@@ -48,8 +61,7 @@ class EncoderInterface(ModuleInterface):
         Type code 2.
 
         The encoder is constructed without a Unity scale and reports zero Unity motion until ``set_unity_scale`` is
-        called. VR-experiment runtimes load the cm-per-Unity-unit conversion factor from the VR TaskTemplate and
-        apply it via ``set_unity_scale`` at experiment-start.
+        called.
 
     Args:
         encoder_ppr: The resolution of the module's quadrature encoder, in Pulses Per Revolution (PPR).
@@ -91,19 +103,18 @@ class EncoderInterface(ModuleInterface):
         self._ppr: int = encoder_ppr
         self._wheel_diameter: float = wheel_diameter
 
-        # Computes the conversion factor to go from pulses to centimeters
+        # Computes the conversion factor to go from pulses to centimeters.
         self._cm_per_pulse: np.float64 = np.float64((math.pi * self._wheel_diameter) / self._ppr)
 
-        # Defaults to zero. VR-experiment runtimes call set_unity_scale() with the cm-per-Unity-unit conversion
-        # loaded from the VR TaskTemplate before consuming encoder data.
+        # Defaults to zero until set_unity_scale() supplies the cm-per-Unity-unit conversion factor.
         self._unity_unit_per_pulse: np.float64 = np.float64(0.0)
 
         self._polling_frequency: np.uint32 = np.uint32(polling_frequency)
 
-        # Pre-creates a shared memory array that shares two encoder metrics with other processes: the absolute distance
-        # traveled by the animal since class initialization, in centimeters (index 0), and the signed encoder
-        # displacement relative to the onset position, in pulses, used to derive the animal's Unity-space position
-        # (index 1).
+        # Pre-creates a shared memory array that shares two encoder metrics with other processes. Index 0 holds the
+        # absolute distance traveled by the animal since class initialization, in centimeters. Index 1 holds the signed
+        # encoder displacement relative to the onset position, in pulses, used to derive the animal's Unity-space
+        # position.
         self._distance_tracker: SharedMemoryArray = SharedMemoryArray.create_array(
             name=f"{int(self._module_type)}_{int(self._module_id)}_distance_tracker",
             prototype=np.zeros(shape=2, dtype=np.float64),
@@ -133,8 +144,7 @@ class EncoderInterface(ModuleInterface):
         """
         # The rotation direction is encoded via the message event code. CW rotation (code 52) is interpreted as negative
         # and CCW (code 51) as positive.
-        _ccw_rotation_code = 51
-        sign = 1 if message.event == _ccw_rotation_code else -1
+        sign = 1 if message.event == _CCW_ROTATION_CODE else -1
 
         # Converts the motion into centimeters. Does not include the sign, as this value is used to compute the absolute
         # traveled distance regardless of the traveled direction.
@@ -151,6 +161,7 @@ class EncoderInterface(ModuleInterface):
 
     def set_parameters(
         self,
+        *,
         report_ccw: np.bool_,
         report_cw: np.bool_,
         delta_threshold: np.uint32,
@@ -191,13 +202,7 @@ class EncoderInterface(ModuleInterface):
 
     @property
     def absolute_position(self) -> np.float64:
-        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset.
-
-        Notes:
-            The position scales the signed encoder displacement accumulated in the shared memory buffer by the current
-            Unity conversion factor. The scaling is applied here, on the main process, because set_unity_scale()
-            updates the factor after the communication process that fills the buffer has already started.
-        """
+        """Returns the absolute position of the animal, in Unity units, relative to the runtime onset."""
         # The tracker is created with a pinned float64 dtype, so the product is already float64 and needs no
         # conversion. The cast only restores the width the shared array's Any-typed element access erases.
         return cast("np.float64", self._distance_tracker[1] * self._unity_unit_per_pulse)
@@ -216,9 +221,9 @@ class EncoderInterface(ModuleInterface):
         """Updates the encoder pulse to Unity unit conversion factor used to report animal motion to Unity.
 
         Notes:
-            VR-experiment runtimes call this method at experiment-start with the cm-per-Unity-unit conversion factor
-            loaded from the VR TaskTemplate. The factor is stored on the main process and applied when the
-            absolute_position property is read, so it can be updated after the communication process has started.
+            The factor is stored on the main process and scales the signed encoder displacement when the
+            absolute_position property is read, so it can be updated after the communication process that fills the
+            shared memory buffer has started.
 
         Args:
             cm_per_unity_unit: The length of one Virtual Reality environment distance unit (Unity unit) in
@@ -273,8 +278,8 @@ class LickInterface(ModuleInterface):
             exists_ok=True,
         )
 
-        # Prevents excessive lick reporting by ensuring that lick counter is only incremented after the signal reaches
-        # the zero value.
+        # Prevents excessive lick reporting by ensuring that the lick counter is only incremented after the signal
+        # reaches the zero value.
         self._previous_readout_zero: bool = False
 
         self._check_state: np.uint8 = np.uint8(1)
@@ -414,19 +419,20 @@ class TorqueInterface(ModuleInterface):
         self._monitoring: bool = False
 
     def initialize_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module keeps no assets in the communication process."""
         return
 
     def terminate_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module holds no remote assets to release."""
         return
 
     def process_received_data(self, _message: ModuleData | ModuleState) -> None:
-        """Not used, as the module currently does not require real-time data processing."""
+        """Discards the received message, because the module carries no real-time processing stage."""
         return
 
     def set_parameters(
         self,
+        *,
         report_ccw: np.bool_,
         report_cw: np.bool_,
         signal_threshold: np.uint16,
@@ -553,8 +559,7 @@ class MesoscopeFrameTTLInterface(ModuleInterface):
         the microcontroller.
         """
         # Each time the module detects a HIGH TTL pulse edge, increments the pulse counter.
-        _ttl_on_code = 51
-        if message.event == _ttl_on_code:
+        if message.event == _TTL_ON_CODE:
             self._pulse_tracker[0] += 1
 
     def set_parameters(
@@ -650,15 +655,15 @@ class BrakeInterface(ModuleInterface):
         self._previous_pulse_duration: int = 0
 
     def initialize_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module keeps no assets in the communication process."""
         return
 
     def terminate_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module holds no remote assets to release."""
         return
 
     def process_received_data(self, _message: ModuleData | ModuleState) -> None:
-        """Not used, as the module currently does not require any real-time data processing."""
+        """Discards the received message, because the module carries no real-time processing stage."""
         return
 
     def set_state(self, *, state: bool) -> None:
@@ -690,7 +695,11 @@ class BrakeInterface(ModuleInterface):
             duration_us = np.uint32(duration_ms * 1000)
             self.send_parameters(parameter_data=(_MAXIMUM_BRAKING_STRENGTH, duration_us))
 
-        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The firmware advances the pulse one stage per runtime cycle, so a blocking send would stall the controller
+        # for the whole hold and lapse its keepalive.
+        self.send_command(command=self._pulse, noblock=_TRUE, repetition_delay=_ZERO_UINT32)
+        # The pulse command returns the brake to the disengaged state, so the commanded state tracks that transition.
+        self._enabled = False
 
     @property
     def maximum_brake_strength(self) -> np.float64:
@@ -764,7 +773,7 @@ class WaterValveInterface(ModuleInterface):
             [calibration_pair[1] for calibration_pair in valve_calibration_data], dtype=np.float64
         )
 
-        # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes
+        # Fits the power-law model to the input calibration data and saves the fit parameters to instance attributes.
         parameters, _ = curve_fit(
             f=_power_law_model,  # type: ignore[arg-type]
             xdata=pulse_durations,
@@ -823,17 +832,13 @@ class WaterValveInterface(ModuleInterface):
         """Updates the reward data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
-        _valve_open_code = 51
-        _valve_closed_code = 52
-        _valve_calibrated_code = 53
-
-        if message.event == _valve_open_code and not self._previous_module_state:
+        if message.event == _VALVE_OPEN_CODE and not self._previous_module_state:
             # Resets the cycle timer each time the valve transitions to an open state.
             self._previous_module_state = True
             self._valve_tracker[2] = 1
             self._cycle_timer.reset()  # type: ignore[union-attr]
 
-        elif message.event == _valve_closed_code and self._previous_module_state:
+        elif message.event == _VALVE_CLOSED_CODE and self._previous_module_state:
             # Each time the valve transitions to a closed state, records the period of time the valve was open and uses
             # it to estimate the volume of fluid delivered through the valve. Accumulates the total volume in the
             # tracker array.
@@ -847,7 +852,7 @@ class WaterValveInterface(ModuleInterface):
 
         # When the valve reports the completion of a calibration cycle, sets the appropriate element of the tracker
         # array to 1.
-        elif message.event == _valve_calibrated_code:
+        elif message.event == _VALVE_CALIBRATED_CODE:
             self._valve_tracker[1] = 1
 
     def set_state(self, *, state: bool) -> None:
@@ -886,6 +891,8 @@ class WaterValveInterface(ModuleInterface):
 
         # Matches the transmitted tone duration to the duration the firmware actually sounds, so the logged parameter
         # records the delivered tone rather than the requested one.
+        tone_duration_us = self._clamp_tone_duration(tone_duration_us=tone_duration_us)
+
         tone_extended: bool = bool(0 < tone_duration_us < pulse_duration)
         if tone_extended:
             tone_duration_us = pulse_duration
@@ -937,6 +944,8 @@ class WaterValveInterface(ModuleInterface):
         tone_duration_us: np.uint32 = np.uint32(
             round(convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND))
         )
+
+        tone_duration_us = self._clamp_tone_duration(tone_duration_us=tone_duration_us)
 
         # Transmitting a triple the firmware already holds costs a serial message that changes nothing, so the
         # transmission is skipped while the values match.
@@ -1051,6 +1060,31 @@ class WaterValveInterface(ModuleInterface):
         """
         return bool(self._valve_tracker[1] == 0)
 
+    @property
+    def valve_tracker(self) -> SharedMemoryArray:
+        """Returns the SharedMemoryArray that exports the valve's delivered volume and state to other processes."""
+        return self._valve_tracker
+
+    def _clamp_tone_duration(self, tone_duration_us: np.uint32) -> np.uint32:
+        """Caps the requested reward tone duration at the maximum duration the firmware keepalive tolerates.
+
+        Args:
+            tone_duration_us: The requested tone duration, in microseconds.
+
+        Returns:
+            The tone duration, in microseconds, to transmit to the managed module.
+        """
+        if tone_duration_us <= _MAXIMUM_VALVE_PULSE_DURATION_US:
+            return tone_duration_us
+
+        message = (
+            f"The requested reward tone duration of {int(tone_duration_us) / 1000:.1f} ms for ValveModule "
+            f"{int(self._module_id)} exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. "
+            f"Capping to {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return np.uint32(_MAXIMUM_VALVE_PULSE_DURATION_US)
+
     def _transmit_parameters(self, pulse_duration: np.uint32, tone_duration_us: np.uint32) -> None:
         """Sends the valve's parameter structure to the microcontroller and records the transmitted values.
 
@@ -1094,15 +1128,15 @@ class ScreenInterface(ModuleInterface):
         self._enabled: bool = False
 
     def initialize_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module keeps no assets in the communication process."""
         return
 
     def terminate_remote_assets(self) -> None:
-        """Not used."""
+        """Returns immediately, because the module holds no remote assets to release."""
         return
 
     def process_received_data(self, _message: ModuleData | ModuleState) -> None:
-        """Not used, as the module currently does not require any real-time data processing."""
+        """Discards the received message, because the module carries no real-time processing stage."""
         return
 
     def set_parameters(self, pulse_duration: np.uint32) -> None:
@@ -1123,7 +1157,9 @@ class ScreenInterface(ModuleInterface):
         if state is self._enabled:
             return
 
-        self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The firmware advances the toggle one stage per runtime cycle, so a blocking send would stall the controller
+        # for the whole pulse and lapse its keepalive.
+        self.send_command(command=self._toggle, noblock=_TRUE, repetition_delay=_ZERO_UINT32)
         self._enabled = state
 
     @property
@@ -1138,8 +1174,8 @@ class GasPuffValveInterface(ModuleInterface):
     Notes:
         Type code 5.
 
-        Unlike the water reward valve, gas valves do not require calibration as precise gas volume control is not
-        critical. This interface provides direct duration-based control without volume conversion.
+        Controls the valve by pulse duration directly, because gas puff delivery tolerates the volume spread an
+        uncalibrated valve produces.
 
     Attributes:
         _pulse: The code for the Pulse module command.
@@ -1170,7 +1206,7 @@ class GasPuffValveInterface(ModuleInterface):
         self._configured_state: bool = False
         self._previous_module_state: bool = False
 
-        # Tracks the pulse duration used by the previous deliver_puff() call
+        # Tracks the pulse duration used by the previous deliver_puff() call.
         self._previous_duration: int = 0
 
         # Creates a SharedMemoryArray used to track and share gas puff data. Index 0 tracks the total number of puffs
@@ -1197,14 +1233,11 @@ class GasPuffValveInterface(ModuleInterface):
         """Updates the puff data stored in the instance's shared memory buffer based on the messages received from
         the microcontroller.
         """
-        _valve_open_code = 51
-        _valve_closed_code = 52
-
-        if message.event == _valve_open_code and not self._previous_module_state:
+        if message.event == _VALVE_OPEN_CODE and not self._previous_module_state:
             self._previous_module_state = True
             self._puff_tracker[1] = 1
 
-        elif message.event == _valve_closed_code and self._previous_module_state:
+        elif message.event == _VALVE_CLOSED_CODE and self._previous_module_state:
             # Each time the valve transitions to a closed state, increments the puff count tracker.
             self._previous_module_state = False
             self._puff_tracker[1] = 0
@@ -1256,6 +1289,11 @@ class GasPuffValveInterface(ModuleInterface):
     def puff_count(self) -> int:
         """Returns the total number of gas puffs delivered since runtime onset."""
         return int(self._puff_tracker[0])
+
+    @property
+    def puff_tracker(self) -> SharedMemoryArray:
+        """Returns the SharedMemoryArray that exports the delivered puff count to other processes."""
+        return self._puff_tracker
 
 
 def _power_law_model(

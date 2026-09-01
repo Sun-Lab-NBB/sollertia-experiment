@@ -19,38 +19,26 @@ This library is part of the [Sollertia](https://github.com/Sun-Lab-NBB/sollertia
 acquisition and processing platform, built on the [Ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) framework and
 developed in the Sun (NeuroAI) lab at Cornell University. It is the system-agnostic data acquisition and preprocessing
 runtime of the platform: it manages the hardware, sessions, and preprocessing pipeline for one or more data acquisition
-systems and is designed to be extended with new systems over time. The **Mesoscope-VR** two-photon imaging system is
-the current reference acquisition system that ships with the library.
-
-Every Sollertia acquisition system runs a Virtual Reality task, presenting an animal with a Unity-rendered linear
-infinite corridor while the system records behavior and (where applicable) brain activity data. The library provides the
-shared machinery these systems reuse, which is the session data hierarchy, the hardware-agnostic Virtual Reality task
-driver, and the acquisition-system configuration registry, alongside the bindings and runtime logic that are specific to
-each system. The system-specific code is tightly integrated with the platform hardware and is generally not designed to
-be reused in any other context. The shared machinery, however, is the reusable substrate new systems plug into. See the
-[Data Acquisition Systems](#data-acquisition-systems) section for more details on currently supported acquisition
-systems and how the platform is extended.
-
-The library pairs with the shared dataclasses, data hierarchy, and configuration tooling provided by
+systems and is designed to be extended with new systems over time. The **Mesoscope-VR** two-photon imaging system is the
+current reference acquisition system that ships with the library, and it builds on the same session data hierarchy,
+Virtual Reality task driver, and configuration registry into which new systems plug. The library pairs with
 [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets), which supplies the
-`AcquisitionSystems`-keyed registry backbone that new systems register against, and feeds the downstream data processing
-pipeline exposed by [sollertia-forgery](https://github.com/Sun-Lab-NBB/sollertia-forgery). The platform ships a
-[Claude Code](https://claude.com/claude-code) marketplace whose **experiment** plugin exposes the library's `sle mcp`
-server and a set of domain skills for AI-assisted use. Human operators interact with the library through its command
-line interface, while AI agents work through the MCP server and skills (see
-[AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills)).
+`AcquisitionSystems`-keyed registry backbone against which new systems register, and feeds the downstream data
+processing pipeline exposed by [sollertia-forgery](https://github.com/Sun-Lab-NBB/sollertia-forgery).
 
 ___
 
 ## Features
 
+- Supports the Linux operating system.
 - System-agnostic acquisition and preprocessing runtime, designed to be extended with new acquisition systems.
 - Mesoscope-VR reference acquisition system combining two-photon imaging with a Unity Virtual Reality behavioral task.
 - A single consolidated `sle` command line interface for hardware discovery, configuration, acquisition, and data
   management.
 - Hardware abstraction through binding classes for Zaber motors, machine-vision cameras, and microcontrollers.
 - Session-based data management with distributed, redundant long-term storage.
-- An `sle mcp` MCP server and a Claude Code marketplace plugin for AI-assisted operation.
+- An `sle mcp` MCP server and two Claude Code marketplace plugins, **experiment** and **mesoscope**, for
+  AI-assisted operation.
 - Apache 2.0 License.
 
 ___
@@ -59,13 +47,19 @@ ___
 
 - [Dependencies](#dependencies)
 - [Installation](#installation)
-- [Data Acquisition Systems](#data-acquisition-systems)
-- [Mesoscope-VR Data Acquisition System](#mesoscope-vr-data-acquisition-system)
-- [Acquired Data Structure and Management](#acquired-data-structure-and-management)
-- [Acquiring Data](#acquiring-data)
-- [Recovering from Interruptions](#recovering-from-interruptions)
-- [AI-Assisted Use (MCP Server and Skills)](#ai-assisted-use-mcp-server-and-skills)
+  - [Source](#source)
+  - [pip](#pip)
+- [Usage](#usage)
+  - [Data Acquisition Systems](#data-acquisition-systems)
+  - [Mesoscope-VR Data Acquisition System](#mesoscope-vr-data-acquisition-system)
+  - [Acquired Data Structure and Management](#acquired-data-structure-and-management)
+  - [Acquiring Data](#acquiring-data)
+  - [Recovering from Interruptions](#recovering-from-interruptions)
 - [API Documentation](#api-documentation)
+- [AI-Assisted Development](#ai-assisted-development)
+  - [MCP Server](#mcp-server)
+  - [Marketplace Plugins](#marketplace-plugins)
+  - [Skills](#skills)
 - [Developers](#developers)
 - [Versioning](#versioning)
 - [Authors](#authors)
@@ -76,13 +70,12 @@ ___
 
 ## Dependencies
 
-For users, all Python library dependencies are installed automatically by all supported installation methods. Each
-acquisition system additionally relies on external software and hardware components that must be installed and
-configured separately, and for the Mesoscope-VR system they are documented under the
+Each acquisition system relies on external software and hardware components that must be installed and configured
+separately, and for the Mesoscope-VR system they are documented under the
 [Mesoscope-VR Data Acquisition System](#mesoscope-vr-data-acquisition-system) section.
 
-For developers, see the [Developers](#developers) section for information on installing additional development
-dependencies.
+For users, all other library dependencies are installed automatically by all supported installation methods. For
+developers, see the [Developers](#developers) section for information on installing additional development dependencies.
 
 ___
 
@@ -107,7 +100,9 @@ Use the following command to install the library and all of its dependencies via
 
 ___
 
-## Data Acquisition Systems
+## Usage
+
+### Data Acquisition Systems
 
 A data acquisition (and runtime control) system can be broadly defined as a collection of hardware and software tools
 used to conduct training or experiment sessions that acquire scientific data. Each data acquisition system can use one
@@ -124,11 +119,7 @@ data. Other systems may center on a different acquisition modality. Due to this 
 platform data acquisition system is treated as an independent unit that contributes its own bindings, runtime logic,
 and preprocessing steps, while plugging into the shared platform machinery for everything else.
 
-***Note,*** Since each data acquisition system is unique, this section is iteratively expanded to include
-system-specific assembly instructions for **each supported acquisition system** (each gets its own section). Commonly,
-updates to this section coincide with major or minor library version updates.
-
-### Extending the Platform
+#### Extending the Platform
 
 The library is designed so that a new acquisition system can be added by composing the shared machinery rather than
 rewriting it. The reusable substrate spans this library and
@@ -140,9 +131,9 @@ rewriting it. The reusable substrate spans this library and
   registers it at import time via `register_system_configuration()`. Registration is the only system-specific wiring
   the configuration file lifecycle requires, and resolution, creation, and loading of the on-disk YAML are all shared.
 - **The shared session data hierarchy and registries.** The 4-level root/project/animal/session hierarchy, the
-  `SessionData` model, and the per-system record registries (session descriptors, hardware states, and experiment
-  configurations) are owned by sollertia-shared-assets. A new system contributes its record schemas to those
-  registries and reuses the rest of the hierarchy unchanged.
+  `SessionData` model, and the record registries (session descriptors keyed by session type, hardware states and
+  experiment configurations keyed by acquisition system) are owned by sollertia-shared-assets. A new system
+  contributes its record schemas to those registries and reuses the rest of the hierarchy unchanged.
 - **The hardware-agnostic Virtual Reality task driver.** The `vr_task` driver encapsulates the MQTT contract with the
   Unity game engine, the editor bridge that drives scene activation and Play Mode, and the cue-sequence-to-trial
   decomposition. The driver is hardware-agnostic, surfacing typed Virtual Reality task events that any acquisition
@@ -155,8 +146,8 @@ rewriting it. The reusable substrate spans this library and
 - **The shared preprocessing primitives.** `cross_system/data_preprocessing.py` provides log archive assembly, video
   renaming, surgery record snapshotting, storage push, session directory deletion, and project migration. Each system
   names its behavior `DataLogger` after `BEHAVIOR_LOGGER_NAME`, which is how log assembly locates the log directory,
-  and resolves its own configuration into the system-agnostic `StorageDestinations` interface that the shared
-  utilities operate on.
+  and resolves its own configuration into the system-agnostic `StorageDestinations` interface on which the shared
+  utilities operate.
 
 ***Note,*** the platform does not expose a generic runtime base class, and that is a design decision rather than a
 missing abstraction. An acquisition system's engine is defined by a physical hardware inventory and by
@@ -172,12 +163,12 @@ member, the `AcquisitionSystems`-keyed dispatch registries, the per-system recor
 contract checks. Both skills are required to land a new system. From there, `system-design-pipeline` orders the build
 phases, `acquisition-system-design` covers the configuration and binding layer, and `acquisition-system-runtime` covers
 the runtime layer. The `microcontroller-interface`, `zaber-interface`, and `vr-driver-interface` skills cover the
-individual hardware and Unity coupling seams. See [AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills) for the
-skill inventory.
+individual hardware and Unity coupling seams. See [AI-Assisted Development](#ai-assisted-development) for the skill
+inventory.
 
 ___
 
-## Mesoscope-VR Data Acquisition System
+### Mesoscope-VR Data Acquisition System
 
 This is the current reference Sollertia platform data acquisition system. The system broadly consists of four major
 parts:
@@ -185,7 +176,7 @@ parts:
    [Thor Labs](https://www.thorlabs.com/newgrouppage9.cfm?objectgroup_id=10646) and controlled by ScanImage software.
    The Mesoscope control and data acquisition are performed by a dedicated computer referred to as the
    **'ScanImagePC'**. This PC is assembled and configured by [MBF Bioscience](https://www.mbfbioscience.com/). The only
-   modification carried out during assembly was the configuration of a Server Message Block (SMB) protocol access to
+   modification carried out during assembly was the configuration of Server Message Block (SMB) protocol access to
    the root directory used by the ScanImage software to save the Mesoscope data.
 2. The [Unity game engine](https://unity.com/products/unity-engine) running the Virtual Reality game world used in all
    experiments to control the task environment and resolve the task logic. The virtual environment runs on the main
@@ -200,13 +191,13 @@ parts:
 in depth by the **mesoscope** plugin's `mesoscope-vr` skill. Use the **experiment** plugin's `system-health-check` and
 `acquisition-system-setup` skills to verify the dependencies below before running sessions.
 
-### Main Dependency
+#### Main Dependency
 - ***Linux*** operating system. The library *may* also work on Windows and (less likely) macOS. It has been explicitly
   written for and tested on the mainline [6.18 kernel](https://kernelnewbies.org/Linux_6.18) and Ubuntu 24.04 LTS
   distribution of the GNU Linux operating system using [Wayland](https://wayland.freedesktop.org/) window system
   architecture.
 
-### Software Dependencies
+#### Software Dependencies
 ***Note,*** This list only includes *external dependencies*, which are installed *in addition* to all dependencies
 automatically installed from pip / conda as part of library installation. The dependencies below have to be installed
 and configured on the **VRPC** before calling runtime commands via the command line interface (CLI) exposed by this
@@ -221,13 +212,27 @@ library.
 - [MvImpactAcquire](https://assets-2.balluff.com/mvIMPACT_Acquire/). This library is tested with version **2.9.2**,
   which is freely distributed. Higher GenTL producer versions likely work too, but they require purchasing a license.
 - [Zaber Launcher](https://software.zaber.com/zaber-launcher/download) version **2025.12.30-1**.
-- [Unity Game Engine](https://unity.com/products/unity-engine) version **6000.3.3f1 LTS**.
+- [Unity Game Engine](https://unity.com/products/unity-engine) version **6000.3.23f1 LTS**.
 
-### Hardware Dependencies
+***Note,*** face-camera pose inference is an ***optional*** preprocessing step, so the dependency below is required
+only by projects that choose to run it. FFMPEG, MvImpactAcquire, and Zaber Launcher are required by every
+Mesoscope-VR session. The MQTT broker is required by window checking and experiment sessions, and the Unity Game
+Engine by experiment sessions alone.
+
+- A separate [conda](https://conda-forge.org/) environment that provides the
+  [sollertia-video-tracking](https://github.com/Sun-Lab-NBB/sollertia-video-tracking) library (`slvt`) and its
+  DeepLabCut installation. Preprocessing invokes `conda run -n <env> slvt infer` to analyze the face-camera video,
+  because DeepLabCut cannot share this library's Python environment. The step runs only when the
+  `video_tracking.conda_environment` and `video_tracking.dlc_project_path` fields of the Mesoscope-VR system
+  configuration are both set, and leaving either unset disables it and leaves the rest of preprocessing unaffected. When
+  they are set but the environment or the model is unavailable, preprocessing aborts the transfer to long-term storage
+  and retains the local session copy for a manual retry.
+
+#### Hardware Dependencies
 
 ***Note,*** These dependencies only apply to the **VRPC**. Hardware dependencies for the **ScanImagePC** are determined
-and controlled by MBF and ThorLabs. This library benefits from the **ScanImagePC** being outfitted with a 10-GB network
-card, but this is not a strict requirement.
+and controlled by MBF and ThorLabs. This library benefits from the **ScanImagePC** being outfitted with a 10-Gigabit
+network card, but this is not a strict requirement.
 
 - [Nvidia GPU](https://www.nvidia.com/en-us/). This library uses GPU hardware acceleration to encode acquired video
   data. Any Nvidia GPU with hardware encoding chip(s) should work as expected. The library was tested with **RTX 4090**.
@@ -241,7 +246,7 @@ card, but this is not a strict requirement.
   destination machines used for long-term data storage (see
   [acquired data management section](#acquired-data-structure-and-management) for more details).
 
-### System Assembly
+#### System Assembly
 
 The Mesoscope-VR system consists of multiple interdependent components. It is continually refined with minor changes to
 optimize its performance and facilitate novel experiments and projects. Treat this section as a general system
@@ -251,7 +256,7 @@ specific system implementations used to acquire the data featured in different p
 Physical assembly and mounting of ***all*** hardware components mentioned in the specific subsections below is
 discussed in the [main Mesoscope-VR assembly section](#mesoscope-vr-assembly).
 
-### Zaber Motors
+#### Zaber Motors
 All brain activity recordings with the Mesoscope require the animal to be head-fixed. To orient head-fixed animals on
 the Virtual Reality treadmill (running wheel) and promote task performance, the system uses three groups of motors
 controlled through Zaber motor controllers. The first group, the **HeadBar**, is used to position the animal's head in
@@ -293,8 +298,8 @@ by the shared `cross_system` Zaber binding layer:
 4. **User Data 11**: Device Park Position. This variable should be set to the position, in native motor units, where
    the device should be moved as part of the 'park' command and the shut-down sequence. This is used to position all
    motors in a way that guarantees they can be safely 'homed' at the beginning of the next runtime. Therefore, each
-   park position has to be selected so that each motor can move to their 'home' sensor without colliding with any other
-   motor **simultaneously** moving towards their 'home' position. ***Note,*** The LickPort uses the 'park' position as
+   park position has to be selected so that each motor can move to its 'home' sensor without colliding with any other
+   motor **simultaneously** moving towards its 'home' position. ***Note,*** The LickPort uses the 'park' position as
    the **default** imaging position. During runtime, it moves to the 'park' position if it has no animal-specific
    position to use during imaging. Therefore, the park position for the LickPort should always be set so that it cannot
    harm the animal mounted in the Mesoscope enclosure while moving to the park position from any other position.
@@ -312,7 +317,7 @@ by the shared `cross_system` Zaber binding layer:
 ***Note,*** for the binding-class patterns behind the User Data scheme and for safe manual motor positioning, use the
 **experiment** plugin's `zaber-interface` skill.
 
-### Behavior Cameras
+#### Behavior Cameras
 To record the animal's behavior, the system uses two high-end machine-vision cameras with 2-MegaPixel resolution. The
 **face_camera** records the animal's face, while the **body_camera** records the body of the animal. To interface with
 the cameras, the system leverages customized
@@ -325,7 +330,7 @@ parameters used by each camera, is available in the
 ***Note,*** for low-level camera configuration, use the **video** plugin's `camera-interface` and `camera-setup`
 skills. For how the cameras integrate with the Mesoscope-VR system, use the **mesoscope** plugin's `mesoscope-vr` skill.
 
-### MicroControllers
+#### MicroControllers
 To interface with all other hardware components **other** than cameras and Zaber motors, the Mesoscope-VR system uses
 Teensy 4.1 microcontrollers with specialized
 [ataraxis-micro-controller](https://github.com/Sun-Lab-NBB/ataraxis-micro-controller) code. Currently, the system uses
@@ -339,7 +344,7 @@ code running on each microcontroller, see the
 `microcontroller-interface` skill. The **communication** plugin's `microcontroller-interface` skill covers the
 underlying base API, and the **microcontroller** plugin's `firmware-module` skill covers the firmware side.
 
-### Virtual Reality Task Environment (Unity)
+#### Virtual Reality Task Environment (Unity)
 The task environment used in all Mesoscope-VR experiments is rendered and controlled by the Unity game engine. To make
 Unity work with this library, each project-specific Unity task must use the bindings and assets released as part of the
 [sollertia-virtual-reality repository](https://github.com/Sun-Lab-NBB/sollertia-virtual-reality). Follow the
@@ -352,7 +357,7 @@ scene and to 'arm' (enter Play Mode) and 'disarm' (exit Play Mode) the task auto
 scenes or press the Unity 'play' button manually, and they only confirm that the Virtual Reality display renders
 correctly during setup. Use the `sle get unity` command to verify the bridge is reachable before running a session.
 
-#### Coordination via MQTT
+##### Coordination via MQTT
 The sollertia-experiment library and Unity coordinate the running task bidirectionally using the MQTT protocol. This
 communication is used to:
 - **Verify scene configuration**: At startup, sollertia-experiment requests the active Unity scene name and validates
@@ -377,7 +382,7 @@ renders). Together they capture both halves of the experiment.
 plugin's `vr-driver-interface` skill. For authoring tasks and scenes on the Unity side, use the **unity** plugin. Task
 template authoring is owned by the **assets** plugin's `task-templates` skill.
 
-### Google Sheets API Integration
+#### Google Sheets API Integration
 
 This library interacts with the shared Google Sheet files used by the Sollertia platform to track and communicate
 certain information about the animals that participate in all projects. Currently, this includes two files: the
@@ -391,9 +396,9 @@ the `slsa configure credentials` command) is owned by
 water-log sheet reading and writing is owned by this library. Each sheet is optional and is only processed when its
 identifier (`surgery_sheet_id`, `water_log_sheet_id`) is set in the Mesoscope-VR system configuration.
 
-#### Setting up Google Sheets API Access
+##### Setting up Google Sheets API Access
 
-**Skip to the next section if a service Google Sheets API account already exists.** Most lab members can safely ignore
+**Skip to the next section if a Google Sheets API service account already exists.** Most lab members can safely ignore
 this section, as service accounts are managed at the platform level rather than by individual lab members.
 
 1. Log into the [Google Cloud Console](https://console.cloud.google.com/welcome).
@@ -404,7 +409,7 @@ this section, as service accounts are managed at the platform level rather than 
 5. Use Actions → Manage Keys and, if a key does not already exist, create a new key and download it in JSON format.
    This key is then used to access the Google Sheets.
 
-#### Registering the Service Account Key
+##### Registering the Service Account Key
 
 The downloaded key must be registered with the Sollertia platform on the **VRPC** before any runtime can read or write
 the Google Sheets. Register it using the
@@ -420,7 +425,7 @@ this registration path.
 preprocessing runtime aborts with a `FileNotFoundError` when it attempts to resolve the credentials. Register the key
 before running sessions that rely on the surgery or water logs.
 
-#### Adding Google Sheets Access to the Service Account
+##### Adding Google Sheets Access to the Service Account
 To access the **surgery log** and the **water restriction log** Google Sheets as part of this library's runtime, create
 and share these log files with the email of the service account created above. The service account requires **Editor**
 access to both files.
@@ -434,21 +439,21 @@ last for at most a month, this usually covers the entire experiment period for a
 ***Note,*** for the sheet schema contract and for authoring a processor for a new sheet layout, use the **experiment**
 plugin's `google-sheets-processing` skill.
 
-### ScanImage PC Assets
+#### ScanImage PC Assets
 As mentioned above, the ScanImagePC is largely assembled and configured by external contractors. However, the PC
 requires additional assets and configuration post-assembly to make it compatible with sollertia-experiment-managed
 runtimes.
 
-#### File System Access
+##### File System Access
 To support the sollertia-experiment runtime, the ScanImagePC's filesystem must be accessible to the **VRPC** via the
-Server Message Block version 3 (SMB3) or equivalent protocol. Since ScanImagePC uses Windows, it is advised to use the
-SMB3 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC
+Server Message Block version 3 (SMB3) or equivalent protocol. Since the ScanImagePC uses Windows, it is advised to use
+the SMB3 protocol, as all Windows machines support it natively with minimal configuration. As a minimum, the ScanImagePC
 must be configured to share the root Mesoscope output directory with the VRPC over the local network. This is required
 to fetch the data acquired by the Mesoscope during preprocessing and to retrieve the desktop screenshot generated
 during session setup. The Mesoscope acquisition itself is controlled over MQTT, not through the shared directory (see
 [MATLAB Assets](#matlab-assets)).
 
-#### MQTT Broker Access
+##### MQTT Broker Access
 The Mesoscope-VR system controls the Mesoscope by exchanging MQTT messages with the **runAcquisition** MATLAB function
 running on the ScanImagePC. The MQTT broker runs on the **VRPC** and is shared with the Unity Virtual Reality task.
 Because the ScanImagePC connects to this broker over the local network, the broker must be configured to accept
@@ -465,32 +470,37 @@ allow_anonymous true
 The `listener 1883` directive binds all network interfaces, including loopback, so the VRPC-side runtime and Unity
 continue to connect on 127.0.0.1 without changes. The `allow_anonymous true` directive is required because defining an
 explicit listener disables anonymous access by default, which both the sollertia-experiment runtime and the MATLAB
-client rely on.
+client require.
 
 ***Note,*** anonymous access is acceptable because the Sollertia platform operates on an isolated local network.
 Deployments on shared or untrusted networks should configure broker authentication instead.
 
 After updating the configuration, restart Mosquitto and ensure the VRPC firewall allows inbound connections on the
-broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when arming the Mesoscope, for
-example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
+broker port (1883). Finally, pass the VRPC's network address to the MATLAB function when launching the Mesoscope
+control interface, for example `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`.
 
-#### Default Screenshot Directory
+##### Default Screenshot Directory
 During runtime, the sollertia-experiment library prompts the user to generate a screenshot of the ScanImagePC desktop
-and place it in the network-shared mesoscope data directory (see above). The screenshot is used to store the
-information about the red-dot alignment, the acquisition parameters, and the state of the imaging plane at the beginning
-of each session. The library is statically configured to fetch the screenshot from the shared directory and does not
-look in any other directories. Therefore, it is advised to reconfigure the default output directory used by the
-'Win + PrtSc' command on the ScanImagePC to save the screenshots into the shared Mesoscope output directory.
+and place it directly in the root of the network-shared ScanImagePC Mesoscope directory. That root is the directory
+named by the system configuration's `mesoscope_directory` field (see above), and the screenshot stays out of its
+`mesoscope_data` subdirectory, which the runtime requires to be empty before it prepares the Mesoscope. The screenshot
+is used to store the information about the red-dot alignment, the acquisition parameters, and the state of the imaging
+plane at the beginning of each session. The library is statically configured to fetch the screenshot from the shared
+directory and does not look in any other directories. Therefore, it is advised to reconfigure the default output
+directory used by the 'Win + PrtSc' command on the ScanImagePC to save the screenshots into the shared Mesoscope output
+directory.
 
-#### MATLAB Assets
-ScanImage software is written in MATLAB and controls all aspects of Mesoscope data acquisition. While each runtime
-requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation, all data
-acquisition runtimes using the sollertia-experiment library require the user to call the **runAcquisition** MATLAB
-function on the ScanImagePC. This function carries out multiple runtime-critical tasks, including setting up the
-acquisition, generating and applying the online motion correction, and servicing the acquisition commands the VRPC
-issues over MQTT. The function connects to the same MQTT broker as the Unity Virtual Reality task, using a dedicated
-*Mesoscope* topic namespace that does not overlap with the Unity topics, and reports command reception and progress
-back to the VRPC.
+##### MATLAB Assets
+ScanImage software is written in MATLAB and controls all aspects of Mesoscope data acquisition. Every runtime that
+images the brain requires the experimenter to manually interface with the ScanImage GUI during Mesoscope preparation.
+Only the **window checking** and **mesoscope experiment** session types command the Mesoscope and therefore require the
+user to call the **runAcquisition** MATLAB function on the ScanImagePC. This function carries out multiple
+runtime-critical tasks, including setting up the acquisition, generating and applying the online motion correction, and
+servicing the acquisition commands the VRPC issues over MQTT. The function connects to the same MQTT broker as the Unity
+Virtual Reality task, using a dedicated *Mesoscope* topic namespace that does not overlap with the Unity topics, and
+reports command reception and progress back to the VRPC. Lick training and run training sessions never command the
+Mesoscope over MQTT, so they require neither runAcquisition nor the ScanImage GUI. They still resolve the shared
+ScanImagePC Mesoscope directory as part of their session data layout.
 
 The runAcquisition function ships with this library under [assets/mesoscope_vr](assets/mesoscope_vr). See the
 [Mesoscope-VR ScanImage PC assets guide](assets/mesoscope_vr/README.md) for instructions on deploying the function to
@@ -500,9 +510,7 @@ the ScanImagePC, and on the MATLAB Industrial Communication Toolbox, which provi
 
 ***Note,*** for the ScanImagePC and runAcquisition setup, use the **mesoscope** plugin's `mesoscope-vr` skill.
 
-### Mesoscope-VR Assembly
-***This section is currently a placeholder. Since the final Mesoscope-VR system design is still a work in progress, it
-will be populated once the final design implementation is constructed and tested in the lab.***
+#### Mesoscope-VR Assembly
 
 The Mesoscope-VR assembly mostly consists of two types of components. First, it includes custom components manufactured
 via 3D-printing or machining (for metalwork). Second, it consists of generic components available from vendors such as
@@ -512,7 +520,7 @@ the [CAD and blueprint folder](https://drive.google.com/drive/folders/1Oz2qWAg3H
 
 ___
 
-## Acquired Data Structure and Management
+### Acquired Data Structure and Management
 
 The library defines a fixed structure for storing all acquired data which uses a 4-level directory tree hierarchy:
 **root** (volume), **project**, **animal**, and **session**. This structure is reused by all acquisition systems, and
@@ -541,7 +549,7 @@ the redundant local copy from the acquisition machine once the transfer succeeds
 the data is retained on the acquisition machine and the preprocessing is limited to the on-premises data conversion and
 aggregation steps.
 
-### Root Directory (Volume)
+#### Root Directory (Volume)
 All data acquisition systems and all long-term storage destinations keep **ALL** Sollertia platform projects under the
 same **root** directory. The exact location and name of the root directory on each machine is arbitrary but should
 generally remain fixed (unchanging) over the entire lifetime of that specific machine. On the main acquisition machine,
@@ -549,7 +557,7 @@ this local data root is configured with the `slsa configure data-root` command a
 part of the system configuration file. The root directories of any long-term storage destinations remain configured
 through the system configuration.
 
-### Project Directory
+#### Project Directory
 When a new project is created, a **project** directory **named after the project** is created under the **root**
 directory of the main data acquisition machine. When the data is moved to the configured long-term storage destinations
 as part of preprocessing, the project directory is also created on these destinations, if it does not already exist.
@@ -559,7 +567,7 @@ This directory stores all supported experiment configurations for the project. F
 `sle mesoscope run` command searches the configuration directory for the .yaml file with the name of the target
 experiment to load the experiment data.
 
-### Animal Directory
+#### Animal Directory
 When the library is used to acquire data for a new animal, it generates a new **animal** directory under the **root**
 and **project** directory combination. The directory uses the ID of the animal as its name.
 
@@ -572,27 +580,23 @@ library components do accept strings as inputs, it is expected that all animal I
 Failure to adhere to this naming convention can lead to runtime errors and unexpected behavior of all library
 components!
 
-### Session Directory
+#### Session Directory
 Each time the library is used to acquire data, a new session directory is created under the **root**, **project** and
 **animal** directory combination. The session name is derived from the current ***UTC*** timestamp at the time of the
 session directory creation, accurate to ***microseconds***. Primarily, this naming format was chosen to make all
 sessions acquired by the same acquisition system have unique and chronologically sortable names. The session name
 format follows the order of **YYYY-MM-DD-HH-MM-SS-US**.
 
-### Raw Data
+#### Raw Data
 All data acquired by this library is stored under the **raw_data** subdirectory, generated for each session. Overall,
 an example path to the acquired (raw) data can therefore look like this:
 `/media/Data/Experiments/Template/666/2025-11-11-05-03-23-234123/raw_data/`.
 
 ***Note,*** This library treats **both** newly acquired and preprocessed data as **raw**. This is because preprocessing
 **does not change the content of the data**. Instead, preprocessing uses lossless compression to more efficiently
-package the data for transmission and can at any time be converted back to the original format.
+package the data for transmission, and the data can at any time be converted back to the original format.
 
-### Shared Raw Data
-
-The section below briefly lists the data acquired by **all** Sollertia platform data acquisition systems. Note, each
-acquisition system also generates **system-specific** data, which is listed under acquisition-system-specific sections
-available after this section.
+#### Shared Raw Data
 
 ***Note,*** For information about the **processed** data, see the
 [main data processing library](https://github.com/Sun-Lab-NBB/sollertia-forgery).
@@ -648,11 +652,16 @@ following files and subdirectories:
     `experiment_configuration.yaml`, it contains the information necessary to fully replicate the Virtual Reality
     environment used during the experiment.
 
+***Note,*** Mesoscope-VR **window checking** sessions are an exception to entries 2, 7, and 8 above. They do not start
+the Mesoscope-VR system controller, which is the only writer of `hardware_state.yaml`, so that file is never generated
+for them. Their preprocessing also deletes the stub `behavior_data` and `camera_data` directories the acquisition camera
+stack leaves behind, before the data integrity checksum is computed, so neither directory reaches long-term storage.
+
 ***Note,*** the generic read, write, and validate surface for `session_descriptor.yaml` and `hardware_state.yaml` is
 owned by the **assets** plugin's `session-descriptors` and `session-hardware-state` skills, and the Mesoscope-VR field
 schemas of both files are owned by the **mesoscope** plugin's `mesoscope-vr-session-schema` skill.
 
-### Shared Temporary Data
+#### Shared Temporary Data
 The session data hierarchy additionally uses the following temporary marker files and directories which are cleared
 before the raw data is transmitted to the long-term storage destinations:
 1. **nk.bin**: This marker is automatically cached to disk by the shared session model as part of creating a new
@@ -667,15 +676,15 @@ before the raw data is transmitted to the long-term storage destinations:
    millions of .npy files at runtime, making it challenging for human operators to work with the data. During
    preprocessing, individual .npy files are grouped by their source (what made the log entry, e.g.: VideoSystem,
    MicroController, Data Acquisition System, etc.) and are compressed into .npz archives, one for each source. The .npz
-   archives are then moved to the *behavior_data* directory, and the *behavior_data_log* with the individual .npy files
-   is deleted to conserve disk space.
+   archives are written in place and the individual .npy files are removed to conserve disk space. The
+   *behavior_data_log* directory is then renamed to *behavior_data*.
 
-### Mesoscope-VR System Data
+#### Mesoscope-VR System Data
 
 The Mesoscope-VR system instantiates a directory hierarchy both on the VRPC and the ScanImagePC. Below is the list of
 files and directories found on each of these machines.
 
-#### Raw Data
+##### Raw Data
 
 The Mesoscope-VR system generates the following files and directories, in addition to those discussed in the shared
 raw data section, on the VRPC:
@@ -692,26 +701,38 @@ raw data section, on the VRPC:
    - **fov.roi**: Region-of-interest file defining the imaging field.
    - **zstack.tiff**: A high-resolution z-stack reference image for future alignment with histology data.
 2. **zaber_positions.yaml**: Stores the snapshot of the positions used by the HeadBar, LickPort, and Wheel Zaber motor
-   groups, taken at the end of the session's data acquisition. All positions are stored in native motor units. This
-   file is created for all session types supported by the Mesoscope-VR system. As a backup, a copy of this file is also
-   generated at the beginning of each session's runtime. This allows recovering from critical runtime failures, where
-   the runtime may not be able to generate this snapshot. During both snapshot generation timepoints, a copy of the
-   generated snapshot file is also cached inside the *persistent_data* directory of the animal to support restoring the
-   motors to the same position during the next session.
+   groups, taken during the session's data acquisition runtime. All positions are stored in native motor units. This
+   file is created for all session types supported by the Mesoscope-VR system. The snapshot is generated exactly once
+   per session. For lick training, run training, and experiment sessions it is taken inside the system shutdown
+   sequence, and for window checking sessions it is taken immediately after the runtime is marked initialized.
+   Generation is skipped when the Zaber motor groups are not connected, and when the session still carries the nk.bin
+   uninitialized-session marker, so no snapshot exists for a session that failed to start. At that single generation
+   point, a copy of the snapshot is also cached inside the *persistent_data* directory of the animal, overwriting any
+   existing copy, to support restoring the motors to the same position during the next session.
 3. **mesoscope_positions.yaml**: Stores the snapshot of the Mesoscope objective position taken at the end of the
    session's data acquisition. The snapshot covers the physical axes (X, Y, Z, and Roll), the virtual ScanImage axes
-   (Fast Z, Tip, and Tilt), and the laser power at the sample. ***Note,*** This file relies on the experimenter updating
-   the stored positions. It is only created for window checking and experiment sessions. A copy of this snapshot file is
-   also saved to the *persistent_data* directory of the animal to support restoring the Mesoscope to the same imaging
-   field during the next session.
+   (Fast Z, Tip, and Tilt), the laser power at the sample, and the red-dot alignment Z position. ***Note,*** all fields
+   except the red-dot alignment Z position are queried live from the ScanImage software over MQTT, so the mesoscope
+   control driver must still be connected and idle when the snapshot is generated. The red-dot alignment Z position is
+   the only field the experimenter enters, defaulting to the previous runtime's value, and every value is then floored
+   to three decimal places before the file is written. This file is only created for window checking and experiment
+   sessions. A copy of this snapshot file is also saved to the *persistent_data* directory of the animal to support
+   restoring the Mesoscope to the same imaging field during the next session.
 4. **window_screenshot.png**: Stores the screenshot of the ScanImagePC screen. The screenshot should contain the image
    of the red-dot alignment, the view of the target cell layer, the Mesoscope position information, and the data
    acquisition parameters. Primarily, the screenshot is used by experimenters to quickly reference the imaging quality
    from each experiment session. This file is only created for window checking and experiment sessions. A copy of this
    file is saved to the *persistent_data* directory of the animal to help the user realign the red-dot to a similar
    position during the next session.
+5. **camera_data eye-tracking predictions**: The DeepLabCut `.h5` prediction file and its companion pickle files,
+   written beside `{session_name}_face_camera.mp4` inside *camera_data* by the `slvt infer` subprocess during
+   preprocessing. They are only generated for **experiment** sessions, and only when the system configuration's
+   `video_tracking` section sets both `conda_environment` and `dlc_project_path`, as an unset value disables the
+   inference. A failed inference or a missing prediction file aborts the transfer to long-term storage and retains the
+   local session copy for a manual retry, with the inference log kept in the system temporary directory as
+   `slvt_infer_{session_name}.log`.
 
-#### ScanImagePC
+##### ScanImagePC
 
 All Mesoscope-VR system data on the ScanImagePC is stored under the user-defined ScanImagePC root directory, which is
 expected to be mounted to the VRPC via the SMB3 or similar protocol. Under that root directory, the system creates the
@@ -725,13 +746,16 @@ following directories and files:
    for the next runtime. This way, all data of each completed session is stored under a unique directory named after
    that session. This step is crucial for data preprocessing, which identifies the session data directory and pulls it
    over to the VRPC based on the session name (id).
-3. **persistent_data**: This directory is created for each unique **project** and **animal** combination, similar to
-   the data structure created by sollertia-experiment on the main acquisition system PC. This directory contains the
-   **first experiment day's** MotionEstimator.me and fov.roi files. These files are typically reused by all following
-   data acquisition sessions to restore the imaging field to the same location as used on the first day. The full path
-   to the persistent_data directory would typically look like **root/project/animal/persistent_data**.
+3. **persistent_data**: This directory is created for each unique **project** and **animal** combination, similar to the
+   data structure created by sollertia-experiment on the main acquisition system PC. This directory contains the
+   MotionEstimator.me and fov.roi files of the animal's **first reference-generating session**, which is normally its
+   window checking session. Preprocessing persists the pair the first time a session produces it, and every later
+   imaging session that finds an existing pair, whether window checking or experiment, offers to replace it with the
+   reference generated during that session. These files are typically reused by all following data acquisition sessions
+   to restore the imaging field to the location the persisted reference describes. The full path to the persistent_data
+   directory would typically look like **root/project/animal/persistent_data**.
 
-#### Mesoscope-VR Temporary Data
+##### Mesoscope-VR Temporary Data
 
 The Mesoscope-VR system also generates the following temporary directory during runtime:
 1. **raw_mesoscope_frames**: Stores uncompressed .TIFF stacks fetched by the VRPC from the ScanImagePC. This is done as
@@ -740,22 +764,20 @@ The Mesoscope-VR system also generates the following temporary directory during 
    *mesoscope_data* directory. Once this process completes successfully, the *raw_mesoscope_frames* directory with all
    raw files is deleted to conserve disk space.
 
-***Note,*** the VRPC controls the Mesoscope acquisition over MQTT rather than through marker files, so no acquisition
-marker files are created during runtime. See the [ScanImage PC Assets](#scanimage-pc-assets) section for details on the
-MQTT command interface.
+***Note,*** the VRPC controls the Mesoscope acquisition over MQTT. See the [ScanImage PC Assets](#scanimage-pc-assets)
+section for details on the MQTT command interface.
 
 ___
 
-## Acquiring Data
+### Acquiring Data
 
 All user-facing library functionality is realized through a set of Command Line Interface (CLI) commands automatically
 exposed when the library is pip-installed into a python environment. The library exposes a single top-level `sle`
 command with two subcommand groups. The first is a general, hardware-agnostic discovery group (`sle get`) shared by all
 acquisition systems, and the second is the Mesoscope-VR system group (`sle mesoscope`) that combines configuration,
 maintenance, data acquisition, and data management for the Mesoscope-VR system. A standalone `sle mcp` command starts
-the MCP server (see [AI-Assisted Use](#ai-assisted-use-mcp-server-and-skills)). Each group contains subcommands that
-allow further configuring their runtime. Use the `--help` argument when calling any of the commands described below to
-see the list of supported arguments together with their descriptions and default values.
+the MCP server (see [AI-Assisted Development](#ai-assisted-development)). Each group contains subcommands that allow
+further configuring their runtime.
 
 To use any of the commands described below, activate the python environment where the library is installed, e.g., with
 `conda activate MYENV` and type one of the commands described below.
@@ -764,7 +786,10 @@ To use any of the commands described below, activate the python environment wher
 or request user feedback. **Carefully read every message printed to the terminal during runtime**. Failure to do so may
 damage the equipment or harm the animal!
 
-### CLI Command Overview
+#### CLI Commands
+
+Use the `--help` argument when calling any of the commands described below to see the list of supported arguments
+together with their descriptions and default values.
 
 | Command                              | Description                                                          |
 |--------------------------------------|----------------------------------------------------------------------|
@@ -779,16 +804,26 @@ damage the equipment or harm the animal!
 | `sle mesoscope migrate`              | Transfer an animal's sessions between projects                       |
 | `sle mcp`                            | Start the MCP server backing the `sle get` and `sle mesoscope` tools |
 
-### Step 0: Configuring the Data Acquisition System
+#### Step 0: Configuring the Data Acquisition System
 
 Before acquiring data, each acquisition system has to be configured. This step is done in addition to assembling the
 system and installing the required hardware components. Typically, this only needs to be done when the acquisition
 system configuration or hardware changes, so most lab members can safely skip this step.
 
-Use the `sle mesoscope configure system` command to generate the system configuration file. As part of its runtime, the
-command configures the host machine to remember the path to the generated configuration file, so all future
-sollertia-experiment runtimes on that machine automatically load and use the appropriate acquisition-system
-configuration parameters.
+Use the `sle mesoscope configure system` command to generate the system configuration file. The command requires the
+Sollertia platform working directory to already be set on the host machine, and it writes the configuration file into
+that directory's **configuration** folder. Once the write succeeds, the command removes any other acquisition system's
+`*_system_configuration.yaml` file from that folder, so the machine belongs to exactly one acquisition system. All
+future sollertia-experiment runtimes resolve that single `*_system_configuration.yaml` file from the working directory
+automatically, and fail when the folder does not contain exactly one such file.
+
+***Note,*** the Sollertia platform **working directory** that receives the configuration file is a platform-level
+setting shared across libraries, so it is configured separately from the system configuration file. Set it on the main
+acquisition machine with the `slsa configure directory` command (from the
+[sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library) and view it with the
+`slsa get directory` command. The `sle mesoscope configure system` command aborts with a FileNotFoundError when the
+working directory has not been set, when its cached path record is empty, or when the configured directory no longer
+exists.
 
 ***Note,*** the local **data root** is configured separately from the system configuration file, because it is a
 Sollertia platform-level setting shared across libraries. It is the directory under which all projects, animals, and
@@ -810,15 +845,17 @@ configuration parameters, read the *API documentation* of this library and the *
 skill. Use the **experiment** plugin's `system-health-check` skill to validate the configuration before running
 sessions.
 
-### Step 1: Creating a Project
+#### Step 1: Creating a Project
 
 All data acquisition sessions require a valid project to run. To create a new project, use the `slsa configure project`
 command (from the [sollertia-shared-assets](https://github.com/Sun-Lab-NBB/sollertia-shared-assets) library). This
 command can only be called on the main PC of a properly configured data-acquisition system (see Step 0 above). As part
-of its runtime, this command generates the root project directory on all machines that make up the data acquisition
-system. Use the **assets** plugin's `project-hierarchy` skill for project creation and for walking the project tree.
+of its runtime, this command generates the project directory, together with its `configuration` subdirectory, under the
+local data root of the main acquisition PC only. The matching project directories on the configured long-term storage
+destinations are created later, when preprocessing transfers a session's data to them (see the Project Directory section
+above). Use the **assets** plugin's `project-hierarchy` skill for project creation and for walking the project tree.
 
-### Step 2: Creating an Experiment
+#### Step 2: Creating an Experiment
 
 All projects that involve scientific experiments also need to define at least one **experiment configuration**.
 Experiment configurations are unique for each data acquisition system and are stored inside .yaml files named after the
@@ -827,16 +864,25 @@ command generates a **precursor** experiment configuration file inside the **con
 the root project directory on the main PC of the data acquisition system. The command takes three required options and
 five optional ones:
 
-| Option                   | Description                                                                             |
-|--------------------------|-----------------------------------------------------------------------------------------|
-| `-p`, `--project`        | The project that receives the new experiment configuration file (required)              |
-| `-e`, `--experiment`     | The name given to the experiment and to its configuration file (required)               |
-| `-t`, `--template`       | The task template to build from, as the filename without the .yaml extension (required) |
-| `-sc`, `--state-count`   | The number of runtime states the experiment supports (default 1)                        |
-| `--reward-size`          | The default water reward volume for lick-type trials, in microliters (default 5.0)      |
-| `--reward-tone-duration` | The default reward tone duration for lick-type trials, in milliseconds (default 300)    |
-| `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)  |
-| `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                      |
+| Option                   | Description                                                                              |
+|--------------------------|------------------------------------------------------------------------------------------|
+| `-p`, `--project`        | The project that receives the new experiment configuration file (required)               |
+| `-e`, `--experiment`     | The name given to the experiment and to its configuration file (required)                |
+| `-t`, `--template`       | The task template to instantiate, as the filename without the .yaml extension (required) |
+| `-sc`, `--state-count`   | The number of runtime states the experiment supports (default 1)                         |
+| `--reward-size`          | The default water reward volume for lick-type trials, in microliters (default 5.0)       |
+| `--reward-tone-duration` | The default reward tone duration for lick-type trials, in milliseconds (default 300)     |
+| `--puff-duration`        | The default gas puff duration for occupancy-type trials, in milliseconds (default 100)   |
+| `-f`, `--force`          | Overwrites an existing experiment configuration file (default off)                       |
+
+***Note,*** the command resolves the template named by `-t`, `--template` through the host machine's configured **task
+templates directory**, which is a platform-level setting owned by sollertia-shared-assets rather than part of the system
+configuration file. Point the main acquisition PC at the sollertia-virtual-reality project's
+`Assets/InfiniteCorridorTask/Configurations` directory with the
+`slsa configure templates -d /path/to/Assets/InfiniteCorridorTask/Configurations` command before running this command,
+and view the configured path with the `slsa get templates` command. The command aborts with a FileNotFoundError when
+that directory has not been configured, when its cached path record is empty, or when the configured directory no longer
+exists.
 
 For information about the available experiment configuration parameters in the precursor file, use the **mesoscope**
 plugin's `mesoscope-vr-experiment-schema` skill, which owns the field schema, the trial classes, and the
@@ -850,7 +896,7 @@ the corridor cues, VR environment, and spatial trial structures that Unity rende
 `vr_configuration.yaml`). The two are joined by trial name at runtime. After creating the experiment configuration, use
 the Unity package to generate the corresponding VR scene before running experiment sessions.
 
-### Step 3: Discovering System Components
+#### Step 3: Discovering System Components
 
 Before running sessions, use `sle get` subcommands to discover and verify the components accessible to the data
 acquisition system:
@@ -875,16 +921,16 @@ Mesoscope imaging session.
 ***Note,*** for an orchestrated pre-flight verification of configuration, storage mounts, and hardware connectivity, use
 the **experiment** plugin's `system-health-check` and `acquisition-system-setup` skills.
 
-### Step 4: Maintaining the Acquisition System
+#### Step 4: Maintaining the Acquisition System
 
 All acquisition systems contain modules that require frequent maintenance. Most of these modules are unique to each
-acquisition system. Therefore, this section is further broken into acquisition-system-specific subsections.
+acquisition system.
 
-#### Mesoscope-VR
+##### Mesoscope-VR
 
-The Mesoscope-VR system contains two modules that require frequent maintenance: the **water delivery system** and the
-**running wheel**. To facilitate the maintenance of these modules, the sollertia-experiment library exposes the `sle
-mesoscope maintain` command.
+The Mesoscope-VR system contains three modules that require frequent maintenance: the **water delivery system**, the
+**gas puff valve**, and the **running wheel**. To facilitate the maintenance of these modules, the sollertia-experiment
+library exposes the `sle mesoscope maintain` command.
 
 This command is typically called at least twice during each day the system is used to acquire data. First, it is used at
 the beginning of the day to prepare the Mesoscope-VR system for runtime by filling the water delivery system. Second, it
@@ -897,9 +943,12 @@ material of the running wheel, which slowly deteriorates as the wheel is used.
 This command can also facilitate cleaning the wheel, which is typically done before and after each runtime to remove any
 biological contaminants left by each animal participating in experiment or training runtimes.
 
+The maintenance GUI's Gas Puff Valve Control section opens and closes the gas puff valve and delivers single puffs of a
+configurable duration, from 10 to 350 milliseconds, so the operator can purge and test the air line.
+
 ***Note,*** This runtime uses a GUI-based interface for issuing commands and monitoring the system state.
 
-### Step 5: Acquiring Data
+#### Step 5: Acquiring Data
 
 Each acquisition system supports one or more distinct types of data-acquisition sessions (runtimes). The set of
 supported session types is unique to each system, and commonly this includes an 'experiment' session type, which is the
@@ -910,7 +959,7 @@ Session commands take common parameters: user ID, project name, animal ID, and a
 parent `sle mesoscope run` command before specifying the session type. Each session type requires only the parameters it
 records, so the window checking session runs without the animal weight.
 
-#### Mesoscope-VR Session Commands
+##### Mesoscope-VR Session Commands
 
 The Mesoscope-VR system supports four types of runtime sessions:
 
@@ -918,10 +967,10 @@ The Mesoscope-VR system supports four types of runtime sessions:
 
 `sle mesoscope run -u USER -p PROJECT -a ANIMAL window-checking`
 
-This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me and
-zstack.tiff files for the checked animal. This session is typically used 2 to 3 weeks after the surgical intervention
-and before any training or experiment sessions to assess the quality of the intervention and the suitability of
-including the animal in experiment cohorts.
+This session guides the user through finding the imaging plane and generating the reference MotionEstimator.me,
+fov.roi, and zstack.tiff files for the checked animal. This session is typically used 2 to 3 weeks after the surgical
+intervention and before any training or experiment sessions to assess the quality of the intervention and the
+suitability of including the animal in experiment cohorts.
 
 **2. Lick Training Session**
 
@@ -954,15 +1003,14 @@ water volume, idle time allowance, and unconsumed reward tracking threshold.
 `sle mesoscope run -u USER -p PROJECT -a ANIMAL -w WEIGHT experiment -e EXPERIMENT [OPTIONS]`
 
 This session type is designed to execute the experiment specified in the target *experiment_configuration.yaml* file
-(see above). The system supports varying experiment configurations and Virtual Reality environments, offering
-experimenters the flexibility to run different projects using the same set of APIs and system hardware.
+(see above). The system supports varying experiment configurations and Virtual Reality environments.
 
 The `-e/--experiment` argument specifies the name of the experiment configuration to use.
 
 ***Note,*** for the runtime state machine, the session types, and the behavior visualizer / control UI behind these
 commands, use the **mesoscope** plugin's `mesoscope-vr-runtime` skill.
 
-### Step 6: Preprocessing and Managing Data
+#### Step 6: Preprocessing and Managing Data
 
 All acquisition systems support several ways of handling the session's data acquired at runtime. For most runtimes, the
 choice of how to handle the data is made as part of the acquisition system shutdown sequence. However, in the case of
@@ -972,7 +1020,7 @@ CLI command.
 ***Note,*** the preprocess, delete, and migrate operations below are also exposed as `sle mcp` tools, and the
 **experiment** plugin's `data-management` skill drives them (including bulk preprocessing) for AI-assisted use.
 
-#### Preprocessing Data
+##### Preprocessing Data
 
 The most commonly used operation is to **preprocess** the acquired data. This can be done manually by calling:
 
@@ -982,6 +1030,11 @@ Preprocessing consists of two major steps. The first step pulls all available da
 machine (PC) and re-packages (re-compresses) the data to reduce its size without loss. The second step distributes
 (pushes) the data to all configured long-term storage destinations, such as a Server and a NAS.
 
+***Note,*** a session that still carries the `nk.bin` uninitialized-session marker never finished runtime
+initialization. Preprocessing such a session purges it from the host machine, every configured long-term storage
+destination, and the ScanImagePC instead of preprocessing it. The purge runs without a confirmation prompt, which is the
+same silent-delete rule the `nk.bin` marker entry above applies to the runtime shutdown cycle.
+
 ***Critical!*** It is imperative that **all** valid data acquired in the lab undergoes preprocessing **as soon as
 possible**. Only preprocessed data is stored in a way that maximizes its safety by using both redundancy and parity.
 Data that is not preprocessed may be **lost** in the case of emergency, which is considerably less likely for the
@@ -990,7 +1043,7 @@ preprocessed data.
 When preprocessed data is successfully and safely pushed to long-term storage destinations, the preprocessing runtime
 removes the local copy of the session's data from the data acquisition system machine to conserve disk space.
 
-#### Deleting Session Data
+##### Deleting Session Data
 
 The second way of managing the data is primarily used during testing and when handling interrupted sessions that did not
 generate any valid data. This involves removing all session data from **both** the data acquisition system and all
@@ -1005,7 +1058,7 @@ caller passes `confirm_deletion`. The purge itself still opens a blocking termin
 that finished initialization, and skips that prompt only for a session that still carries the `nk.bin`
 uninitialized-session marker.
 
-#### Migrating Animal Data Between Projects
+##### Migrating Animal Data Between Projects
 
 To transfer all sessions for an animal from one project to another, use:
 
@@ -1016,19 +1069,19 @@ destination project, not copied.
 
 ___
 
-## Recovering from Interruptions
+### Recovering from Interruptions
 While it is not typical for the data acquisition or preprocessing pipelines to fail during runtime, it is possible. The
 library can recover or gracefully terminate the runtime for most code-generated errors, so this is usually not a
-concern. However, if a major interruption (i.e., power outage) occurs or one of the hardware assets malfunctions during
+concern. However, if a major interruption (e.g., power outage) occurs or one of the hardware assets malfunctions during
 runtime, manual intervention is typically required to recover the session's data and reset the acquisition system.
 
-### Data acquisition interruption
+#### Data acquisition interruption
 
 Data acquisition can be interrupted in two main ways, the first being due to an external asset failure, for example, if
 the ScanImagePC unexpectedly shuts down during Mesoscope-VR system runtime. In this case, the runtime pauses and
 instructs the user to troubleshoot the issue and then resume the runtime. This type of *soft* interruption is handled
 gracefully during runtime to exclude the data collected during the interruption from the output dataset. Generally, soft
-interruptions are supported for most external assets, which includes anything not managed directly by the
+interruptions are supported for most external assets, which include anything not managed directly by the
 sollertia-experiment library and the main data acquisition system PC. While inconvenient, these interruptions do not
 typically require specialized handling other than recovering and restoring the failed asset.
 
@@ -1044,11 +1097,11 @@ for each supported acquisition system. Typically, these *hard* interruptions are
 facility power loss or severe malfunction of sensitive acquisition system components, such as microcontrollers and
 communication cables.
 
-#### Mesoscope-VR
+##### Mesoscope-VR
 If the VRPC runtime unexpectedly interrupts at any point without executing the graceful shutdown, follow these
 instructions:
 1. If the session involved Mesoscope imaging, shut down the Mesoscope acquisition process and make sure all required
-   files (frame stacks, motion estimator data, and cranial window screenshot) have been generated and saved to the
+   files (frame stacks, MotionEstimator.me, fov.roi, and zstack.tiff) have been generated and saved to the
    **mesoscope_data** directory.
 2. If necessary, **manually** edit the session_descriptor.yaml, the mesoscope_positions.yaml, and the
    zaber_positions.yaml files to include actual runtime information. Estimate the volume of water delivered at runtime
@@ -1059,9 +1112,9 @@ instructions:
    critical! If this is not done, the motor cannot home during the next session and instead collides with the movement
    guard, at best damaging the motor and, at worst, the Mesoscope.
 5. If the session involved Mesoscope imaging, **rename the mesoscope_data directory to use the session name**. For
-   example, from mesoscope_data → 2025-11-11-05-03-23-234123. ***Critical!*** if this is not done, the library may
-   **delete** any leftover Mesoscope files during the next runtime and cannot properly preprocess the frames for the
-   interrupted session during the next step.
+   example, from mesoscope_data → 2025-11-11-05-03-23-234123. ***Critical!*** The mesoscope_data directory is shared
+   by every session, so the next runtime clears it and **deletes** any leftover Mesoscope files it holds. Preprocessing
+   performs the same rename itself, but only while no later runtime has written to the shared directory.
 6. Call `sle mesoscope preprocess -sp SESSION_PATH` and provide the path to the session directory of the interrupted
    session. This preprocesses and transfers all collected data to the long-term storage destinations. This preserves any
    data acquired before the interruption and prepares the system for running the next session.
@@ -1071,14 +1124,24 @@ instructions:
 behavior, use the `mesoscope-vr-runtime` skill, and for safe manual motor positioning, the **experiment** plugin's
 `zaber-interface` skill.
 
-### Data preprocessing interruption
+#### Data preprocessing interruption
 To recover from an error encountered during preprocessing, call `sle mesoscope preprocess -sp SESSION_PATH` and provide
-the path to the session directory of the interrupted session. The preprocessing pipeline automatically resumes an
-interrupted runtime from the nearest checkpoint.
+the path to the session directory of the interrupted session. Re-running the command repeats the whole pipeline
+rather than resuming from a checkpoint, and each stage aborts early once its input has already been consumed. When the
+re-run stops with an error naming missing files, perform the cleanup that message requests before retrying.
 
 ___
 
-## AI-Assisted Use (MCP Server and Skills)
+## API Documentation
+
+See the [API documentation](https://sollertia-experiment-api-docs.netlify.app/) for the detailed description of the
+library's internal modules and the CLI commands with their arguments. The top-level `sollertia_experiment` package does
+not export any Python-level API symbols, and all user-facing functionality is realized through the `sle` command line
+interface.
+
+___
+
+## AI-Assisted Development
 
 The library is built for AI-assisted operation. It ships a single MCP server, exposed through the `sle mcp` command, and
 a set of Claude Code skills distributed through the [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace.
@@ -1147,33 +1210,27 @@ CLI command.
 argument. Calling either one without `confirm` or `confirm_deletion` returns an error that previews the pending change
 or spells out the consequences, so the calling agent asks the user before retrying with `yes` or `no`.
 
-#### Claude Desktop Configuration
+#### Client Registration
 
-Add the following to the Claude Desktop configuration file:
-
-```json
-{
-  "mcpServers": {
-    "sollertia-experiment": {
-      "command": "sle",
-      "args": ["mcp"]
-    }
-  }
-}
-```
+MCP server registration and the system-agnostic Claude Code skill assets for this library are distributed through the
+[sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace as part of the **experiment** plugin, which is the
+only plugin that registers the `sle mcp` server. The Mesoscope-VR system-specific skills ship separately, in the
+**mesoscope** plugin. Install the experiment plugin from the marketplace to register the `sle mcp` server with
+compatible clients and make the core skills available, and install the mesoscope plugin alongside it to add the six
+Mesoscope-VR skills listed below.
 
 ### Marketplace Plugins
 
-The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five plugins, each backed by the MCP server
-of the library it targets. Installing a plugin registers its MCP server with compatible clients and makes its skills
-available:
+The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five plugins, three of which declare an MCP
+server of their own. Installing a plugin makes its skills available and, when that plugin declares a server, registers
+that server with compatible clients:
 
 | Plugin       | Targets                                                          | MCP server | Role                                                                        |
 |--------------|------------------------------------------------------------------|------------|-----------------------------------------------------------------------------|
 | `assets`     | sollertia-shared-assets                                          | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
-| `unity`      | sollertia-virtual-reality                                        | (relay)    | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
+| `unity`      | sollertia-virtual-reality                                        | (none)     | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
 | `experiment` | sollertia-experiment, sollertia-micro-controllers                | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
-| `mesoscope`  | sollertia-experiment, sollertia-shared-assets, sollertia-forgery | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
+| `mesoscope`  | sollertia-experiment, sollertia-shared-assets, sollertia-forgery | (none)     | Mesoscope-VR system-specific skills (layered on the core plugins)           |
 | `forging`    | sollertia-forgery                                                | `slf mcp`  | Downstream behavior processing and analysis                                 |
 
 The **unity** plugin uses the Unity relay served by the assets plugin's `slsa` MCP server and the McpBridge editor
@@ -1205,6 +1262,7 @@ invoked directly by operators.
 | `experiment` | `vr-driver-interface`              | VR task driver, Unity MQTT contract, and cue-sequence trial decomposition     |
 | `experiment` | `google-sheets-processing`         | Implement Google Sheets SurgeryLog / WaterLog processors                      |
 | `experiment` | `data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`                    |
+| `experiment` | `external-tool-bindings`           | Bind a tool that cannot be installed beside the stack (producer seam)         |
 | `experiment` | `cli-reference`                    | Document the `sle` root, `sle mcp`, and `sle get` commands and options        |
 | `experiment` | `experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                                 |
 | `mesoscope`  | `mesoscope-vr`                     | Mesoscope-VR hardware inventory, configuration, and bindings                  |
@@ -1214,21 +1272,10 @@ invoked directly by operators.
 | `mesoscope`  | `mesoscope-vr-experiment-schema`   | Mesoscope-VR experiment configuration and trial-class field schema            |
 | `mesoscope`  | `mesoscope-vr-cli-reference`       | Reference for the `sle mesoscope` commands, options, and MCP tool mapping     |
 
-#### Client Registration
-
-MCP server registration and Claude Code skill assets for this library are distributed through the
-[sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace as part of the **experiment** plugin. Install the
-plugin from the marketplace to automatically register the MCP server with compatible clients and make all associated
-skills available.
-
-___
-
-## API Documentation
-
-See the [API documentation](https://sollertia-experiment-api-docs.netlify.app/) for the detailed description of the
-library's internal modules and the CLI commands with their arguments. The top-level `sollertia_experiment` package does
-not export any Python-level API symbols, and all user-facing functionality is realized through the `sle` command line
-interface.
+Development assets for this repository ship separately, through the [ataraxis](https://github.com/Sun-Lab-NBB/ataraxis)
+marketplace's **automation** plugin, which carries the Claude Code skills and other AI development assets shared by all
+Sollertia platform repositories. Install that plugin from the marketplace to make all associated development skills and
+tools available to compatible AI coding agents.
 
 ___
 
@@ -1282,12 +1329,6 @@ Run any environment using `tox -e ENVIRONMENT`. For example, `tox -e lint`.
 
 ***Note,*** all pull requests for this project have to successfully complete the `tox` task before being merged. To
 expedite the task's runtime, use the `tox --parallel` command to run some tasks in parallel.
-
-### AI-Assisted Development
-
-Claude Code skills and other AI development assets for Sollertia platform repositories are distributed through the
-[ataraxis](https://github.com/Sun-Lab-NBB/ataraxis) marketplace as part of the **automation** plugin. Install the plugin
-from the marketplace to make all associated development skills and tools available to compatible AI coding agents.
 
 ### Automation Troubleshooting
 

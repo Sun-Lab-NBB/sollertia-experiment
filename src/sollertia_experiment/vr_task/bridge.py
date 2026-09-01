@@ -16,11 +16,11 @@ import httpx2
 logging.getLogger("httpx2").setLevel(logging.WARNING)
 
 _BRIDGE_HOST: str = "127.0.0.1"
-"""The loopback host the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener to. The bridge only accepts
-loopback connections, so the runtime must execute on the same machine as the Unity Editor."""
+"""The loopback host on which the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener. The bridge only
+accepts loopback connections, so the runtime must execute on the same machine as the Unity Editor."""
 
 _BRIDGE_PORT: int = 8090
-"""The TCP port the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener to."""
+"""The TCP port on which the sollertia-virtual-reality editor MCP Bridge binds its HTTP listener."""
 
 _BRIDGE_REQUEST_TIMEOUT_S: float = 5.0
 """The per-request timeout, in seconds, applied to every bridge HTTP call. Kept short because the bridge runs on the
@@ -44,11 +44,11 @@ class UnityBridgeClient:
         misleading when the editor is simply closed, so error reporting is deferred to the driver layer.
 
     Args:
-        host: The loopback host the bridge listens on.
-        port: The TCP port the bridge listens on.
+        host: The loopback host on which the bridge listens.
+        port: The TCP port on which the bridge listens.
 
     Attributes:
-        _url: The fully-formed bridge endpoint every tool call is POSTed to.
+        _url: The fully-formed bridge endpoint to which every tool call is POSTed.
         _client: The httpx2 client that issues bridge requests.
     """
 
@@ -60,7 +60,7 @@ class UnityBridgeClient:
         """Returns a string representation of the UnityBridgeClient instance."""
         return f"UnityBridgeClient(url={self._url})"
 
-    def list_scenes(self) -> tuple[tuple[str, ...], str]:
+    def _list_scenes(self) -> tuple[tuple[str, ...], str]:
         """Requests the project-relative paths of all Unity scenes and the active scene.
 
         Returns:
@@ -189,7 +189,7 @@ class UnityBridgeClient:
         Raises:
             UnityBridgeError: If the bridge is unreachable or no scene with a matching name exists in the project.
         """
-        scene_paths, _ = self.list_scenes()
+        scene_paths, _ = self._list_scenes()
         for scene_path in scene_paths:
             if Path(scene_path).stem == scene_name:
                 return scene_path
@@ -221,7 +221,8 @@ class UnityBridgeClient:
         """Closes the underlying httpx2 client and releases its connection pool."""
         self._client.close()
 
-    def _extract_actor_controller(self, payload: dict[str, object], tool: str) -> str:
+    @staticmethod
+    def _extract_actor_controller(payload: dict[str, object], tool: str) -> str:
         """Extracts the active scene actor's controller name from a task-parameter bridge response.
 
         Args:
@@ -277,8 +278,8 @@ class UnityBridgeClient:
             The parsed JSON response object for a successful tool call.
 
         Raises:
-            UnityBridgeError: If the request fails at the transport layer, the response is not valid JSON, or the
-                bridge reports the tool call as unsuccessful.
+            UnityBridgeError: If the request fails at the transport layer, the response is not valid JSON or is not a
+                JSON object, or the bridge reports the tool call as unsuccessful.
         """
         request_body: dict[str, object] = {"tool": tool, "args": args if args is not None else {}}
         try:

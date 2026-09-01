@@ -44,7 +44,7 @@ _REGIONAL_ACCESS_BOUNDARY_DRAIN_TIMEOUT: float = 5.0
 before releasing a Google Sheets service connection."""
 
 _REQUIRED_SURGERY_HEADERS: set[str] = {
-    # Subject Data headers
+    # Subject Data headers.
     "id",
     "ear punch",
     "sex",
@@ -54,7 +54,7 @@ _REQUIRED_SURGERY_HEADERS: set[str] = {
     "cage #",
     "location housed",
     "status",
-    # Procedure Data headers
+    # Procedure Data headers.
     "date",
     "start",
     "end",
@@ -63,7 +63,7 @@ _REQUIRED_SURGERY_HEADERS: set[str] = {
     "surgery notes",
     "post-op notes",
     "surgery quality",
-    # Drug Data headers
+    # Drug Data headers.
     "lrs (ml)",
     "ketoprofen (ml)",
     "buprenorphine (ml)",
@@ -114,7 +114,8 @@ class SurgeryLog:
         _animals: Stores the unique identifiers of all animals whose data is stored in the surgery log.
 
     Raises:
-        ValueError: If the target Google Sheet is not a valid Sollertia platform surgery log.
+        ValueError: If the target Google Sheet is not a valid Sollertia platform surgery log, or if the target
+            animal's identifier is not present in the sheet's 'ID' column.
     """
 
     def __init__(
@@ -135,8 +136,9 @@ class SurgeryLog:
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to fetch the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
-        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        # used to fetch the sheet data via HTTP request(s). Disables the discovery-document cache, which is
+        # unavailable to projects authenticating through google-auth rather than oauth2client, and only emits a
+        # spurious INFO log record when left enabled.
         self._service: Resource = build(
             serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
         )
@@ -162,7 +164,7 @@ class SurgeryLog:
 
         self._headers: dict[str, str] = {}
         for index, header in enumerate(header_values):
-            column_letter = _convert_index_to_column_letter(index)
+            column_letter = _convert_index_to_column_letter(index=index)
             self._headers[str(header).strip().lower()] = column_letter
 
         missing_headers = [
@@ -203,7 +205,7 @@ class SurgeryLog:
             )
             console.error(message=message, error=ValueError)
 
-        # Converts input animal ID to the same format as IDs stored in the id_list generated above for comparison
+        # Converts input animal ID to the same format as IDs stored in the id_list generated above for comparison.
         formatted_id = str(self._animal_id).zfill(5)
 
         # Checks if the animal ID exists in the tuple of all known animal IDs. If not, it raises an error.
@@ -238,12 +240,14 @@ class SurgeryLog:
         """Extracts and returns the processed animal's surgical intervention data as a SurgeryData object.
 
         Returns:
-            A SurgeryData instance that stores the extracted data.
+            The subject, procedure, drug, implant, and injection records read from the animal's row.
 
         Raises:
-            ValueError: If the animal's date or time cells are empty, or if the date, time, identifier, weight, cage,
-                or surgery quality cells contain malformed values. Date and time cells are parsed via
-                _convert_date_time_to_timestamp, while the remaining cells are parsed via int() and float().
+            ValueError: If the animal's date or time cells are empty, or if the date, time, identifier, weight,
+                cage, surgery quality, '<stem> (ml)' drug volume, '<base> volume (nl)' injection volume, or
+                '<base> coordinates' cells contain malformed values. Date and time cells are parsed via
+                _convert_date_time_to_timestamp, the coordinate cells via _parse_stereotactic_coordinates, and the
+                remaining cells via int() and float().
         """
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
@@ -251,7 +255,7 @@ class SurgeryLog:
         animal_index = self._animals.index(str(self._animal_id).zfill(5))
         row_number = animal_index + 2
 
-        # Retrieves the entire row of data for the target animal
+        # Retrieves the entire row of data for the target animal.
         row_data = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
@@ -263,7 +267,7 @@ class SurgeryLog:
         row_values = row_data.get("values")[0]
 
         # Replaces empty cells and value placeholders ('n/a', '--', or '---') with None.
-        row_values = _replace_empty_values(row_values)
+        row_values = _replace_empty_values(row_data=row_values)
 
         # Keys the row values by their Excel-style column letters. Both the header row and the animal row are read as
         # full-row ranges that start at column A, so the same index-to-letter conversion applies to both.
@@ -305,20 +309,19 @@ class SurgeryLog:
         # recorded volume were not administered during the processed surgery and are excluded from the assembled list.
         # Since early surgery log versions did not use drug / injection / implant codes, code parsing has fall-back
         # default values (0). A code value of 0 should be interpreted as not having a code.
-        drugs = []
-        for drug_name, column_stem in _SURGERY_LOG_DRUGS.items():
-            drug_volume = animal_data.get(f"{column_stem} (ml)")
-            if drug_volume is not None:
-                drugs.append(
-                    DrugData(
-                        drug=drug_name,
-                        drug_volume_ml=float(drug_volume),
-                        drug_code=str(animal_data.get(f"{column_stem} code") or 0),
-                    )
-                )
+        drugs = [
+            DrugData(
+                drug=drug_name,
+                drug_volume_ml=float(animal_data[f"{column_stem} (ml)"]),
+                drug_code=str(animal_data.get(f"{column_stem} code") or 0),
+            )
+            for drug_name, column_stem in _SURGERY_LOG_DRUGS.items()
+            if animal_data.get(f"{column_stem} (ml)") is not None
+        ]
 
         # Determines the number of implants and injections performed during the processed surgery. This is based on the
-        # assumption that all implants and injections are named like 'Implant1', 'Injection2_location', etc.
+        # assumption that all implants and injections are named like 'Implant1', 'Injection2', etc., and that their
+        # sub-columns are named like 'injection2 location', with a whitespace separator.
 
         # Pre-creates the lists to store the digits associated with each implant and injection.
         implant_numbers = []
@@ -348,7 +351,7 @@ class SurgeryLog:
             implant_name: str | None = animal_data.get(base_key)
 
             # If the implant name is 'None', the processed subject does not have this implant, despite the
-            # header being present. If the name is a string, it processes the rest of the data
+            # header being present. If the name is a string, it processes the rest of the data.
             if implant_name is not None:
                 # Some surgeries (training ones) do not make use of stereotactic coordinates. In such cases, defaults
                 # to a set of zeroes to indicate no valid coordinates to parse.
@@ -357,7 +360,7 @@ class SurgeryLog:
                 # If a valid coordinate string is found, parses ap, ml, and dv coordinates from the string.
                 implant_coordinate_string: str | None = animal_data.get(f"{base_key} coordinates")
                 if implant_coordinate_string is not None:
-                    ap, ml, dv = _parse_stereotactic_coordinates(implant_coordinate_string)
+                    ap, ml, dv = _parse_stereotactic_coordinates(coordinate_string=implant_coordinate_string)
 
                 # Packages the data into an ImplantData class and appends it to the storage list.
                 implants.append(
@@ -383,7 +386,7 @@ class SurgeryLog:
 
                 injection_coordinate_string: str | None = animal_data.get(f"{base_key} coordinates")
                 if injection_coordinate_string is not None:
-                    ap, ml, dv = _parse_stereotactic_coordinates(injection_coordinate_string)
+                    ap, ml, dv = _parse_stereotactic_coordinates(coordinate_string=injection_coordinate_string)
 
                 injections.append(
                     InjectionData(
@@ -431,12 +434,12 @@ class SurgeryLog:
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
         column_index = 0
-        for char in quality_column.upper():  # type: ignore[union-attr]
-            column_index = column_index * 26 + (ord(char) - ord("A") + 1)
+        for letter in quality_column.upper():  # type: ignore[union-attr]
+            column_index = column_index * 26 + (ord(letter) - ord("A") + 1)
         column_index -= 1
         row_index_zero_based = row_number - 1
 
-        # Gets the sheet ID for the project tab
+        # Gets the sheet ID for the project tab.
         sheet_metadata = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .get(spreadsheetId=self._sheet_id)
@@ -449,7 +452,7 @@ class SurgeryLog:
                 break
 
         if sheet_id is not None:
-            # Applies center alignment formatting to the cell
+            # Applies center alignment formatting to the cell.
             requests = [
                 {
                     "repeatCell": {
@@ -518,7 +521,8 @@ class WaterLog:
 
     Raises:
         ValueError: If the target Google Sheet is not a valid Sollertia platform water restriction and animal
-            interaction log.
+            interaction log. If the session_date cannot be parsed as a Sollertia session timestamp, or if the log
+            does not contain a row for the session's local date.
     """
 
     def __init__(
@@ -532,26 +536,27 @@ class WaterLog:
         self._animal_id: int = animal_id
         self._sheet_id: str = sheet_id
 
-        # Generates the credentials' object to access the target Google Sheet. In contrast to surgery data, this object
-        # requires write access.
+        # Generates the credentials' object to access the target Google Sheet. This object requests the same
+        # read-write 'spreadsheets' scope used to access the surgery data.
         credentials = Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to write the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
-        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        # used to write the sheet data via HTTP request(s). Disables the discovery-document cache, which is
+        # unavailable to projects authenticating through google-auth rather than oauth2client, and only emits a
+        # spurious INFO log record when left enabled.
         self._service: Resource = build(
             serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
         )
 
-        # Gets all tab names from the sheet metadata
+        # Gets all tab names from the sheet metadata.
         sheet_metadata = (
             self._service.spreadsheets().get(spreadsheetId=sheet_id).execute(num_retries=_GOOGLE_API_MAX_RETRIES)
         )
         tabs = sheet_metadata.get("sheets", [])
 
-        # Filters for tabs with digit-only names and extract them as animal IDs. This relies on all water restriction
+        # Filters for tabs with digit-only names and extracts them as animal IDs. This relies on all water restriction
         # logs following the general lab design, where tabs are named after animal numeric IDs and each tab is used to
         # store the animals' data.
         animal_ids = []
@@ -564,11 +569,11 @@ class WaterLog:
             if tab_name.isdigit():
                 animal_ids.append(tab_name)
 
-                # If this tab matches the target animal ID, stores its numeric sheet ID to the attribute
+                # If this tab matches the target animal ID, stores its numeric sheet ID to the attribute.
                 if int(tab_name) == self._animal_id:
                     self._animal_tab_id = tab_id
 
-        # Formats the animal IDs with zero-padding for consistent sorting
+        # Formats the animal IDs with zero-padding for consistent sorting.
         self._animals: tuple[str, ...] = tuple(str(animal_id).zfill(5) for animal_id in animal_ids)
 
         # If no IDs are extracted, raises an error. This usually indicates that the target Google Sheet is not formatted
@@ -612,7 +617,7 @@ class WaterLog:
 
         self._headers: dict[str, str] = {}
         for index, header in enumerate(header_values):
-            column_letter = _convert_index_to_column_letter(index)
+            column_letter = _convert_index_to_column_letter(index=index)
             self._headers[str(header).strip().lower()] = column_letter
 
         missing_headers = [
@@ -648,7 +653,7 @@ class WaterLog:
 
         # Finds the row inside the water restriction log file with session's date. This assumes that the log file is
         # pre-filled with dates. If not, this method will enter a loop to prompt the user to resolve the date issue.
-        self._session_row_index: int = self._find_date_row(formatted_date)
+        self._session_row_index: int = self._find_date_row(target_date=formatted_date)
 
     def __del__(self) -> None:
         """Closes the underlying HTTP connection when the instance is garbage-collected, as a backstop to close()."""
@@ -684,7 +689,8 @@ class WaterLog:
             experimenter_id: The unique identifier of the experimenter supervising the data acquisition session.
             session_type: The type of the data acquisition session.
         """
-        # Writes each value to the appropriate column, using the same formatting as used in row 3. Since the sheet
+        # Writes each value to the appropriate column, applying CENTER horizontal and MIDDLE vertical alignment to
+        # every written cell and rounding the weight and water values to one decimal place. Since the sheet
         # is checked for validity and the session row index is discovered at class instantiation, this is a fairly
         # simple writing procedure.
         row_index = self._session_row_index
@@ -706,10 +712,10 @@ class WaterLog:
         Raises:
             ValueError: If the target date is not found inside the processed log file.
         """
-        # Gets the date column letter
+        # Gets the date column letter.
         date_column = self._headers["date"]
 
-        # Retrieves all dates from the date column (row 3 and below)
+        # Retrieves all dates from the date column (row 3 and below).
         date_data = (
             self._service.spreadsheets()  # type: ignore[attr-defined]
             .values()
@@ -727,7 +733,7 @@ class WaterLog:
             f"animal interaction log file for the animal {self._animal_id}. Update the log to include the "
             f"specified date and rerun the command that caused this error."
         )
-        console.error(message=message, error=ValueError)  # Aborts with an error
+        console.error(message=message, error=ValueError)
         # Unreachable: console.error() is NoReturn, but ruff cannot trace NoReturn through method calls (RET503).
         raise ValueError(message)  # pragma: no cover
 
@@ -742,7 +748,7 @@ class WaterLog:
         column_letter = self._headers[column_name.lower()]
         cell_range = f"{column_letter}{row_index}"
 
-        # Formats value based on its type and column
+        # Formats value based on its type and column.
         formatted_value = value
         if column_name.lower() == "weight (g)" or column_name.lower() == "water given (ml)":
             formatted_value = round(float(value), ndigits=1)
@@ -758,12 +764,12 @@ class WaterLog:
         # Transforms the column letter and the row index to the format necessary to apply formatting to the newly
         # written value.
         column_index = 0
-        for char in column_letter.upper():
-            column_index = column_index * 26 + (ord(char) - ord("A") + 1)
+        for letter in column_letter.upper():
+            column_index = column_index * 26 + (ord(letter) - ord("A") + 1)
         column_index -= 1
         row_index_zero_based = row_index - 1
 
-        # Applies formatting to the newly written value using the cached sheet ID
+        # Applies formatting to the newly written value using the cached sheet ID.
         requests = [
             {
                 "repeatCell": {
@@ -894,7 +900,7 @@ def _extract_coordinate_value(substring: str) -> float:
         ValueError: If the input substring does not contain an extractable anatomical coordinate value.
     """
     # Finds the coordinate number that precedes the anatomical axis designator (AP, ML, DV) and extracts it as a float.
-    match = re.search(r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", substring)
+    match = re.search(pattern=r"([-+]?\d*\.?\d+)\s*(AP|ML|DV)", string=substring)
 
     if match is not None:
         return float(match.group(1))
@@ -920,13 +926,13 @@ def _parse_stereotactic_coordinates(coordinate_string: str) -> tuple[float, floa
     ap_coordinate = 0.0
     ml_coordinate = 0.0
     dv_coordinate = 0.0
-    for substring in (s.strip() for s in coordinate_string.split(",")):
+    for substring in (fragment.strip() for fragment in coordinate_string.split(",")):
         if "AP" in substring.upper():
-            ap_coordinate = _extract_coordinate_value(substring)
+            ap_coordinate = _extract_coordinate_value(substring=substring)
         elif "ML" in substring.upper():
-            ml_coordinate = _extract_coordinate_value(substring)
+            ml_coordinate = _extract_coordinate_value(substring=substring)
         elif "DV" in substring.upper():
-            dv_coordinate = _extract_coordinate_value(substring)
+            dv_coordinate = _extract_coordinate_value(substring=substring)
 
     return ap_coordinate, ml_coordinate, dv_coordinate
 
@@ -943,7 +949,7 @@ def _convert_index_to_column_letter(index: int) -> str:
     result = ""
     while index >= 0:
         remainder = index % 26
-        result = chr(65 + remainder) + result  # 65 is ASCII for 'A'
+        result = chr(65 + remainder) + result  # 65 is ASCII for 'A'.
         index = index // 26 - 1
     return result
 
