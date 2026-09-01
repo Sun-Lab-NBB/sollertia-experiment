@@ -179,8 +179,8 @@ def check_system_mounts_tool() -> dict[str, Any]:
         face-camera inference. Paths belonging to a feature the host leaves switched off report as not configured.
 
     Returns:
-        A dictionary with ``system_name``, ``paths`` (the per-path diagnostic report), and ``summary`` (the count
-        of reachable and failed paths), or ``{"error": ...}`` on failure.
+        A dictionary with ``system_name``, ``paths`` (the per-path diagnostic report), and ``summary`` (the count of
+        paths that pass and fail their check, where an unset optional path passes), or ``{"error": ...}`` on failure.
     """
     try:
         configuration = get_system_configuration()

@@ -86,8 +86,8 @@ def window_checking_logic(
     project_name: str,
     animal_id: str,
 ) -> None:
-    """Guides the user though verifying the quality of the implanted cranial window and generating the initial
-    Mesoscope-VR system configuration for the target animal.
+    """Guides the user though verifying the quality of the implanted cranial window and generating the animal's
+    initial Zaber and Mesoscope position snapshots.
 
     Args:
         experimenter: The unique identifier of the experimenter conducting the window checking session.
@@ -801,7 +801,8 @@ def run_training_logic(
     # the epoch outright, the system allows the speed to be below the threshold for a short period of time. These
     # assets help with that task pattern.
     epoch_timer_engaged: bool = False
-    # Ensures a positive value and converts the maximum idle time from seconds to milliseconds.
+    # Clamps a negative value to zero, which disables the guard, and converts the maximum idle time from seconds to
+    # milliseconds.
     maximum_idle_time_ms = max(0.0, descriptor.maximum_idle_time_s) * 1000
 
     # Converts all arguments used to determine the speed and duration threshold over time into numpy variables to
@@ -1370,8 +1371,9 @@ def maintenance_logic() -> None:
             )
             logger.start()
 
-            # Initializes the interface for the Actor MicroController. The calibration data union is narrower than the
-            # interface's declared parameter type, and the type: ignore below acknowledges the mismatch.
+            # Initializes the interface for the Actor MicroController. The configuration field is a dict | tuple union,
+            # wider than the interface's tuple-only parameter type, and the type: ignore below acknowledges the
+            # mismatch.
             valve: WaterValveInterface = WaterValveInterface(
                 valve_calibration_data=(
                     system_configuration.microcontrollers.valve_calibration_data  # type: ignore[arg-type]

@@ -65,7 +65,7 @@ class _MesoscopeMQTTTopics(StrEnum):
     GENERATE_REFERENCE = "MesoscopeGenerateReference"
     """Request to run the lengthy reference sequence (fresh session estimator plus high-definition z-stack) and arm the
     Mesoscope. Carries the full acquisition parameter set as a JSON payload. Dispatched once the acquisition runtime
-    detects the alignment screenshot."""
+    detects the alignment screenshot, and on demand from the runtime control GUI's reference regeneration button."""
     BEGIN_ACQUISITION = "MesoscopeBeginAcquisition"
     """Request to begin acquiring session frames (empty payload). The TTL frame stream, not this command, confirms
     that frame acquisition actually started."""
@@ -80,8 +80,7 @@ class _MesoscopeMQTTTopics(StrEnum):
     ScanImagePC replies on the State topic, and the reply populates a MesoscopePositions instance at runtime
     boundaries."""
     STATUS = "MesoscopeStatus"
-    """Acknowledgement and progress reply published by the ScanImagePC, carrying 'command', 'state', and optional
-    'detail' fields."""
+    """Acknowledgement and progress reply published by the ScanImagePC, carrying 'command' and 'state' fields."""
     ERROR = "MesoscopeError"
     """Failure reply published by the ScanImagePC, carrying a 'message' field describing the error."""
     STATE = "MesoscopeState"
@@ -174,8 +173,8 @@ class MesoscopeDriver:
             acknowledge it on the Status topic, mirroring the request-reply presence check used for the Unity bridge.
             A reply confirms that the command loop is running, while the absence of a reply within the acknowledgement
             timeout indicates that it is not. The probe is resent on each timeout because the operator must launch the
-            runAcquisition function manually, and that call requires the ScanImage handles and interactive
-            imaging-parameter confirmations.
+            runAcquisition function manually, as that call requires the live hSI and hSICtl ScanImage handles, which
+            only an operator at the ScanImagePC MATLAB prompt can supply.
         """
         message = (
             "Launch the 'runAcquisition(hSI, hSICtl, <parameters>)' function in the MATLAB command line on the "

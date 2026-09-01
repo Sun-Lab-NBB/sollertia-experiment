@@ -691,7 +691,8 @@ class BehaviorVisualizer:
 
         # The speed value is updated ~every 50 milliseconds. Until the update timeout is exhausted, at each graph
         # update cycle the last speed point is overwritten with the previous speed point. This generates a
-        # sequence of at most 2 identical speed readouts and is not noticeable to the user. Only updates if speed axis
+        # sequence of at most 4 identical speed readouts, as the ~50 ms speed window spans roughly three 16 ms plot
+        # updates, and is not noticeable to the user. Only updates if speed axis
         # exists (not in LICK_TRAINING mode).
         if self._speed_axis is not None:
             self._speed_data = np.roll(a=self._speed_data, shift=-1)

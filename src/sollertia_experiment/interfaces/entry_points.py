@@ -63,8 +63,9 @@ def mcp(transport: Literal["stdio", "streamable-http"]) -> None:  # pragma: no c
 def _register_subcommands() -> None:
     """Imports and registers all subcommand groups on the top-level 'sle' Click group.
 
-    The imports are deferred to this helper to keep the module's import surface minimal when only metadata is
-    needed by the wheel build or by tools like importlib.metadata.
+    The imports live in this helper rather than in the module's top-level import block so that the group
+    registration is expressed in one place. The helper runs unconditionally at the end of this module, so importing
+    the module always imports both subcommand groups.
     """
     from .get import get  # noqa: PLC0415
     from .mesoscope_vr import mesoscope  # noqa: PLC0415

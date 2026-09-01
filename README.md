@@ -224,7 +224,9 @@ library.
 - [Unity Game Engine](https://unity.com/products/unity-engine) version **6000.3.23f1 LTS**.
 
 ***Note,*** face-camera pose inference is an ***optional*** post-processing step, so the dependency below is required
-only by projects that choose to run it. Every dependency listed above is required by every Mesoscope-VR session.
+only by projects that choose to run it. FFMPEG, MvImpactAcquire, and Zaber Launcher are required by every
+Mesoscope-VR session. The MQTT broker is required by window checking and experiment sessions, and the Unity Game
+Engine by experiment sessions alone.
 
 - A separate [conda](https://conda-forge.org/) environment that provides the
   [sollertia-video-tracking](https://github.com/Sun-Lab-NBB/sollertia-video-tracking) library (`slvt`) and its

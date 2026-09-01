@@ -69,6 +69,8 @@ def create_system_configuration_file(system: AcquisitionSystems | str) -> None:
         system: The acquisition system to create the configuration file for.
 
     Raises:
+        FileNotFoundError: If the local Sollertia platform working directory has not been configured for the
+            host-machine or no longer exists.
         ValueError: If the requested acquisition system is not registered.
     """
     resolved = AcquisitionSystems(str(system))

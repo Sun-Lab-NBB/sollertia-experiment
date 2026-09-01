@@ -55,6 +55,8 @@ These dependencies apply to the **ScanImagePC** and are typically satisfied by t
 - [Industrial Communication Toolbox](https://www.mathworks.com/products/industrial-communication.html),
   required by `runAcquisition` to connect to the MQTT broker shared with the sollertia-experiment runtime.
 - An [NVIDIA CUDA GPU](https://www.nvidia.com/en-us/), used to accelerate online motion detection and correction.
+- A ScanImage resource store that exposes an `MCM6000` stage controller and an imaging beam named `Thor Axon 920`.
+  Both names are matched literally, and `runAcquisition` asserts on each when answering the VRPC's state query.
 
 ___
 
@@ -85,8 +87,9 @@ two handles, the function accepts only two optional name-value arguments. The fi
 Mesoscope data root (default `F:\mesodata`), beneath which the function resolves the shared `mesoscope_data` output
 folder and the per-animal persistent reference hierarchy. The second is `broker`, the MQTT broker address described
 below. The VRPC system configuration owns all remaining acquisition parameters, such as the z-step, z-range, and
-exclusion zone, and delivers them over MQTT with each command. Use `help runAcquisition` in the MATLAB Command Window
-for the full argument documentation.
+exclusion zone, and delivers them over MQTT with each command that consumes them: the reference-generation command
+carries the full set, while the recovery command carries only the plane-geometry subset. Use
+`help runAcquisition` in the MATLAB Command Window for the full argument documentation.
 
 ***Critical!*** `runAcquisition` is a **lock-in** function. It is launched **once** and then runs a persistent command
 loop that services VRPC commands continuously and **holds the MATLAB command line for the entire acquisition runtime**.
@@ -101,26 +104,34 @@ by passing the new address through the `broker` argument, for example
 `runAcquisition(hSI, hSICtl, broker="tcp://VRPC-IP:1883")`. The VRPC's broker must also be configured to accept
 connections from the ScanImagePC over the local network.
 
-In most cases, the function executes three major steps:
+The function connects to the broker and enters a persistent MQTT command loop before carrying out any imaging work.
+Every step below runs inside that loop, in response to a command the sollertia-experiment library publishes, and the
+function reports command reception and progress back to the library throughout:
 
-1. **Motion estimation setup.** The function configures the acquisition according to the user-defined parameters and
-   establishes the single plane or the z-stack of planes to image at runtime. It then acquires a set of reference
-   sub-planes above and below each target plane and uses the resulting volume to build the `MotionEstimator.me` file,
-   which stores the per-ROI motion estimators. During the runtime, the motion manager pairs these estimators with the
-   `MariusMotionCorrector2` class to correct X and Y drift with the galvos and Z drift with the fast-Z actuator.
-2. **High-definition z-stack acquisition.** The function increases the resolution of the target ROIs and repeats the
-   z-stack acquisition, generating a high-definition `zstack.tiff` file that is kept alongside the TIFF files acquired
-   during runtime. It then rescales the ROIs back to their runtime dimensions and saves a snapshot of the imaging field
-   as a `fov.roi` file. Together with the `MotionEstimator.me` file from step 1, the `zstack.tiff` and `fov.roi` files
-   make up the three reference files produced for each session.
-3. **Data acquisition.** The function configures the acquisition and motion-detection parameters for the runtime and
-   enters its MQTT command loop. While in the loop, it begins, aborts, or recovers frame acquisition in response to the
-   commands published by the sollertia-experiment library, answers liveness probes and state queries, and reports
-   command reception and progress back to the library.
+1. **Estimator preload.** On the preload command, the function aborts any active acquisition, clears the existing
+   estimators and the current ROI group, and loads the persisted `MotionEstimator.me` file from the per-animal
+   `<root>\<project>\<animal>\persistent_data` directory when one exists. It then shows the MotionDisplay GUI with
+   automatic XY and Z correction left disabled, so the operator can align the imaging field manually against the
+   persisted reference. A missing file, for example on an animal's first imaging day, is not an error.
+2. **Motion estimation setup.** On the reference-generation command, the function configures the acquisition according
+   to the parameters carried in the command payload and establishes the single plane or the z-stack of planes to image
+   at runtime. It then acquires a set of reference sub-planes above and below each target plane and uses the resulting
+   volume to build the `MotionEstimator.me` file, which stores the per-ROI motion estimators. During the runtime, the
+   motion manager pairs these estimators with the `MariusMotionCorrector2` class to correct X and Y drift with the
+   galvos and Z drift with the fast-Z actuator.
+3. **High-definition z-stack acquisition.** Still servicing the reference-generation command, the function increases the
+   resolution of the target ROIs and repeats the z-stack acquisition, generating a high-definition `zstack.tiff` file
+   that is kept alongside the TIFF files acquired during runtime. It then rescales the ROIs back to their runtime
+   dimensions and saves a snapshot of the imaging field as a `fov.roi` file. Together with the `MotionEstimator.me` file
+   from step 2, the `zstack.tiff` and `fov.roi` files make up the three reference files produced for each session. The
+   command finishes by arming the mesoscope.
+4. **Data acquisition.** The function begins or aborts frame acquisition in response to the corresponding commands, and
+   answers liveness probes and state queries at any point in the loop.
 
 ***Note,*** the function can also resume an interrupted runtime in response to the recover command.
-In this mode, it skips steps 1 and 2, reloads the existing `MotionEstimator.me` file from the shared
-Mesoscope data directory, and resumes frame acquisition.
+In this mode, it skips steps 1 through 3, reloads the existing `MotionEstimator.me` file from the shared
+Mesoscope data directory, and re-arms the mesoscope without resetting the acquisition file counter. The VRPC's begin
+command then resumes frame acquisition.
 
 ___
 

@@ -406,7 +406,8 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     # Determines whether to carry out the Zaber motor shutdown sequence.
     message = (
         "Do you want to carry out Zaber motor shutdown sequence? If ending a successful runtime, enter 'yes'. If "
-        "terminating a failed runtime to restart it, enter 'no'. Note! Entering 'yes' does NOT move any motors."
+        "terminating a failed runtime to restart it, enter 'no'. Note! Entering 'yes' retracts the lick-port and "
+        "then moves all motors to their parking positions. Entering 'no' only locks the motors in place."
     )
     console.echo(message=message, level=LogLevel.INFO)
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)

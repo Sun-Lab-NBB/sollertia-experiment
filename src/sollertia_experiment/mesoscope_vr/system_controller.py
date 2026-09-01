@@ -618,7 +618,7 @@ class MesoscopeVRSystem:
         )
 
         # Updates the internally stored SessionDescriptor instance with runtime data, collects the experimenter notes
-        # through a GUI window, and saves the completed descriptor to disk.
+        # through a blocking terminal prompt, and saves the completed descriptor to disk.
         run_shutdown_step(description="finalizing the session descriptor", step=self._generate_session_descriptor)
 
         # Generates the snapshot of the positions used by all mesoscope's imaging axes by querying the ScanImagePC. This
@@ -1022,7 +1022,9 @@ class MesoscopeVRSystem:
 
     @property
     def dispensed_water_volume(self) -> float:
-        """Returns the total volume of water, in microliters, dispensed by the valve during the current runtime."""
+        """Returns the volume of water, in microliters, dispensed by the valve during the active (non-paused)
+        portion of the current runtime.
+        """
         return float(self._delivered_water_volume)
 
     def _generate_hardware_state_snapshot(self) -> None:
@@ -1215,8 +1217,8 @@ class MesoscopeVRSystem:
                     self._mesoscope_started = True
                     return
 
-            # If the timeout window expires without receiving any mesoscope frames, aborts the acquisition and prompts
-            # the user to reconfigure the mesoscope.
+            # If the timeout window expires without receiving _EXPECTED_FRAME_PULSES frame pulses, aborts the
+            # acquisition and prompts the user to reconfigure the mesoscope.
             self._log_mesoscope_acquisition_state(acquiring=False)
             self._mesoscope.abort()
             message = (
@@ -1232,8 +1234,9 @@ class MesoscopeVRSystem:
         """Commands the ScanImagePC to abort frame acquisition over MQTT and waits for the frame acquisition to stop.
 
         Notes:
-            This method is used internally to stop the mesoscope frame acquisition as part of the stop() method
-            runtime. It contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
+            This method is used internally to stop the mesoscope frame acquisition, both as part of the stop() method
+            runtime and from _mesoscope_cycle() when the mesoscope stops emitting frame pulses during a session. It
+            contains an infinite loop that waits for the mesoscope to stop generating frame acquisition
             triggers, treating the hardware TTL frame stream as the authoritative confirmation that acquisition stopped.
         """
         # Commands the ScanImagePC to abort the acquisition over MQTT.

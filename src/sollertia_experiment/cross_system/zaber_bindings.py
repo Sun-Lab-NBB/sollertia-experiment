@@ -85,7 +85,8 @@ class _ZaberDeviceData:
     """Stores the identification data about a Zaber device."""
 
     device_number: int
-    """The positional index of the device in the daisy-chain of devices connected to the same serial port."""
+    """The 1-based positional number of the device in the daisy-chain of devices connected to the same serial
+    port. This equals the device_index used by the configuration functions plus one."""
     device_id: int
     """The unique identifier code of the device."""
     label: str
@@ -248,7 +249,9 @@ def set_zaber_device_setting(port: str, device_index: int, setting: str, value: 
         ConnectionError: If unable to connect to the specified port.
         IndexError: If device_index is out of range for the connected devices.
         TypeError: If the value type does not match the setting (a non-string label, or a non-integer position or flag).
-        ValueError: If the setting name is invalid or the value is out of range.
+        ValueError: If the setting name is invalid, if the value is out of range, or if a device_label write
+            succeeded but the matching USER_DATA_0 checksum write failed, leaving the label and the checksum
+            possibly out of agreement.
     """
     valid_settings = {
         "park_position",
@@ -513,9 +516,9 @@ class ZaberAxis:
         _mount_position: The absolute position, in native motor units, where the motor should be moved before mounting
             the animal into the system's enclosure.
         _maximum_limit: The maximum absolute position relative to the home sensor position, in native motor units,
-            the motor hardware can reach.
+            the motor is allowed to reach during runtime. Read from the configurable 'limit.max' axis setting.
         _minimum_limit: The minimum absolute position relative to the home sensor position, in native motor units,
-            the motor hardware can reach.
+            the motor is allowed to reach during runtime. Read from the configurable 'limit.min' axis setting.
         _shutdown_flag: Tracks whether the motor has been shut down.
         _pacing_guard: A Timeout class instance that is used to ensure that communication with the motor is carried
             out at a pace that does not overwhelm the connection interface with too many successive calls.
@@ -664,8 +667,9 @@ class ZaberAxis:
             This method can be called to interrupt other currently running methods, which is primarily used in the case
             of an emergency.
 
-            Calling this method once instructs the motor to decelerate and stop. Calling this method twice in a row
-            instructs the motor to stop immediately (without deceleration).
+            Calling this method once instructs the motor to decelerate and stop. Per the Zaber ASCII protocol
+            manual, a second stop command issued while the motor is still decelerating halts it immediately. That
+            is controller firmware behavior and is not implemented by this wrapper.
 
             This command does not block until the motor stops to allow stopping multiple motors (axes) in rapid
             succession.
@@ -1034,8 +1038,9 @@ def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
     Returns:
         A list of _ZaberDeviceData instances, one for each discovered device or an empty list if none are discovered.
     """
-    # Uses 'with' to automatically close the connection at the end of the runtime. If the port is used by a Zaber
-    # device, this statement opens the connection. Otherwise, the statement raises an exception.
+    # Uses 'with' to automatically close the connection at the end of the runtime. This statement opens the serial
+    # port without testing it for Zaber devices. The detect_devices() call below raises NoDeviceFoundException when
+    # the port carries no Zaber devices, which the caller catches.
     with Connection.open_serial_port(port_name=port, direct=False) as connection:
         # Parses each detected device and its axes into _ZaberDeviceData instances.
         return [

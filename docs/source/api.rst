@@ -9,6 +9,13 @@ Mesoscope-VR Acquisition System
    :undoc-members:
    :show-inheritance:
 
+.. The automodule directive above discovers module-level data through the source of the module it documents, so it
+   skips a constant the package re-exports, and the constant never reaches the rendered page. This directive names the
+   defining module rather than the re-exporting package, because autodoc reads the attribute docstring from that
+   module's source and otherwise falls back to the docstring of the value's own type.
+
+.. autodata:: sollertia_experiment.mesoscope_vr.data_preprocessing.EYE_TRACKING_PROJECT_NAME
+
 Virtual Reality Task Interface
 ==============================
 

@@ -281,7 +281,8 @@ def _annotation_matches(value: Any, annotation: Any) -> bool:
     Notes:
         A parameterized tuple, list, or mapping annotation is checked against its origin type and its element types,
         and every other parameterized annotation is checked against its origin type alone. An integer satisfies a float
-        annotation, following the numeric tower the typing specification defines. An annotation the runtime cannot
+        annotation, following the numeric tower the typing specification defines, except a boolean, which is rejected
+        despite subclassing int. An annotation the runtime cannot
         reduce to a type is treated as satisfied, since rejecting it would refuse a value the dataclass itself accepts.
 
     Args:

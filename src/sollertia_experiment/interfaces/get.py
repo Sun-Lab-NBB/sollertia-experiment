@@ -68,9 +68,10 @@ def get_cameras() -> None:
 
     # Displays Harvesters camera information.
     if not harvesters_cameras:
-        # An empty Harvesters listing has three causes, so each branch below names the one that applies, instead of
-        # sending the operator to inspect camera cabling and power in all three cases. The runtime is evaluated first,
-        # because check_cti_file() also returns None where the runtime is absent.
+        # An empty Harvesters listing has four causes, so each branch below names the one that applies, instead of
+        # sending the operator to inspect camera cabling and power in every case. The runtime is evaluated first,
+        # because check_cti_file() also returns None where the runtime is absent. The check_cti_file() branch covers
+        # two of the four causes, an unconfigured .cti path and a configured path that no longer loads.
         if not genicam_runtime_available():
             console.echo(
                 message=f"Harvesters camera discovery skipped. {GENICAM_UNAVAILABLE_REASON}", level=LogLevel.WARNING

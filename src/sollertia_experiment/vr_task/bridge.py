@@ -277,8 +277,8 @@ class UnityBridgeClient:
             The parsed JSON response object for a successful tool call.
 
         Raises:
-            UnityBridgeError: If the request fails at the transport layer, the response is not valid JSON, or the
-                bridge reports the tool call as unsuccessful.
+            UnityBridgeError: If the request fails at the transport layer, the response is not valid JSON or is not a
+                JSON object, or the bridge reports the tool call as unsuccessful.
         """
         request_body: dict[str, object] = {"tool": tool, "args": args if args is not None else {}}
         try:

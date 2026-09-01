@@ -99,9 +99,9 @@ _pass_shared_parameters = click.make_pass_decorator(_SharedSessionParameters)
 def mesoscope() -> None:  # pragma: no cover
     """Configures, runs, and manages the Mesoscope-VR data acquisition system.
 
-    This command group exposes every Mesoscope-VR-specific runtime: generating the system configuration file,
-    performing system maintenance, checking the mesoscope control bridge, running data acquisition sessions, and
-    managing the data collected by the system.
+    This command group exposes every Mesoscope-VR-specific runtime: generating the system and experiment
+    configuration files, performing system maintenance, checking the mesoscope control bridge, running data
+    acquisition sessions, and managing the data collected by the system.
     """
 
 
@@ -299,7 +299,10 @@ def window_checking(shared: _SharedSessionParameters) -> None:
     "-t",
     "--maximum-time",
     type=int,
-    help="The maximum time to run the training session, in minutes. Defaults to 20 minutes.",
+    help=(
+        "The maximum time to run the training session, in minutes. When omitted, reuses the previous session's "
+        "value for this animal, or 20 minutes if there is none."
+    ),
 )
 @click.option(
     "-min",
@@ -307,7 +310,7 @@ def window_checking(shared: _SharedSessionParameters) -> None:
     type=int,
     help=(
         "The minimum number of seconds that has to pass between two consecutive reward deliveries during training. "
-        "Defaults to 6 seconds."
+        "When omitted, reuses the previous session's value for this animal, or 6 seconds if there is none."
     ),
 )
 @click.option(
@@ -316,14 +319,17 @@ def window_checking(shared: _SharedSessionParameters) -> None:
     type=int,
     help=(
         "The maximum number of seconds that can pass between two consecutive reward deliveries during training. "
-        "Defaults to 18 seconds."
+        "When omitted, reuses the previous session's value for this animal, or 18 seconds if there is none."
     ),
 )
 @click.option(
     "-v",
     "--maximum-volume",
     type=float,
-    help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
+    help=(
+        "The maximum volume of water, in milliliters, that can be delivered during training. When omitted, reuses "
+        "the previous session's value for this animal, or 1.0 mL if there is none."
+    ),
 )
 @click.option(
     "-ur",
@@ -331,10 +337,10 @@ def window_checking(shared: _SharedSessionParameters) -> None:
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
-        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "reward count reaches this threshold, the system stops delivering new water rewards until the animal consumes "
         "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
-        "remain unconsumed. "
-        "Defaults to 1."
+        "remain unconsumed. When omitted, reuses the previous session's value for this animal, or 1 if there is "
+        "none."
     ),
 )
 @_pass_shared_parameters
@@ -370,7 +376,10 @@ def lick_training(
     "-t",
     "--maximum-time",
     type=int,
-    help="The maximum time to run the training session, in minutes. Must be greater than 0. Defaults to 40 minutes.",
+    help=(
+        "The maximum time to run the training session, in minutes. Must be greater than 0. When omitted, reuses "
+        "the previous session's value for this animal, or 40 minutes if there is none."
+    ),
 )
 @click.option(
     "-is",
@@ -378,7 +387,7 @@ def lick_training(
     type=float,
     help=(
         "The initial speed, in centimeters per second, the animal must maintain to obtain water rewards. "
-        "Defaults to 0.8 cm/s."
+        "When omitted, reuses the previous session's value for this animal, or 0.8 cm/s if there is none."
     ),
 )
 @click.option(
@@ -387,7 +396,8 @@ def lick_training(
     type=float,
     help=(
         "The initial duration, in seconds, the animal must maintain above-threshold running speed to obtain water "
-        "rewards. Defaults to 1.5 seconds."
+        "rewards. When omitted, reuses the previous session's value for this animal, or 1.5 seconds if there is "
+        "none."
     ),
 )
 @click.option(
@@ -397,7 +407,8 @@ def lick_training(
     help=(
         "The volume of water delivered to the animal, in milliliters, after which the speed and duration thresholds "
         "are increased by the specified step-sizes. This is used to make the training progressively harder for the "
-        "animal over the course of the training session. Defaults to 0.1 mL."
+        "animal over the course of the training session. When omitted, reuses the previous session's value for "
+        "this animal, or 0.1 mL if there is none."
     ),
 )
 @click.option(
@@ -406,7 +417,8 @@ def lick_training(
     type=float,
     help=(
         "The amount, in centimeters per second, to increase the speed threshold each time the animal receives the "
-        "volume of water specified by the 'increase-threshold' parameter. Defaults to 0.05 cm/s."
+        "volume of water specified by the 'increase-threshold' parameter. When omitted, reuses the previous "
+        "session's value for this animal, or 0.05 cm/s if there is none."
     ),
 )
 @click.option(
@@ -415,14 +427,18 @@ def lick_training(
     type=float,
     help=(
         "The amount, in seconds, to increase the duration threshold each time the animal receives the volume of water "
-        "specified by the 'increase-threshold' parameter. Defaults to 0.1 seconds."
+        "specified by the 'increase-threshold' parameter. When omitted, reuses the previous session's value for "
+        "this animal, or 0.1 seconds if there is none."
     ),
 )
 @click.option(
     "-v",
     "--maximum-volume",
     type=float,
-    help="The maximum volume of water, in milliliters, that can be delivered during training. Defaults to 1.0 mL.",
+    help=(
+        "The maximum volume of water, in milliliters, that can be delivered during training. When omitted, reuses "
+        "the previous session's value for this animal, or 1.0 mL if there is none."
+    ),
 )
 @click.option(
     "-mit",
@@ -431,7 +447,8 @@ def lick_training(
     help=(
         "The maximum time, in seconds, the animal is allowed to maintain the speed that is below the speed threshold "
         "and still receive the water reward. Setting this argument to 0 forces the animal to maintain the "
-        "above-threshold speed at all times. Defaults to 0.3 seconds."
+        "above-threshold speed at all times. When omitted, reuses the previous session's value for this animal, "
+        "or 0.3 seconds if there is none."
     ),
 )
 @click.option(
@@ -440,10 +457,10 @@ def lick_training(
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
-        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "reward count reaches this threshold, the system stops delivering new water rewards until the animal consumes "
         "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
-        "remain unconsumed. "
-        "Defaults to 1."
+        "remain unconsumed. When omitted, reuses the previous session's value for this animal, or 1 if there is "
+        "none."
     ),
 )
 @_pass_shared_parameters
@@ -498,10 +515,10 @@ def run_training(
     type=int,
     help=(
         "The maximum number of rewards that can be delivered without the animal consuming them. If the unconsumed "
-        "reward count exceeds this threshold, the system stops delivering new water rewards until the animal consumes "
+        "reward count reaches this threshold, the system stops delivering new water rewards until the animal consumes "
         "the already delivered rewards. Setting this argument to 0 removes the limit, so any number of rewards can "
-        "remain unconsumed. "
-        "Defaults to 1."
+        "remain unconsumed. When omitted, reuses the previous session's value for this animal, or 1 if there is "
+        "none."
     ),
 )
 @_pass_shared_parameters

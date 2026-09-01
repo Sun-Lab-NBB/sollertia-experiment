@@ -607,7 +607,8 @@ class VRTaskDriver:
 
         Notes:
             The driver opens the expected scene through the bridge before arming Unity, so a mismatch indicates a
-            configuration error, such as a scene whose embedded name disagrees with its file name. The SceneName
+            configuration error, such as the operator switching the active scene in the editor during one of the
+            arming retry prompts. The SceneName
             reply also confirms the scene's MQTT client is responsive.
 
         Raises:

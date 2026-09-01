@@ -306,9 +306,12 @@ def migrate_animal_between_projects(animal: str, source_project: str, target_pro
         stored session to the target project directory and reassigns it. The persistent data relocation and the cleanup
         of redundant directories apply to both modes.
 
-        The migration fails with an error if any session cannot be preprocessed or migrated. Each session is handled as
-        an isolated unit that cleans up after itself on failure, so re-running the migration after resolving the error
-        resumes from the failed session without manual intervention.
+        The migration fails with an error if any session cannot be preprocessed or migrated. In the destination-backed
+        mode, each session is handled as an isolated unit that removes its in-flight source-project directory on
+        failure, so re-running the migration after resolving the error resumes from the failed session without manual
+        intervention. The on-premises mode relocates each session with a move that is not rolled back, so a failure
+        after the move leaves that session under the target project while its record still names the source project,
+        and a re-run no longer sees it. That case requires manual repair.
 
     Args:
         animal: The animal for which to migrate the data.
@@ -802,7 +805,7 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
     total_rows = np.sum(roi_heights)
 
     # Calculates the number of flyback pixels between ROIs. These are the pixels acquired when the galvos are moving
-    # between frames.
+    # between consecutive ROIs within a frame.
     flyback_pixels = (frame_data.shape[0] - total_rows) // max(1, (roi_number - 1))
 
     # Creates an array that stores the start and end row indices for each ROI.
@@ -1266,7 +1269,9 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             "LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor", descriptor
         )
 
-        # Calculates the total volume of water, in ml, the animal received during and after the session's runtime.
+        # Calculates the volume of water, in ml, the animal received during the active portion of the session's
+        # runtime plus any water the experimenter gave afterwards. Water dispensed while the runtime was paused is
+        # tracked separately and is excluded from this total.
         training_water = round(water_descriptor.dispensed_water_volume_ml, ndigits=3)
         experimenter_water = round(water_descriptor.experimenter_given_water_volume_ml, ndigits=3)
         total_water = training_water + experimenter_water

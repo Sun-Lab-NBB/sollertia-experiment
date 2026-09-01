@@ -1,4 +1,6 @@
-"""Provides MCP tools wrapping the general, hardware-agnostic 'sle get' acquisition system discovery utilities."""
+"""Provides the general, hardware-agnostic MCP tools for acquisition system discovery, Zaber device inspection and
+configuration, and mount and Unity-bridge health checks.
+"""
 
 from __future__ import annotations
 
@@ -45,7 +47,7 @@ def get_checksum_tool(input_string: str) -> str:
         input_string: The string for which to compute the checksum.
 
     Returns:
-        The computed CRC32-XFER checksum value.
+        The computed CRC32-XFER checksum value, or an error description on failure.
     """
     try:
         calculator = CRCCalculator()
@@ -65,7 +67,8 @@ def get_zaber_device_settings_tool(port: str, device_index: int) -> str:
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A formatted string containing device settings including labels, positions, flags, and motion limits.
+        A formatted string containing device settings including labels, positions, flags, and motion limits, or an
+        error description when the device cannot be read.
     """
     try:
         settings = get_zaber_device_settings(port=port, device_index=device_index)
@@ -159,13 +162,13 @@ def set_zaber_device_setting_tool(
 
 @mcp.tool()
 def check_mount_accessibility_tool(path: str) -> str:
-    """Verifies that a filesystem path exists and is writable.
+    """Verifies that a filesystem directory exists and is writable.
 
-    Probes the path by writing and removing a temporary file to confirm write access. Useful for verifying
-    that a mounted storage location is reachable before invoking acquisition or transfer operations.
+    Probes the directory by writing and removing a temporary file inside it to confirm write access. Useful for
+    verifying that a mounted storage location is reachable before invoking acquisition or transfer operations.
 
     Args:
-        path: The absolute filesystem path to verify.
+        path: The absolute path to the directory (such as a mount point) to verify.
 
     Returns:
         A formatted string reporting existence, mount status, and writability, or an error description.
@@ -212,7 +215,8 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A validation report including checksum verification, position bounds checking, and any errors or warnings.
+        A validation report including checksum verification, position bounds checking, and any errors or warnings,
+        or an error description when the device cannot be reached.
     """
     try:
         result = validate_zaber_device_configuration(port=port, device_index=device_index)

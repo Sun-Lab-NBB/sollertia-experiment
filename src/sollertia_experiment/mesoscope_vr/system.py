@@ -53,13 +53,19 @@ class MesoscopeStorageDestination(StrEnum):
 
 
 class MesoscopeAcquisitionOrder(StrEnum):
-    """Defines the supported plane-acquisition orders for the Mesoscope reference and high-definition z-stacks."""
+    """Defines the supported plane-acquisition orders for the Mesoscope reference and high-definition z-stacks.
+
+    The ScanImagePC runAcquisition script programs one ascending sweep of every reference plane per acquired volume and
+    repeats that sweep once per averaged frame, which is the INTERLEAVED order. It does not read this field, so every
+    member of this enumeration currently yields that same acquisition.
+    """
 
     INTERLEAVED = "interleaved"
     """Iterates over the target planes once per acquired volume, acquiring one frame at each plane before repeating
-    (Z1, Z2, Z1, Z2)."""
+    (Z1, Z2, Z1, Z2). This is what the ScanImagePC acquires today."""
     SMOOTH = "smooth"
-    """Acquires all averaged frames at one target plane before advancing to the next plane (Z1, Z1, Z2, Z2)."""
+    """Requests that all averaged frames be acquired at one target plane before advancing to the next plane
+    (Z1, Z1, Z2, Z2). The ScanImagePC does not implement this dwell, so selecting it acquires the INTERLEAVED order."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,9 +265,10 @@ class MesoscopeAcquisition:
     """The [minimum, maximum] boundaries, in micrometers, of the non-imaged exclusion zone used for two-plane imaging.
     Equal boundaries disable two-plane imaging. When the boundaries differ, they must fall within z_range_um."""
     acquisition_order: MesoscopeAcquisitionOrder = MesoscopeAcquisitionOrder.INTERLEAVED
-    """The order in which the target planes are acquired when building the reference and high-definition z-stacks."""
+    """The order in which the target planes are acquired when building the reference and high-definition z-stacks. The
+    ScanImagePC acquires the INTERLEAVED order for every value of this field."""
     registration_channel: int = 1
-    """The acquisition channel used for online motion registration and the high-definition reference z-stack."""
+    """The acquisition channel used for online motion registration."""
     field_curvature_correction: bool = False
     """Determines whether ScanImage field curvature correction is enabled during acquisition. The appropriate setting
     depends on the specific microscope."""
@@ -597,8 +604,8 @@ class _ScanImagePCData:
 
 # Registers the Mesoscope-VR system configuration with the shared cross-system registry so the shared create / resolve
 # / load helpers can operate on it. The shared helpers own the file lifecycle, and this package only adds the
-# registration and the typed get_system_configuration() wrapper below. The shared get_system_configuration_path is
-# re-exported as-is.
+# registration plus the two thin wrappers below, create_system_configuration_file() and the typed
+# get_system_configuration(). The shared get_system_configuration_path is re-exported as-is.
 register_system_configuration(system=AcquisitionSystems.MESOSCOPE_VR, configuration_class=MesoscopeSystemConfiguration)
 
 

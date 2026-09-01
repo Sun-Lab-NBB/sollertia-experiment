@@ -174,8 +174,9 @@ class MaintenanceControlUI:
         self._data_array.disconnect()
         self._data_array.destroy()
 
-        # Does not disconnect the trackers here. They are owned by their respective interfaces, and disconnecting
-        # them would break access to delivered_volume when generating the session descriptor during shutdown.
+        # Does not disconnect the trackers here. They are owned by the WaterValveInterface and GasPuffValveInterface
+        # instances, which are still live when this method runs and disconnect their own buffers during the
+        # microcontroller teardown that follows.
 
         self._started = False
 
@@ -391,8 +392,8 @@ class _MaintenanceUIWindow(QMainWindow):
             event: The Qt-generated window shutdown event instance.
         """
         # Closing the window terminates the maintenance runtime, so an operator-initiated close is confirmed first.
-        # An accidental click on the window close control, or an Escape keypress, would otherwise end the runtime
-        # outright. A close the runtime itself drives carries no prompt, as the decision is already made.
+        # An accidental click on the window close control would otherwise end the runtime outright. A close the
+        # runtime itself drives carries no prompt, as the decision is already made.
         if not self._close_confirmed:
             confirmation = QMessageBox.question(
                 self,

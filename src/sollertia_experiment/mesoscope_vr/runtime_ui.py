@@ -205,11 +205,13 @@ class RuntimeControlUI:
 
         Args:
             mode: The VisualizerMode that determines which UI elements are enabled. Speed and duration threshold
-                controls are only enabled for RUN_TRAINING mode. Must be a valid VisualizerMode enumeration member.
+                controls are only enabled for RUN_TRAINING mode, and the guidance and gas puff controls only for
+                EXPERIMENT mode. Must be a valid VisualizerMode enumeration member.
             has_reinforcing_trials: Determines whether the experiment includes reinforcing (water reward) trials.
-                When True, the UI shows the reinforcing guidance toggle button.
-            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True,
-                the UI shows the aversive guidance toggle button and the gas puff valve control group.
+                When True and the mode is EXPERIMENT, the UI shows the reinforcing guidance toggle button.
+            has_aversive_trials: Determines whether the experiment includes aversive (gas puff) trials. When True and
+                the mode is EXPERIMENT, the UI shows the aversive guidance toggle button and the gas puff valve
+                control group.
             has_mesoscope: Determines whether the runtime uses the mesoscope. When True, the UI shows the reference
                 regeneration button.
         """
@@ -751,7 +753,7 @@ class _ControlUIWindow(QMainWindow):
             return
 
         # Closing the window aborts the runtime, so an operator-initiated close is confirmed first. An accidental
-        # click on the window close control, or an Escape keypress, would otherwise abort the session outright.
+        # click on the window close control would otherwise abort the session outright.
         confirmation = QMessageBox.question(
             self,
             "Abort Runtime",
@@ -1021,7 +1023,8 @@ class _ControlUIWindow(QMainWindow):
             speed_layout = QVBoxLayout(speed_group)
 
             # Speed threshold. The spinbox shows the current effective threshold in absolute units and lets the user
-            # request an absolute target, which the runtime converts into a modifier offset.
+            # request an absolute target, which the GUI converts into a modifier offset the run training loop
+            # consumes.
             speed_spinbox = QDoubleSpinBox()
             speed_spinbox.setRange(limits.minimum_speed_cm_s, limits.maximum_speed_cm_s)
             speed_spinbox.setSingleStep(0.01)
@@ -1038,7 +1041,8 @@ class _ControlUIWindow(QMainWindow):
             duration_layout = QVBoxLayout(duration_group)
 
             # Duration threshold. The spinbox shows the current effective threshold in absolute units and lets the
-            # user request an absolute target, which the runtime converts into a modifier offset.
+            # user request an absolute target, which the GUI converts into a modifier offset the run training loop
+            # consumes.
             duration_spinbox = QDoubleSpinBox()
             duration_spinbox.setRange(limits.minimum_duration_s, limits.maximum_duration_s)
             duration_spinbox.setSingleStep(0.01)
@@ -1054,7 +1058,8 @@ class _ControlUIWindow(QMainWindow):
             controls_layout.addWidget(duration_group)
             main_layout.addLayout(controls_layout)
 
-            # Caches the widget references accessed by the modifier-update handler methods.
+            # Caches the threshold group boxes and the spinbox references read by the monitoring and modifier-update
+            # methods.
             self._speed_group = speed_group
             self._duration_group = duration_group
             self._speed_spinbox = speed_spinbox
@@ -1471,7 +1476,8 @@ class _ControlUIWindow(QMainWindow):
 
     def _setup_monitoring(self) -> None:
         """Sets up a QTimer that periodically polls the externally addressable shared-memory state (termination, pause,
-        guidance, setup-complete, run-training thresholds, and valve states) to refresh the GUI.
+        guidance, setup-complete, run-training thresholds, reference-button enable state, and valve states) to refresh
+        the GUI.
         """
         self._monitor_timer = QTimer(self)
         self._monitor_timer.timeout.connect(self._check_external_state)

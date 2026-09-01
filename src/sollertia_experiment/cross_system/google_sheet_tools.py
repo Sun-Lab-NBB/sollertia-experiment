@@ -114,7 +114,8 @@ class SurgeryLog:
         _animals: Stores the unique identifiers of all animals whose data is stored in the surgery log.
 
     Raises:
-        ValueError: If the target Google Sheet is not a valid Sollertia platform surgery log.
+        ValueError: If the target Google Sheet is not a valid Sollertia platform surgery log, or if the target
+            animal's identifier is not present in the sheet's 'ID' column.
     """
 
     def __init__(
@@ -135,8 +136,9 @@ class SurgeryLog:
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to fetch the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
-        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        # used to fetch the sheet data via HTTP request(s). Disables the discovery-document cache, which is
+        # unavailable to projects authenticating through google-auth rather than oauth2client, and only emits a
+        # spurious INFO log record when left enabled.
         self._service: Resource = build(
             serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
         )
@@ -241,9 +243,11 @@ class SurgeryLog:
             A SurgeryData instance that stores the extracted data.
 
         Raises:
-            ValueError: If the animal's date or time cells are empty, or if the date, time, identifier, weight, cage,
-                or surgery quality cells contain malformed values. Date and time cells are parsed via
-                _convert_date_time_to_timestamp, while the remaining cells are parsed via int() and float().
+            ValueError: If the animal's date or time cells are empty, or if the date, time, identifier, weight,
+                cage, surgery quality, '<stem> (ml)' drug volume, '<base> volume (nl)' injection volume, or
+                '<base> coordinates' cells contain malformed values. Date and time cells are parsed via
+                _convert_date_time_to_timestamp, the coordinate cells via _parse_stereotactic_coordinates, and the
+                remaining cells via int() and float().
         """
         # Finds the index of the target animal in the ID value tuple to determine the row number to parse from the
         # sheet. The index is modified by 2 because: +1 for 0-indexing to 1-indexing conversion, +1 to account for the
@@ -318,7 +322,8 @@ class SurgeryLog:
                 )
 
         # Determines the number of implants and injections performed during the processed surgery. This is based on the
-        # assumption that all implants and injections are named like 'Implant1', 'Injection2_location', etc.
+        # assumption that all implants and injections are named like 'Implant1', 'Injection2', etc., and that their
+        # sub-columns are named like 'injection2 location', with a whitespace separator.
 
         # Pre-creates the lists to store the digits associated with each implant and injection.
         implant_numbers = []
@@ -518,7 +523,8 @@ class WaterLog:
 
     Raises:
         ValueError: If the target Google Sheet is not a valid Sollertia platform water restriction and animal
-            interaction log.
+            interaction log, if the session_date cannot be parsed as a Sollertia session timestamp, or if the log
+            does not contain a row for the session's local date.
     """
 
     def __init__(
@@ -532,15 +538,16 @@ class WaterLog:
         self._animal_id: int = animal_id
         self._sheet_id: str = sheet_id
 
-        # Generates the credentials' object to access the target Google Sheet. In contrast to surgery data, this object
-        # requires write access.
+        # Generates the credentials' object to access the target Google Sheet. This object requests the same
+        # read-write 'spreadsheets' scope used to access the surgery data.
         credentials = Credentials.from_service_account_file(  # type: ignore[no-untyped-call]
             filename=str(credentials_path), scopes=("https://www.googleapis.com/auth/spreadsheets",)
         )
 
         # Uses the credentials' object to build the access service for the target Google Sheet. This service is then
-        # used to write the sheet data via HTTP request(s). Disables the discovery-document cache, which is unsupported
-        # with the installed oauth2client version and only emits a spurious warning when left enabled.
+        # used to write the sheet data via HTTP request(s). Disables the discovery-document cache, which is
+        # unavailable to projects authenticating through google-auth rather than oauth2client, and only emits a
+        # spurious INFO log record when left enabled.
         self._service: Resource = build(
             serviceName="sheets", version="v4", credentials=credentials, cache_discovery=False
         )
@@ -684,7 +691,8 @@ class WaterLog:
             experimenter_id: The unique identifier of the experimenter supervising the data acquisition session.
             session_type: The type of the data acquisition session.
         """
-        # Writes each value to the appropriate column, using the same formatting as used in row 3. Since the sheet
+        # Writes each value to the appropriate column, applying CENTER horizontal and MIDDLE vertical alignment to
+        # every written cell and rounding the weight and water values to one decimal place. Since the sheet
         # is checked for validity and the session row index is discovered at class instantiation, this is a fairly
         # simple writing procedure.
         row_index = self._session_row_index
