@@ -67,40 +67,53 @@ Sollertia platform repositories. Low-level hardware work also draws on the `vide
 `microcontroller` plugins, and configuration authoring draws on the `assets` plugin (see Downstream library integration
 below).
 
-| Skill                                         | Description                                                          |
-|-----------------------------------------------|----------------------------------------------------------------------|
-| `automation:explore-codebase`                 | Perform in-depth codebase exploration at session start               |
-| `automation:python-style`                     | Apply Sollertia platform Python conventions (REQUIRED for .py edits) |
-| `automation:readme-style`                     | Apply Sollertia platform README conventions (REQUIRED for READMEs)   |
-| `automation:commit`                           | Draft Sollertia platform style-compliant commit messages             |
-| `automation:pyproject-style`                  | Apply Sollertia platform pyproject.toml conventions                  |
-| `automation:tox-config`                       | Apply Sollertia platform tox.ini conventions                         |
-| `automation:api-docs`                         | Apply Sollertia platform Sphinx documentation conventions            |
-| `automation:project-layout`                   | Apply Sollertia platform directory structure conventions             |
-| `automation:skill-design`                     | Generate, update, and verify skill files and this CLAUDE.md          |
-| `automation:audit-facts`                      | Audit documentation against source code for factual accuracy         |
-| `automation:audit-style`                      | Audit files against the applicable style skill checklists            |
-| `experiment:pipeline`                         | Orchestrate the end-to-end experiment lifecycle                      |
-| `experiment:system-design-pipeline`           | Orchestrate building a new acquisition system end-to-end             |
-| `experiment:acquisition-system-design`        | Design a new acquisition system (config, bindings, runtime)          |
-| `experiment:acquisition-system-runtime`       | Runtime pattern: per-mode logic, state machine, dispatch             |
-| `experiment:acquisition-system-setup`         | Discover and verify connected acquisition hardware                   |
-| `experiment:library-extension`                | Extension seams for a new acquisition system across sle and slmc     |
-| `experiment:system-health-check`              | Pre-flight checks of configuration, mounts, and hardware             |
-| `experiment:zaber-interface`                  | Implement Zaber motor interfaces and binding classes                 |
-| `experiment:microcontroller-interface`        | Paired Module + ModuleInterface registry and conventions             |
-| `experiment:vr-driver-interface`              | VR task driver, Unity MQTT contract, trial decomposition             |
-| `experiment:data-management`                  | Preprocess, migrate, and delete session data via `sle mcp`           |
-| `experiment:google-sheets-processing`         | Implement SurgeryLog / WaterLog Google Sheets processors             |
-| `experiment:cli-reference`                    | Document the `sle` root, `sle mcp`, and `sle get` CLI surface        |
-| `experiment:external-tool-bindings`           | Bind a tool that cannot be installed beside the stack                |
-| `experiment:experiment-mcp-environment-setup` | Diagnose `sle mcp` server connectivity issues                        |
-| `mesoscope:mesoscope-vr`                      | Mesoscope-VR hardware inventory, configuration, and bindings         |
-| `mesoscope:mesoscope-vr-runtime`              | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
-| `mesoscope:mesoscope-vr-snapshots`            | Read/write per-session Zaber and Mesoscope position snapshots        |
-| `mesoscope:mesoscope-vr-session-schema`       | Mesoscope-VR session descriptor and hardware-state field schema      |
-| `mesoscope:mesoscope-vr-experiment-schema`    | Mesoscope-VR experiment configuration and trial-class field schema   |
-| `mesoscope:mesoscope-vr-cli-reference`        | Reference for the `sle mesoscope` commands and their options         |
+| Skill                                           | Description                                                          |
+|-------------------------------------------------|----------------------------------------------------------------------|
+| `automation:explore-codebase`                   | Perform in-depth codebase exploration at session start               |
+| `automation:explore-dependencies`               | Explore installed dependency source to build a live API snapshot     |
+| `automation:python-style`                       | Apply Sollertia platform Python conventions (REQUIRED for .py edits) |
+| `automation:readme-style`                       | Apply Sollertia platform README conventions (REQUIRED for READMEs)   |
+| `automation:commit`                             | Draft Sollertia platform style-compliant commit messages             |
+| `automation:pr`                                 | Draft a style-compliant pull request summary                         |
+| `automation:release`                            | Draft style-compliant release notes                                  |
+| `automation:pyproject-style`                    | Apply Sollertia platform pyproject.toml conventions                  |
+| `automation:tox-config`                         | Apply Sollertia platform tox.ini conventions                         |
+| `automation:api-docs`                           | Apply Sollertia platform Sphinx documentation conventions            |
+| `automation:project-layout`                     | Apply Sollertia platform directory structure conventions             |
+| `automation:skill-design`                       | Generate, update, and verify skill files and this CLAUDE.md          |
+| `automation:audit-correctness`                  | Audit source for active and latent bugs                              |
+| `automation:audit-facts`                        | Audit documentation against source code for factual accuracy         |
+| `automation:audit-performance`                  | Audit source for algorithmic, allocation, and dtype costs            |
+| `automation:audit-project`                      | Orchestrate all four audits and merge their findings                 |
+| `automation:audit-style`                        | Audit files against the applicable style skill checklists            |
+| `experiment:pipeline`                           | Orchestrate the end-to-end experiment lifecycle                      |
+| `experiment:system-design-pipeline`             | Orchestrate building a new acquisition system end-to-end             |
+| `experiment:acquisition-system-design`          | Design a new acquisition system (config, bindings, runtime)          |
+| `experiment:acquisition-system-runtime`         | Runtime pattern: per-mode logic, state machine, dispatch             |
+| `experiment:acquisition-system-setup`           | Discover and verify connected acquisition hardware                   |
+| `experiment:library-extension`                  | Extension seams for a new acquisition system across sle and slmc     |
+| `experiment:system-health-check`                | Pre-flight checks of configuration, mounts, and hardware             |
+| `experiment:zaber-interface`                    | Implement Zaber motor interfaces and binding classes                 |
+| `experiment:microcontroller-interface`          | Paired Module + ModuleInterface registry and conventions             |
+| `experiment:vr-driver-interface`                | VR task driver, Unity MQTT contract, trial decomposition             |
+| `experiment:data-management`                    | Preprocess, migrate, and delete session data via `sle mcp`           |
+| `experiment:google-sheets-processing`           | Implement SurgeryLog / WaterLog Google Sheets processors             |
+| `experiment:cli-reference`                      | Document the `sle` root, `sle mcp`, and `sle get` CLI surface        |
+| `experiment:external-tool-bindings`             | Bind a tool that cannot be installed beside the stack                |
+| `experiment:experiment-mcp-environment-setup`   | Diagnose `sle mcp` server connectivity issues                        |
+| `mesoscope:mesoscope-vr`                        | Mesoscope-VR hardware inventory, configuration, and bindings         |
+| `mesoscope:mesoscope-vr-runtime`                | Mesoscope-VR state machine, orchestrator, UIs, and CLI               |
+| `mesoscope:mesoscope-vr-snapshots`              | Read/write per-session Zaber and Mesoscope position snapshots        |
+| `mesoscope:mesoscope-vr-session-schema`         | Mesoscope-VR session descriptor and hardware-state field schema      |
+| `mesoscope:mesoscope-vr-experiment-schema`      | Mesoscope-VR experiment configuration and trial-class field schema   |
+| `mesoscope:mesoscope-vr-processing-schema`      | Processed filename rosters and the assembled column schema           |
+| `mesoscope:mesoscope-vr-module-parsing`         | Per-module log parser registry and processed feather schemas         |
+| `mesoscope:mesoscope-vr-trial-decomposition`    | Runtime log decomposition into cue, trigger zone, and trial data     |
+| `mesoscope:mesoscope-vr-fluorescence-alignment` | Fluorescence TTL frame alignment and ScanImage metadata fallback     |
+| `mesoscope:mesoscope-vr-video-tracking`         | Pupil tracking pass and per-camera video sub-dataset assembly        |
+| `mesoscope:mesoscope-vr-imaging-configuration`  | Two-photon imaging locators and cindra configuration resolvers       |
+| `mesoscope:mesoscope-vr-dataset-assembly`       | Session-assembly worker and admission policy for forged datasets     |
+| `mesoscope:mesoscope-vr-cli-reference`          | Reference for the `sle mesoscope` commands and their options         |
 
 ## MCP server
 
@@ -244,17 +257,21 @@ For Zaber motor configuration, use the `experiment:zaber-interface` skill and fo
 
 1. For shared hardware (microcontrollers), add `ModuleInterface` subclasses to `cross_system/module_interfaces.py`
 2. For system-specific hardware, add wrapper classes to the system's `binding_classes.py`
-3. Follow existing patterns: wrapper classes that manage device lifecycle (`connect()`, `start()`, `stop()`)
+3. Follow existing patterns: wrapper classes acquire their devices in `__init__`, where `ZaberMotors` calls
+   `ZaberConnection.connect()`, and expose teardown alongside per-subsystem control methods, so `ZaberMotors` provides
+   `disconnect()` and the `is_connected` property, `MicroControllerInterfaces` provides `start()` and `stop()`, and
+   `VideoSystems` provides `start_face_camera()`, `start_body_camera()`, and `stop()`
 4. Use the system's own configuration dataclasses for hardware parameters (`mesoscope_vr/system.py`)
 
-**Modifying CLI commands:** (see `experiment:acquisition-system-setup` for the six `sle get` commands,
-`mesoscope:mesoscope-vr-cli-reference` for the `sle mesoscope` command and option surface, and
-`experiment:library-extension` for the `_register_subcommands()` registration seam)
+**Modifying CLI commands:** (see `experiment:cli-reference` for the `sle` root group, `sle mcp`, and the six `sle get`
+commands with their options, failure modes, and MCP-tool mapping, `mesoscope:mesoscope-vr-cli-reference` for the
+`sle mesoscope` command and option surface, and `experiment:library-extension` for the `_register_subcommands()`
+registration seam)
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
-   `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `configure`, `maintain`,
-   `check-bridge`, `preprocess`, `delete`, `migrate`, and the `run` command group with its `window-checking`,
-   `lick-training`, `run-training`, and `experiment` subcommands)
+   `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`, covering `maintain`, `check-bridge`,
+   `preprocess`, `delete`, `migrate`, the `configure` command group with its `system` and `experiment` subcommands, and
+   the `run` command group with its `window-checking`, `lick-training`, `run-training`, and `experiment` subcommands)
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
 4. Register commands with the appropriate Click group. The `get` and `mesoscope` groups reach the top-level `sle`
