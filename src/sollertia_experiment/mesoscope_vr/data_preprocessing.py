@@ -4,8 +4,10 @@ session's runtime and moving it to the long-term storage destinations.
 
 from __future__ import annotations
 
+import os
 import json
 import shutil
+import signal
 from typing import TYPE_CHECKING, Any, cast
 from pathlib import Path
 from datetime import UTC, datetime
@@ -34,7 +36,13 @@ from sollertia_shared_assets import (
     get_credentials,
     iter_animal_sessions,
 )
-from ataraxis_data_structures import direct_write, delete_directory, transfer_directory
+from ataraxis_data_structures import (
+    direct_write,
+    delete_directory,
+    transfer_directory,
+    limit_worker_threads,
+    initialize_worker_threads,
+)
 
 from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
 from ..cross_system import (
@@ -89,6 +97,12 @@ destinations."""
 _FACE_CAMERA_NAME: str = "face_camera"
 """The colloquial name of the camera whose video is analyzed by the DeepLabCut eye-tracking model. It matches the name
 assigned to the camera during acquisition, which rename_session_videos uses to build the video's final filename."""
+
+EYE_TRACKING_PROJECT_NAME: str = "eye_tracking"
+"""The DeepLabCut project name token that has to appear in the eye-tracking prediction filename. DeepLabCut names each
+prediction after the analyzed video's stem followed by its scorer string, and the scorer embeds the project's 'Task'
+field verbatim, so the project the acquisition system points at has to carry this name for sollertia-forgery's
+locate_mesoscope_pose_predictions to resolve the prediction downstream."""
 
 _INFERENCE_LOG_TAIL_CHARACTERS: int = 2000
 """The number of trailing characters of the eye-tracking inference log surfaced when reporting an inference failure."""
@@ -467,7 +481,9 @@ def _launch_face_tracking(
     # long-running child fills an unread pipe buffer, and preserves DeepLabCut's output for diagnosing a failure.
     log_file = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log").open("wb")
     try:
-        return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT)
+        # Places the child in its own process group, so an aborted preprocessing run signals the whole 'conda run' ->
+        # 'slvt' -> inference worker tree rather than the wrapper process alone.
+        return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
     finally:
         # The child process holds its own duplicated descriptor, so the parent's handle is no longer needed.
         log_file.close()
@@ -483,16 +499,21 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
         pickle files) beside the face-camera video in raw camera_data, where the checksum and transfer then capture
         them. The transient inference log is removed on success and retained on failure for inspection.
 
+        The prediction is accepted only when its name carries the EYE_TRACKING_PROJECT_NAME token, which is the token
+        the downstream sollertia-forgery locator matches on. A run driven by a DeepLabCut project under a different
+        name therefore fails here, rather than shipping a session whose predictions the downstream pipeline skips.
+
     Args:
         process: The running inference subprocess returned by _launch_face_tracking.
         session_data: The SessionData instance that defines the processed session.
 
     Raises:
-        RuntimeError: If the inference subprocess exits with a non-zero status or writes no prediction file.
+        RuntimeError: If the inference subprocess exits with a non-zero status or writes no prediction file named
+            after the eye-tracking project.
     """
     return_code = process.wait()
     face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
-    predictions = list(face_video.parent.glob(f"{face_video.stem}*.h5"))
+    predictions = list(face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.h5"))
     log_path = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log")
 
     if return_code != 0 or not predictions:
@@ -513,8 +534,12 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
     """Stops the face-camera eye-tracking inference subprocess and waits for it to exit.
 
     Notes:
-        The wait on the terminated child is bounded and escalates to a kill, so an unresponsive child never stalls the
-        abort that triggers this cleanup.
+        The 'conda run' wrapper the inference launches under does not forward signals to the tool it wraps, so the
+        signal goes to the whole process group the child heads. The group is interrupted rather than terminated,
+        because slvt reaps its GPU worker processes from the KeyboardInterrupt handler of its inference pipeline.
+
+        The wait on the interrupted child is bounded and escalates to a kill of the same group, so an unresponsive
+        child never stalls the abort that triggers this cleanup.
 
     Args:
         process: The inference subprocess returned by _launch_face_tracking.
@@ -529,12 +554,15 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
     )
     console.echo(message=message, level=LogLevel.WARNING)
 
-    process.terminate()
+    # Suppresses the lookup error for the race where the group exits between the poll above and the signal below.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(os.getpgid(pid=process.pid), signal.SIGINT)
     try:
         process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
     except subprocess.TimeoutExpired:
-        # A child that ignores the termination signal keeps the GPU reserved, so it is killed and reaped outright.
-        process.kill()
+        # A group that ignores the interrupt keeps the GPU reserved, so it is killed and the child is reaped outright.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(os.getpgid(pid=process.pid), signal.SIGKILL)
         process.wait()
 
 
@@ -1044,7 +1072,15 @@ def _preprocess_mesoscope_directory(
     # completion order is arbitrary and the metadata rows must be concatenated in acquisition order to line up with
     # the frames written to the output stacks.
     stack_metadata: dict[int, dict[str, NDArray[Any]]] = {}
-    with ProcessPoolExecutor(max_workers=processes) as executor:
+
+    # Pins the numeric backends of each worker to a single thread. Without this, every worker opens a core-count-wide
+    # decode and compression pool of its own, oversubscribing the host by the square of the core count. The limit
+    # reaches a spawned worker through the environment it inherits, so it has to enclose the pool's whole lifetime,
+    # and the initializer covers the backends that read their width after the worker has started.
+    with (
+        limit_worker_threads(),
+        ProcessPoolExecutor(max_workers=processes, initializer=initialize_worker_threads) as executor,
+    ):
         futures = {
             executor.submit(process_stack_partial, tiff_file, frame_number): frame_number
             for tiff_file, frame_number in valid_stacks

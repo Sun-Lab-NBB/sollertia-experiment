@@ -354,8 +354,10 @@ class MesoscopeVideoTracking:
     process, since DeepLabCut cannot share the acquisition environment. An empty string disables face-camera
     inference."""
     dlc_project_path: Path = Path()
-    """The absolute path to the DeepLabCut project's config.yaml whose trained model analyzes the face-camera video. An
-    empty path disables face-camera inference."""
+    """The absolute path to the DeepLabCut project's config.yaml whose trained model analyzes the face-camera video.
+    The project's 'Task' field has to be set to 'eye_tracking', because DeepLabCut embeds that field verbatim in the
+    scorer string it appends to each prediction filename, and both preprocessing and the downstream sollertia-forgery
+    locator resolve the prediction by that token. An empty path disables face-camera inference."""
     shuffle: int = 1
     """The shuffle index of the trained DeepLabCut model to run."""
     crop: str = ""

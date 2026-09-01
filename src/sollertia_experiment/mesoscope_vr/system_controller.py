@@ -18,6 +18,7 @@ from ataraxis_time import (
 from ataraxis_base_utilities import LogLevel, console, convert_scalar_to_bytes
 from sollertia_shared_assets import (
     SessionData,
+    TriggerType,
     SessionTypes,
     TaskTemplate,
     MesoscopeGasPuffTrial,
@@ -186,7 +187,10 @@ class MesoscopeVRSystem:
             mesoscope frame acquisition pulses.
         _trial_state: The TrialState instance that tracks the progression of trials during experiment runtimes.
         _resolved_stimulus_count: The number of Unity stimulus events resolved since the last cue sequence reset,
-            which is the position of the trial the next stimulus event belongs to.
+            which is the position of the trial the next stimulus event belongs to. The positional attribution is valid
+            only while every decomposed trial resolves exactly one Unity stimulus event, which holds for the
+            INTERACTION and OCCUPANCY_DISARM trigger types and not for OCCUPANCY_TRIGGER, so supporting a trigger type
+            that can resolve a trial without publishing an event requires replacing this counter.
 
     Raises:
         RuntimeError: If the host-machine does not have enough logical CPU cores to support the runtime.
@@ -1397,7 +1401,9 @@ class MesoscopeVRSystem:
             cue sequence. This method looks each name up in the experiment configuration's trial-structures mapping
             and builds two parallel tuples: per-trial reward parameters (zero placeholders on aversive trials) and
             per-trial puff durations (zero placeholders on reinforcing trials). It also validates that every trial
-            name produced by the decomposer has a matching entry in the experiment configuration.
+            name produced by the decomposer has a matching entry in the experiment configuration and that every trial
+            uses a trigger type Unity resolves with exactly one stimulus event, which is the precondition the runtime's
+            positional stimulus attribution depends on.
 
         Args:
             trial_names: The ordered sequence of trial names produced by the VRTaskDriver's cue-sequence decomposition.
@@ -1407,10 +1413,11 @@ class MesoscopeVRSystem:
             per-trial aversive puff durations in milliseconds.
 
         Raises:
-            RuntimeError: If the experiment configuration is not initialized, which indicates the method was called
-                outside a mesoscope experiment session.
+            RuntimeError: If the experiment configuration or the VR task template is not initialized, which indicates
+                the method was called outside a mesoscope experiment session.
             ValueError: If a trial name produced by the decomposer has no matching entry in the experiment
-                configuration's trial structures.
+                configuration's trial structures, or if a trial uses a trigger type Mesoscope-VR does not resolve with
+                exactly one Unity stimulus event.
         """
         if self._experiment_configuration is None:
             message = (
@@ -1418,7 +1425,14 @@ class MesoscopeVRSystem:
                 "is not initialized. This method must only be called for mesoscope experiment sessions."
             )
             console.error(message=message, error=RuntimeError)
+        if self._task_template is None:
+            message = (
+                "Unable to build the trial parameter arrays for the Mesoscope-VR system. The Virtual Reality task "
+                "template is not initialized. This method must only be called for mesoscope experiment sessions."
+            )
+            console.error(message=message, error=RuntimeError)
         trial_structures = self._experiment_configuration.trial_structures
+        template_trial_structures = self._task_template.trial_structures
 
         reinforcing_rewards: list[tuple[float, int]] = []
         aversive_puff_durations: list[int] = []
@@ -1428,6 +1442,20 @@ class MesoscopeVRSystem:
                     f"Unable to build the trial parameter arrays for the Mesoscope-VR system. The VR cue sequence "
                     f"decomposer produced trial '{trial_name}', but the experiment configuration has no matching "
                     f"entry. Trial names must align between the VR TaskTemplate and the experiment configuration."
+                )
+                console.error(message=message, error=ValueError)
+
+            # The runtime attributes each incoming Unity stimulus event to the next decomposed trial by position, so a
+            # trigger type that can resolve a trial without publishing an event would shift every later trial onto the
+            # wrong parameters. Checking the live template here also closes the path where the experiment
+            # configuration was authored against an earlier revision of the template.
+            trigger_type = template_trial_structures[trial_name].trigger_type
+            if trigger_type not in (TriggerType.INTERACTION, TriggerType.OCCUPANCY_DISARM):
+                message = (
+                    f"Unable to build the trial parameter arrays for the Mesoscope-VR system. The VR task template "
+                    f"assigns trial '{trial_name}' the trigger type '{trigger_type}', but the Mesoscope-VR stimulus "
+                    f"attribution requires each trial to resolve exactly one Unity stimulus event. Use the "
+                    f"'{TriggerType.INTERACTION.value}' or '{TriggerType.OCCUPANCY_DISARM.value}' trigger type."
                 )
                 console.error(message=message, error=ValueError)
 
@@ -1563,6 +1591,19 @@ class MesoscopeVRSystem:
                     f"from the session's cue sequence were resolved."
                 )
                 console.echo(message=message, level=LogLevel.WARNING)
+                return
+
+            # A stimulus reporting a trial name other than the one decomposed at the resolved position means the
+            # positional attribution has drifted from the Unity trial order, so the event is discarded rather than
+            # scored against the parameters of a trial it does not belong to.
+            expected_trial_name = self._vr_task.trial_names[trial_position]
+            if event.trial_name != expected_trial_name:
+                message = (
+                    f"Discarding a Virtual Reality stimulus event reported for the trial '{event.trial_name}', which "
+                    f"does not match the trial '{expected_trial_name}' decomposed at the trial position "
+                    f"{trial_position} the Mesoscope-VR stimulus attribution resolved the event to."
+                )
+                console.echo(message=message, level=LogLevel.ERROR)
                 return
 
             self._resolved_stimulus_count += 1

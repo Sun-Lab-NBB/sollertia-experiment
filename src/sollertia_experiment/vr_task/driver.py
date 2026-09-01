@@ -415,11 +415,18 @@ class VRTaskDriver:
 
         Notes:
             An emergency pause occurs when Unity reports that its runtime terminated. This method ensures the editor
-            is reachable, re-arms Unity via the bridge, re-queries the regenerated wall cue sequence so the animal's
-            Virtual Reality position is tracked accurately after the reset, and clears the termination flag.
+            is reachable, re-arms Unity via the bridge, re-publishes the tracked guidance modes, re-queries the
+            regenerated wall cue sequence so the animal's Virtual Reality position is tracked accurately after the
+            reset, and clears the termination flag.
+
+            A fresh Play Mode session reloads Unity's interaction and wait requirements from the values serialized
+            into the task prefab, and Unity never queries the driver for them. Re-publishing both guidance modes
+            restores the requirements the operator selected for the session.
         """
         self._require_bridge()
         self._arm_unity()
+        self.set_reinforcing_guidance(enabled=self._state.reinforcing_guidance_enabled)
+        self.set_aversive_guidance(enabled=self._state.aversive_guidance_enabled)
         self._refresh_cue_sequence()
         self._state.terminated = False
 
@@ -521,15 +528,19 @@ class VRTaskDriver:
 
         Notes:
             Draining the SessionStop published when the scene's MQTT client disconnects prevents it from later being
-            misread by cycle() as an unexpected Unity termination during the runtime.
+            misread by cycle() as an unexpected Unity termination during the runtime. An editor that is already out
+            of Play Mode publishes no SessionStop, so the drain is skipped when the bridge reports the 'edit' state.
         """
         try:
-            self._bridge.exit_play_mode()
+            state = self._bridge.exit_play_mode()
         except UnityBridgeError as exception:
             message = f"Unable to stop Unity through the bridge. {exception}"
             console.echo(message=message, level=LogLevel.WARNING)
             return
-        self._wait_for_topic_bounded(expected_topic=_VRTaskMQTTTopics.SESSION_STOP, timeout_ms=_SESSION_STOP_TIMEOUT_MS)
+        if state != "edit":
+            self._wait_for_topic_bounded(
+                expected_topic=_VRTaskMQTTTopics.SESSION_STOP, timeout_ms=_SESSION_STOP_TIMEOUT_MS
+            )
 
     def _refresh_cue_sequence(self) -> None:
         """Requests and resolves the Virtual Reality wall cue sequence used by the current Unity scene.
