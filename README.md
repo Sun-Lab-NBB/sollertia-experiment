@@ -1207,21 +1207,6 @@ CLI command.
 argument. Calling either one without `confirm` or `confirm_deletion` returns an error that previews the pending change
 or spells out the consequences, so the calling agent asks the user before retrying with `yes` or `no`.
 
-#### Claude Desktop Configuration
-
-Add the following to the Claude Desktop configuration file:
-
-```json
-{
-  "mcpServers": {
-    "sollertia-experiment": {
-      "command": "sle",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
 #### Client Registration
 
 MCP server registration and the system-agnostic Claude Code skill assets for this library are distributed through the
@@ -1233,16 +1218,16 @@ Mesoscope-VR skills listed above.
 
 ### Marketplace Plugins
 
-The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five plugins, each backed by the MCP server
-of the library it targets. Installing a plugin makes its skills available and, for the plugins that declare an MCP
-server of their own, registers that server with compatible clients:
+The [sollertia](https://github.com/Sun-Lab-NBB/sollertia) marketplace ships five plugins, three of which declare an MCP
+server of their own. Installing a plugin makes its skills available and, when that plugin declares a server, registers
+that server with compatible clients:
 
 | Plugin       | Targets                                                          | MCP server | Role                                                                        |
 |--------------|------------------------------------------------------------------|------------|-----------------------------------------------------------------------------|
 | `assets`     | sollertia-shared-assets                                          | `slsa mcp` | Configuration authoring and shared session/subject/template asset I/O       |
-| `unity`      | sollertia-virtual-reality                                        | (relay)    | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
+| `unity`      | sollertia-virtual-reality                                        | (none)     | Unity task authoring, VR scenes, and the MQTT contract, via the slsa relay  |
 | `experiment` | sollertia-experiment, sollertia-micro-controllers                | `sle mcp`  | System-agnostic core: design, runtime, hardware interfaces, data management |
-| `mesoscope`  | sollertia-experiment, sollertia-shared-assets, sollertia-forgery | `sle mcp`  | Mesoscope-VR system-specific skills (layered on the core plugins)           |
+| `mesoscope`  | sollertia-experiment, sollertia-shared-assets, sollertia-forgery | (none)     | Mesoscope-VR system-specific skills (layered on the core plugins)           |
 | `forging`    | sollertia-forgery                                                | `slf mcp`  | Downstream behavior processing and analysis                                 |
 
 The **unity** plugin uses the Unity relay served by the assets plugin's `slsa` MCP server and the McpBridge editor
