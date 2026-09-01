@@ -30,10 +30,12 @@ _ZERO_UINT32: np.uint32 = np.uint32(0)
 """A pre-created uint32 zero, reused across the module to avoid unnecessary object recreation."""
 _FALSE: np.bool_ = np.bool_(0)
 """A pre-created boolean False, reused across the module to avoid unnecessary object recreation."""
+_TRUE: np.bool_ = np.bool_(1)
+"""A pre-created boolean True, reused across the module to avoid unnecessary object recreation."""
 
 _MAXIMUM_VALVE_PULSE_DURATION_MS: int = 400
-"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves, kept below the 500 ms firmware
-keepalive interval."""
+"""The maximum PC-side pulse duration, in milliseconds, for water and gas valves and for the reward tone, kept below
+the 500 ms firmware keepalive interval."""
 _MAXIMUM_VALVE_PULSE_DURATION_US: int = _MAXIMUM_VALVE_PULSE_DURATION_MS * 1000
 """The maximum valve pulse duration, in microseconds."""
 
@@ -690,7 +692,11 @@ class BrakeInterface(ModuleInterface):
             duration_us = np.uint32(duration_ms * 1000)
             self.send_parameters(parameter_data=(_MAXIMUM_BRAKING_STRENGTH, duration_us))
 
-        self.send_command(command=self._pulse, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The firmware advances the pulse one stage per runtime cycle, so a blocking send would stall the controller
+        # for the whole hold and lapse its keepalive.
+        self.send_command(command=self._pulse, noblock=_TRUE, repetition_delay=_ZERO_UINT32)
+        # The pulse command returns the brake to the disengaged state, so the commanded state tracks that transition.
+        self._enabled = False
 
     @property
     def maximum_brake_strength(self) -> np.float64:
@@ -886,6 +892,8 @@ class WaterValveInterface(ModuleInterface):
 
         # Matches the transmitted tone duration to the duration the firmware actually sounds, so the logged parameter
         # records the delivered tone rather than the requested one.
+        tone_duration_us = self._clamp_tone_duration(tone_duration_us=tone_duration_us)
+
         tone_extended: bool = bool(0 < tone_duration_us < pulse_duration)
         if tone_extended:
             tone_duration_us = pulse_duration
@@ -937,6 +945,8 @@ class WaterValveInterface(ModuleInterface):
         tone_duration_us: np.uint32 = np.uint32(
             round(convert_time(time=tone_duration, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.MICROSECOND))
         )
+
+        tone_duration_us = self._clamp_tone_duration(tone_duration_us=tone_duration_us)
 
         # Transmitting a triple the firmware already holds costs a serial message that changes nothing, so the
         # transmission is skipped while the values match.
@@ -1051,6 +1061,26 @@ class WaterValveInterface(ModuleInterface):
         """
         return bool(self._valve_tracker[1] == 0)
 
+    def _clamp_tone_duration(self, tone_duration_us: np.uint32) -> np.uint32:
+        """Caps the requested reward tone duration at the maximum duration the firmware keepalive tolerates.
+
+        Args:
+            tone_duration_us: The requested tone duration, in microseconds.
+
+        Returns:
+            The tone duration, in microseconds, to transmit to the managed module.
+        """
+        if tone_duration_us <= _MAXIMUM_VALVE_PULSE_DURATION_US:
+            return tone_duration_us
+
+        message = (
+            f"The requested reward tone duration of {int(tone_duration_us) / 1000:.1f} ms for ValveModule "
+            f"{int(self._module_id)} exceeds the maximum allowed duration of {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms. "
+            f"Capping to {_MAXIMUM_VALVE_PULSE_DURATION_MS} ms."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+        return np.uint32(_MAXIMUM_VALVE_PULSE_DURATION_US)
+
     def _transmit_parameters(self, pulse_duration: np.uint32, tone_duration_us: np.uint32) -> None:
         """Sends the valve's parameter structure to the microcontroller and records the transmitted values.
 
@@ -1123,7 +1153,9 @@ class ScreenInterface(ModuleInterface):
         if state is self._enabled:
             return
 
-        self.send_command(command=self._toggle, noblock=_FALSE, repetition_delay=_ZERO_UINT32)
+        # The firmware advances the toggle one stage per runtime cycle, so a blocking send would stall the controller
+        # for the whole pulse and lapse its keepalive.
+        self.send_command(command=self._toggle, noblock=_TRUE, repetition_delay=_ZERO_UINT32)
         self._enabled = state
 
     @property
