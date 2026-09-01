@@ -57,7 +57,7 @@ class _MesoscopeMQTTTopics(StrEnum):
     ALIVE = "MesoscopeAlive"
     """Liveness probe published by the VRPC (empty payload). The ScanImagePC replies on the Status topic with a
     reception acknowledgement. The VRPC treats the absence of a reply within the acknowledgement timeout as the
-    runAcquisition command loop not running. Mirrors the request-reply presence check used for the Unity bridge."""
+    runAcquisition command loop not running."""
     PRELOAD = "MesoscopePreload"
     """Request to preload a persisted reference estimator as an alignment aid, carrying the 'project' and 'animal'
     identifiers the ScanImagePC uses to resolve the estimator path under its local Mesoscope data root. Automatic motion
@@ -188,9 +188,8 @@ class MesoscopeDriver:
         """Issues a single bounded liveness probe and reports whether the ScanImagePC command loop replied.
 
         Notes:
-            Unlike await_alive, which blocks and re-prompts the operator until the ScanImagePC replies, this issues
-            one probe and returns, making it suitable for a non-interactive pre-flight health check. The driver must
-            be connected before this method is called.
+            Issues exactly one probe and returns within the timeout rather than blocking on the operator, which suits
+            a non-interactive pre-flight health check. The driver must be connected before this method is called.
 
         Args:
             timeout_ms: The maximum time, in milliseconds, to wait for the liveness acknowledgement.
@@ -215,8 +214,8 @@ class MesoscopeDriver:
             the animal (for example, on the first imaging day), the ScanImagePC proceeds without an alignment aid.
 
         Args:
-            project: The name of the project the animal belongs to, used by the ScanImagePC to resolve the persisted
-                estimator path.
+            project: The name of the project to which the animal belongs, used by the ScanImagePC to resolve the
+                persisted estimator path.
             animal: The unique identifier of the animal, used by the ScanImagePC to resolve the persisted estimator
                 path.
         """
@@ -312,10 +311,13 @@ class MesoscopeDriver:
                     mesoscope_tilt=float(state["tilt"]),
                     laser_power_mw=float(state["power_mW"]),
                 )
+            timeout_seconds = convert_time(
+                time=_ACK_TIMEOUT_MS, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND, as_float=True
+            )
             message = (
                 f"The mesoscope control driver requested a state snapshot from the ScanImagePC but received no reply "
-                f"within {_ACK_TIMEOUT_MS // 1000} seconds. Ensure the runAcquisition function is running and idle on "
-                f"the ScanImagePC."
+                f"within {timeout_seconds:.0f} seconds. Ensure the runAcquisition function is running and idle on the "
+                f"ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter to retry")
@@ -379,10 +381,13 @@ class MesoscopeDriver:
             self._mqtt.send_data(topic=command, payload=payload)
             if self._await_status(command=command, state=_MesoscopeStatusState.RECEIVED, timeout_ms=_ACK_TIMEOUT_MS):
                 break
+            timeout_seconds = convert_time(
+                time=_ACK_TIMEOUT_MS, from_units=TimeUnits.MILLISECOND, to_units=TimeUnits.SECOND, as_float=True
+            )
             message = (
                 f"The mesoscope control driver sent the '{command}' command to the ScanImagePC but received no "
-                f"acknowledgement within {_ACK_TIMEOUT_MS // 1000} seconds. Ensure the runAcquisition function is "
-                f"running on the ScanImagePC."
+                f"acknowledgement within {timeout_seconds:.0f} seconds. Ensure the runAcquisition function is running "
+                f"on the ScanImagePC."
             )
             console.echo(message=message, level=LogLevel.ERROR)
             wait_for_enter(message="Press Enter to retry")
@@ -496,9 +501,8 @@ def check_mesoscope_bridge() -> tuple[bool, str]:
 
     Notes:
         Loads the active Mesoscope-VR system configuration to resolve the shared broker address, connects to the
-        broker, issues a single bounded liveness probe, and disconnects. This is the pre-flight counterpart to the
-        Unity bridge reachability check, and an unreachable interface means the operator has not launched the
-        runAcquisition function on the ScanImagePC.
+        broker, issues a single bounded liveness probe, and disconnects. An unreachable interface means the operator
+        has not launched the runAcquisition function on the ScanImagePC.
 
     Returns:
         A two-element tuple whose first element is True when the ScanImagePC acknowledged the probe within the

@@ -41,7 +41,7 @@ class ZaberMotors:
     """Interfaces with Zaber controllers and motors used in the Mesoscope-VR data acquisition system.
 
     Notes:
-        This class interfaces with the three Zaber motors groups used in the system: HeadBar, Wheel, and LickPort.
+        Interfaces with the three Zaber motor groups used in the system: HeadBar, Wheel, and LickPort.
 
         All communication with the managed Zaber devices is performed using asynchronous threads running in the main
         runtime process.
@@ -75,7 +75,6 @@ class ZaberMotors:
     """
 
     def __init__(self, zaber_configuration: MesoscopeVRAssets, zaber_positions: ZaberPositions | None) -> None:
-        # Initializes the ZaberConnection instances for all Zaber controller groups.
         self._headbar: ZaberConnection = ZaberConnection(port=zaber_configuration.headbar_port)
         self._wheel: ZaberConnection = ZaberConnection(port=zaber_configuration.wheel_port)
         self._lickport: ZaberConnection = ZaberConnection(port=zaber_configuration.lickport_port)
@@ -96,7 +95,7 @@ class ZaberMotors:
         self._wheel.connect()
         self._wheel_x: ZaberAxis = self._wheel.get_device(index=0).axis
 
-        # If there is no previous zaber position data to use, displays a warning message to the user.
+        # If there is no previous Zaber position data to use, displays a warning message to the user.
         self._previous_positions: ZaberPositions | None = zaber_positions
         if self._previous_positions is None:
             message = (
@@ -169,12 +168,11 @@ class ZaberMotors:
         """Homes the managed Zaber motors in parallel.
 
         Notes:
-            This method ensures that all motors have a stable reference point for executing all other methods exposed
-            by this instance and must be called before any other method in most use contexts.
+            Ensures that all motors have a stable reference point for executing all other methods exposed by this
+            instance and must be called before any other method in most use contexts.
         """
         self.unpark_motors()
 
-        # Homes all motors in parallel.
         self._headbar_z.home()
         self._headbar_pitch.home()
         self._headbar_roll.home()
@@ -191,8 +189,8 @@ class ZaberMotors:
         """Moves the managed Zaber motors to their parking positions in parallel.
 
         Notes:
-            This method should be called as part of the runtime's shutdown sequence to optimally position the motors to
-            support homing during the next runtime.
+            Should be called as part of the runtime's shutdown sequence to optimally position the motors to support
+            homing during the next runtime.
         """
         self.unpark_motors()
 
@@ -268,7 +266,6 @@ class ZaberMotors:
         """
         self.unpark_motors()
 
-        # Moves the LickPort back to the mount position, while keeping all other motors in their current positions.
         self._lickport_y.move(position=self._lickport_y.mount_position)
         self._lickport_z.move(position=self._lickport_z.mount_position)
         self._lickport_x.move(position=self._lickport_x.mount_position)
@@ -303,8 +300,8 @@ class ZaberMotors:
 
     def wait_until_idle(self) -> None:
         """Blocks in-place while at least one motor in the managed motor groups is moving."""
-        # Waits for the motors to finish moving. Note, motor state polling includes the built-in delay mechanism to
-        # prevent overwhelming the communication interface.
+        # Note, motor state polling includes the built-in delay mechanism to prevent overwhelming the communication
+        # interface.
         while (
             self._headbar_z.is_busy
             or self._headbar_pitch.is_busy
@@ -349,7 +346,7 @@ class MicroControllerInterfaces:
     """Interfaces with the Ataraxis Micro Controller (AMC) devices used in the Mesoscope-VR data acquisition system.
 
     Notes:
-        This class interfaces with the three AMC controllers used in the system: Actor, Sensor, and Encoder.
+        Interfaces with the three AMC controllers used in the system: Actor, Sensor, and Encoder.
 
         Calling the class initializer does not start the microcontroller communication processes.
         Use the start() method before calling other instance methods.
@@ -363,7 +360,7 @@ class MicroControllerInterfaces:
             parameters for the managed microcontrollers.
 
     Attributes:
-        _started: Tracks whether the microcontroller communication processes are currently running.
+        _started: Determines whether the microcontroller communication processes are currently running.
         _configuration: Stores the managed microcontrollers' configuration parameters.
         brake: The interface that controls the electromagnetic particle brake attached to the running wheel.
         valve: The interface that controls the solenoid water valve.
@@ -380,14 +377,9 @@ class MicroControllerInterfaces:
     """
 
     def __init__(self, data_logger: DataLogger, microcontroller_configuration: MesoscopeMicroControllers) -> None:
-        # Tracks whether the communication processes have been started.
         self._started: bool = False
-
-        # Caches the microcontroller configuration parameters to the instance attribute.
         self._configuration: MesoscopeMicroControllers = microcontroller_configuration
 
-        # Converts the sensor polling frequency from milliseconds to microseconds. This value is used below to
-        # initialize most sensor interfaces.
         _sensor_polling_delay: int = round(
             convert_time(
                 time=self._configuration.sensor_polling_delay_ms,
@@ -399,7 +391,6 @@ class MicroControllerInterfaces:
         # ACTOR. Actor AMC controls the hardware that needs to be triggered by PC at irregular intervals. Most of such
         # hardware is designed to produce some form of an output: deliver water reward, engage wheel brake, etc.
 
-        # Module interfaces:
         self.brake: BrakeInterface = BrakeInterface(
             minimum_brake_strength=self._configuration.minimum_brake_strength_g_cm,
             maximum_brake_strength=self._configuration.maximum_brake_strength_g_cm,
@@ -410,7 +401,6 @@ class MicroControllerInterfaces:
         self.gas_puff_valve: GasPuffValveInterface = GasPuffValveInterface()
         self.screens: ScreenInterface = ScreenInterface()
 
-        # Main interface:
         self._actor: MicroControllerInterface = MicroControllerInterface(
             controller_id=np.uint8(101),
             buffer_size=8192,
@@ -425,7 +415,6 @@ class MicroControllerInterfaces:
         # torque sensors, and input TTL recorders. Critically, all managed hardware does not rely on hardware interrupt
         # logic to maintain the necessary precision.
 
-        # Module interfaces:
         self.mesoscope_frame: MesoscopeFrameTTLInterface = MesoscopeFrameTTLInterface(
             polling_frequency=_sensor_polling_delay,
         )
@@ -440,7 +429,6 @@ class MicroControllerInterfaces:
             polling_frequency=_sensor_polling_delay,
         )
 
-        # Main interface:
         self._sensor: MicroControllerInterface = MicroControllerInterface(
             controller_id=np.uint8(152),
             buffer_size=8192,
@@ -455,14 +443,12 @@ class MicroControllerInterfaces:
         # wheel. The encoder uses hardware interrupt logic to maintain high precision and is isolated to a separate
         # microcontroller to ensure the highest possible throughput and sensor resolution.
 
-        # Module interfaces:
         self.wheel_encoder: EncoderInterface = EncoderInterface(
             encoder_ppr=self._configuration.wheel_encoder_ppr,
             wheel_diameter=self._configuration.wheel_diameter_cm,
             polling_frequency=microcontroller_configuration.wheel_encoder_polling_delay_us,
         )
 
-        # Main interface:
         self._encoder: MicroControllerInterface = MicroControllerInterface(
             controller_id=np.uint8(203),
             buffer_size=8192,
@@ -485,7 +471,6 @@ class MicroControllerInterfaces:
         """Starts the communication processes for all managed microcontrollers and configures all interfaced hardware
         modules to use the runtime parameters loaded from the acquisition system's configuration file.
         """
-        # Prevents executing this method if the microcontrollers are already running.
         if self._started:
             return
 
@@ -507,14 +492,12 @@ class MicroControllerInterfaces:
         self.mesoscope_frame.initialize_local_assets()
         self.lick.initialize_local_assets()
 
-        # Wheel Encoder
         self.wheel_encoder.set_parameters(
             report_cw=np.bool_(self._configuration.wheel_encoder_report_cw),
             report_ccw=np.bool_(self._configuration.wheel_encoder_report_ccw),
             delta_threshold=np.uint32(self._configuration.wheel_encoder_delta_threshold_pulse),
         )
 
-        # Screen Interface
         screen_pulse_duration: np.float64 = convert_time(  # type: ignore[assignment]
             time=self._configuration.screen_trigger_pulse_duration_ms,
             from_units=TimeUnits.MILLISECOND,
@@ -522,14 +505,12 @@ class MicroControllerInterfaces:
         )
         self.screens.set_parameters(pulse_duration=np.uint32(round(screen_pulse_duration)))
 
-        # Lick Sensor
         self.lick.set_parameters(
             signal_threshold=np.uint16(self._configuration.lick_signal_threshold_adc),
             delta_threshold=np.uint16(self._configuration.lick_delta_threshold_adc),
             average_pool_size=np.uint8(self._configuration.lick_averaging_pool_size),
         )
 
-        # Torque Sensor
         self.torque.set_parameters(
             report_ccw=np.bool_(self._configuration.torque_report_ccw),
             report_cw=np.bool_(self._configuration.torque_report_cw),
@@ -538,7 +519,6 @@ class MicroControllerInterfaces:
             averaging_pool_size=np.uint8(self._configuration.torque_averaging_pool_size),
         )
 
-        # Mesoscope Frame TTL Recorder
         self.mesoscope_frame.set_parameters(
             averaging_pool_size=np.uint8(self._configuration.mesoscope_frame_averaging_pool_size),
         )
@@ -548,7 +528,6 @@ class MicroControllerInterfaces:
 
     def stop(self) -> None:
         """Stops all microcontroller communication processes and releases all reserved resources."""
-        # Prevents stopping already-stopped microcontroller communication processes.
         if not self._started:
             return
 
@@ -557,7 +536,7 @@ class MicroControllerInterfaces:
 
         # Stops all microcontroller interfaces. This also shuts down and resets all managed hardware modules. Each
         # controller is isolated, so a failing teardown does not strand the communication processes of the controllers
-        # that follow it past the data logger they write to.
+        # that follow it past the data logger to which they write.
         run_shutdown_step(description="stopping the actor microcontroller", step=self._actor.stop)
         run_shutdown_step(description="stopping the sensor microcontroller", step=self._sensor.stop)
         run_shutdown_step(description="stopping the encoder microcontroller", step=self._encoder.stop)
@@ -574,8 +553,7 @@ class VideoSystems:
     """Interfaces with the Ataraxis Video System (AVS) devices used in the Mesoscope-VR data acquisition system.
 
     Notes:
-        This class interfaces with the two high-grade scientific (GeniCam) cameras used in the system: Face and Body
-        cameras.
+        Interfaces with the two high-grade scientific (GeniCam) cameras used in the system: Face and Body cameras.
 
         Calling the class initializer does not start the camera producer and consumer processes. Call other instance
         methods to enable acquiring (grabbing) and saving (caching) the desired camera's frames.
@@ -595,8 +573,8 @@ class VideoSystems:
         output_directory: The path to the directory where to output the generated .MP4 video files.
 
     Attributes:
-        _face_camera_started: Tracks whether the face camera frame acquisition is running.
-        _body_camera_started: Tracks whether the body camera frame acquisition is running.
+        _face_camera_started: Determines whether the face camera frame acquisition is running.
+        _body_camera_started: Determines whether the body camera frame acquisition is running.
         _face_camera: The interface that captures and saves the frames acquired by the camera aimed at the animal's face
             and eye.
         _body_camera: The interface that captures and saves the frames acquired by the camera aimed at the animal's
@@ -609,11 +587,9 @@ class VideoSystems:
         camera_configuration: MesoscopeCameras,
         output_directory: Path,
     ) -> None:
-        # Tracks whether the producer and consumer processes are initialized for the managed cameras.
         self._face_camera_started: bool = False
         self._body_camera_started: bool = False
 
-        # Initializes the face camera system.
         self._face_camera: VideoSystem = VideoSystem(
             system_id=np.uint8(51),
             data_logger=data_logger,
@@ -630,7 +606,6 @@ class VideoSystems:
             quantization_parameter=camera_configuration.face_camera_quantization,
         )
 
-        # Initializes the body camera system.
         self._body_camera: VideoSystem = VideoSystem(
             system_id=np.uint8(62),
             data_logger=data_logger,
@@ -665,7 +640,6 @@ class VideoSystems:
             Does not start saving the acquired frames to disk. Call the save_face_camera_frames() method to start
             saving the acquired frames to disk.
         """
-        # Prevents executing this method if the face camera frame acquisition is already running.
         if self._face_camera_started:
             return
 
@@ -685,7 +659,6 @@ class VideoSystems:
             Does not start saving the acquired frames to disk. Call the save_body_camera_frames() method to start
             saving the acquired frames to disk.
         """
-        # Prevents executing this method if the body camera frame acquisition is already running.
         if self._body_camera_started:
             return
 
@@ -712,7 +685,6 @@ class VideoSystems:
 
     def stop(self) -> None:
         """Stops acquiring and saving frames for all managed cameras."""
-        # Prevents executing this method if no cameras are running.
         if not self._face_camera_started and not self._body_camera_started:
             return
 

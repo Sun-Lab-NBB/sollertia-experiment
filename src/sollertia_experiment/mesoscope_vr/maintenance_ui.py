@@ -299,7 +299,11 @@ class MaintenanceControlUI:
             app.setOrganizationName("Sollertia")
             app.setStyle("Fusion")
 
-            window = _MaintenanceUIWindow(self._data_array, self._valve_tracker, self._gas_puff_tracker)
+            window = _MaintenanceUIWindow(
+                data_array=self._data_array,
+                valve_tracker=self._valve_tracker,
+                gas_puff_tracker=self._gas_puff_tracker,
+            )
             window.show()
 
             app.exec()
@@ -317,6 +321,14 @@ class MaintenanceControlUI:
 
 class _MaintenanceUIWindow(QMainWindow):
     """Generates, renders, and maintains the Mesoscope-VR acquisition system's maintenance GUI application window.
+
+    Args:
+        data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
+            and other runtime processes.
+        valve_tracker: The SharedMemoryArray instance used by the WaterValveInterface to export the valve's state to
+            other processes during runtime.
+        gas_puff_tracker: The SharedMemoryArray instance used by the GasPuffValveInterface to export the gas puff data
+            to other processes during runtime.
 
     Attributes:
         _data_array: The SharedMemoryArray instance used to bidirectionally transfer the data between the UI process
@@ -893,7 +905,6 @@ class _MaintenanceUIWindow(QMainWindow):
     def _check_external_state(self) -> None:
         """Checks for external termination signal and updates valve, calibration, and gas puff status."""
         try:
-            # Checks for termination.
             if bool(self._data_array[_DataArrayIndex.TERMINATION]):
                 self._close_confirmed = True
                 self.close()

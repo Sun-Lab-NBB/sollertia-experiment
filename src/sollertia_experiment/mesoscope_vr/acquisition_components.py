@@ -84,6 +84,10 @@ class _ResponseDelayTimer:
         ataraxis_time extension is finalized, nanobind prints a spurious 'leaked instance' warning to the terminal.
         Since every runtime module shares this single holder by reference, the holder owns the only reference to the
         C++ timer, so releasing it here frees the object before the extension teardown check runs.
+
+    Attributes:
+        _timer: The PrecisionTimer instance used to pace the terminal output rendering, or None once it has been
+            released at interpreter shutdown.
     """
 
     def __init__(self) -> None:
@@ -119,8 +123,8 @@ RESPONSE_DELAY_TIMER: _ResponseDelayTimer = _ResponseDelayTimer()
 
 
 class MesoscopeVRLogMessageCodes(IntEnum):
-    """Defines the set of codes used by the Mesoscope-VR data acquisition to specify the ongoing events when logging
-    the system data acquired during runtime.
+    """Defines the set of codes used by the Mesoscope-VR data acquisition system to specify the ongoing events when
+    logging the system data acquired during runtime.
     """
 
     SYSTEM_STATE = 1
@@ -149,13 +153,11 @@ class TrialState:
     reinforcing (water reward) and aversive (gas puff) trial types.
     """
 
-    # Overall trial tracking.
     completed: int = 0
     """The total number of trials completed by the animal since the last cue sequence reset or runtime onset."""
     distances: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0, dtype=np.float64))
     """Stores the total cumulative distance, in centimeters, the animal will have traveled at the end of each trial."""
 
-    # Reinforcing (water reward) trial tracking.
     reinforcing_guided_trials: int = 0
     """The remaining number of reinforcing trials for which to maintain the lick guidance mode."""
     reinforcing_failed_trials: int = 0
@@ -165,12 +167,11 @@ class TrialState:
     reinforcing_recovery_trials: int = 0
     """The number of guided reinforcing trials to use when recovery mode is triggered."""
     reinforcing_rewarded: bool = False
-    """Tracks whether the current reinforcing trial has been rewarded."""
+    """Determines whether the current reinforcing trial has been rewarded."""
     reinforcing_rewards: tuple[tuple[float, int], ...] = ((0.0, 0),)
     """Stores the reward size (volume in μL) and tone duration (ms) for each trial, with 0 for trials of the other
     type."""
 
-    # Aversive (gas puff) trial tracking.
     aversive_guided_trials: int = 0
     """The remaining number of aversive trials for which to maintain the occupancy guidance mode."""
     aversive_failed_trials: int = 0
@@ -180,11 +181,10 @@ class TrialState:
     aversive_recovery_trials: int = 0
     """The number of guided aversive trials to use when recovery mode is triggered."""
     aversive_succeeded: bool = False
-    """Tracks whether the animal met the occupancy requirement for the current aversive trial."""
+    """Determines whether the animal met the occupancy requirement for the current aversive trial."""
     aversive_puff_durations: tuple[int, ...] = (100,)
     """Stores the gas puff duration (ms) for each trial, with 0 for trials of the other type."""
 
-    # Trial structure configuration.
     trial_structures: dict[str, MesoscopeWaterRewardTrial | MesoscopeGasPuffTrial] = field(default_factory=dict)
     """Maps trial structure names to their configuration objects."""
 
@@ -228,14 +228,14 @@ class TrialState:
         self.completed += 1
 
         if is_aversive:
-            # Aversive trial: success = met occupancy requirement (no puff delivered).
+            # An aversive trial succeeds when the animal meets the occupancy requirement and no puff is delivered.
             if not self.aversive_succeeded:
                 self.aversive_failed_trials += 1
             else:
                 self.aversive_failed_trials = 0
             self.aversive_succeeded = False
             return self.aversive_failed_trials
-        # Reinforcing trial: success = received water reward.
+        # A reinforcing trial succeeds when the animal receives a water reward.
         if not self.reinforcing_rewarded:
             self.reinforcing_failed_trials += 1
         else:
@@ -271,7 +271,6 @@ def generate_mesoscope_position_snapshot(
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
         mesoscope_driver: The MesoscopeDriver instance used to query the Mesoscope state over MQTT.
     """
-    # If the session was not fully initialized (nk.bin marker exists), skips the snapshot generation.
     if session_data.raw_data.nk_path.exists():
         return
 
@@ -312,15 +311,12 @@ def generate_zaber_snapshot(
         zaber_motors: The ZaberMotors instance that manages the Zaber assets used by the session for which the
             snapshot is generated.
     """
-    # If at least one of the managed motor groups is not connected, does not run the snapshot generation sequence.
-    # Also, if the session failed to properly initialize, as marked by the presence of the nk.bin marker.
     if not zaber_motors.is_connected or session_data.raw_data.nk_path.exists():
         return
 
     zaber_positions = zaber_motors.generate_position_snapshot()
 
-    # Saves the newly generated file both to the persistent directory and to the session directory. Note, saving to the
-    # persistent data directory automatically overwrites any existing position file.
+    # Note, saving to the persistent data directory automatically overwrites any existing position file.
     zaber_positions.to_yaml(file_path=mesoscope_data.vrpc_data.zaber_positions_path)
     zaber_positions.to_yaml(file_path=session_data.system_raw_data.zaber_positions_path)
 
@@ -334,7 +330,6 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     Args:
         zaber_motors: The ZaberMotors instance that manages the Zaber motors used during runtime.
     """
-    # Determines whether to carry out the Zaber motor positioning sequence.
     message = (
         "Do you want to carry out the Zaber motor setup sequence for this runtime? Only enter 'no' if the animal is "
         "already positioned inside the Mesoscope enclosure."
@@ -345,11 +340,10 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     # Blocks until the operator confirms or declines the Zaber motor setup sequence. The prompt has no default, so an
     # accidental empty Enter cannot silently skip positioning the motors.
     if not request_required_confirmation(message="Carry out the Zaber motor setup sequence?"):
-        # Aborts method runtime, as no further Zaber setup is required.
         return
 
-    # Since it is now possible to shut down Zaber motors without fixing HeadBarRoll position, requests the user
-    # to verify this manually.
+    # Shutting down the Zaber motors does not fix the HeadBarRoll position, so the user verifies the angle manually
+    # before homing.
     message = (
         "Check that the HeadBarRoll motor has a positive (>0) angle. If the angle is negative (<0), the motor will "
         "collide with the stopper during homing, which will DAMAGE the motor."
@@ -368,10 +362,8 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     wait_for_enter(message="Press Enter to continue")
 
-    # Homes all managed motors in parallel.
     zaber_motors.prepare_motors()
 
-    # Moves all motors to the animal mounting position.
     zaber_motors.mount_position()
 
     message = "Motor Positioning: Complete."
@@ -386,7 +378,6 @@ def setup_zaber_motors(zaber_motors: ZaberMotors) -> None:
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     wait_for_enter(message="Press Enter to continue")
 
-    # Restores all motors to the positions used during the previous session's runtime.
     zaber_motors.restore_position()
 
     message = "Motor Positioning: Complete."
@@ -399,11 +390,9 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     Args:
         zaber_motors: The ZaberMotors instance that manages the Zaber motors used during runtime.
     """
-    # If at least one of the managed motor groups is not connected, does not run the reset sequence.
     if not zaber_motors.is_connected:
         return
 
-    # Determines whether to carry out the Zaber motor shutdown sequence.
     message = (
         "Do you want to carry out Zaber motor shutdown sequence? If ending a successful runtime, enter 'yes'. If "
         "terminating a failed runtime to restart it, enter 'no'. Note! Entering 'yes' retracts the lick-port and "
@@ -434,11 +423,8 @@ def reset_zaber_motors(zaber_motors: ZaberMotors) -> None:
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     wait_for_enter(message="Press Enter to continue")
 
-    # Moves all motors to the hardcoded parking positions.
     zaber_motors.park_position()
 
-    # Disconnects from Zaber motors. This does not change motor positions but does lock (park) all motors
-    # before disconnecting.
     zaber_motors.disconnect()
 
     message = "Zaber motors: Reset."
@@ -463,7 +449,6 @@ def setup_mesoscope(
         mesoscope_data: The MesoscopeData instance that defines the current Mesoscope-VR system's configuration.
         mesoscope_driver: The MesoscopeDriver instance used to command the ScanImage software over MQTT.
     """
-    # Determines whether the acquired session is a Window Checking session.
     window_checking: bool = session_data.session_type == SessionTypes.WINDOW_CHECKING
 
     # Captures whether the operator chooses to replace the animal's persisted reference (MotionEstimator.me and
@@ -472,7 +457,7 @@ def setup_mesoscope(
 
     # Step 0: Clears out the mesoscope_data directory.
     # Ensures that the mesoscope_data directory is reset before running the mesoscope's preparation sequence. To
-    # minimize the risk of important data loss, this procedure now requires the user to remove the files manually.
+    # minimize the risk of important data loss, this procedure requires the user to remove the files manually.
     while True:
         existing_files = list(mesoscope_data.scanimagepc_data.mesoscope_data_path.glob("*"))
 
@@ -534,7 +519,6 @@ def setup_mesoscope(
     RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
     wait_for_enter(message="Press Enter to continue")
 
-    # Ensures that the screenshot is created before proceeding further.
     while True:
         screenshots = list(mesoscope_data.scanimagepc_data.mesoscope_root_path.glob("*.png"))
 
@@ -550,17 +534,14 @@ def setup_mesoscope(
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
         wait_for_enter(message="Press Enter to continue")
 
-    # Transfers the screenshot to the session's raw_data directory (window_screenshot.png).
     screenshot_path = session_data.system_raw_data.window_screenshot_path
 
-    # Moves the screenshot from the ScanImagePC to the VRPC.
     shutil.move(src=screenshots.pop(), dst=screenshot_path)
 
     # Copies the screenshot to the animal's persistent data directory so that it can be reused during the next
     # runtime.
     shutil.copy2(src=screenshot_path, dst=mesoscope_data.vrpc_data.window_screenshot_path)
 
-    # Window checking sessions require special handling.
     if window_checking:
         # Since window checking may reveal that the evaluated animal is not fit for participating in experiments,
         # optionally allows aborting the runtime early for window checking sessions.
@@ -579,8 +560,8 @@ def setup_mesoscope(
     # Step 3: Commands the ScanImagePC to generate the new session estimator and high-definition z-stack and arm the
     # mesoscope for acquisition. The alignment screenshot detected above gates this lengthy preparation step.
 
-    # Verifies the ScanImage imaging parameters before the lengthy reference generation. The runAcquisition function no
-    # longer blocks on this confirmation once launched, so it is surfaced here, immediately before the
+    # Verifies the ScanImage imaging parameters before the lengthy reference generation. The runAcquisition function
+    # does not block on this confirmation once launched, so it is surfaced here, immediately before the
     # reference-generation command is dispatched.
     message = (
         "Ensure the following ScanImage imaging parameters are applied before generating the reference: the laser is "
@@ -637,7 +618,6 @@ def setup_mesoscope(
         mesoscope_data.scanimagepc_data.mesoscope_data_path.joinpath("zstack.tiff"),
     )
 
-    # Waits until the necessary files are generated on the ScanImagePC.
     while True:
         missing_files = [file for file in target_files if not file.exists()]
 
@@ -734,7 +714,6 @@ def finalize_session_descriptor(
     # GUIs.
     descriptor.experimenter_notes = collect_experimenter_notes(session_name=session_data.session_name)
 
-    # Saves the completed descriptor as a .yaml file inside the session's raw_data directory.
     descriptor.to_yaml(file_path=session_data.raw_data.session_descriptor_path)
     console.echo(message="Session descriptor file: Created.", level=LogLevel.SUCCESS)
 
@@ -841,7 +820,7 @@ def _stage_reference_file(source: Path, destination: Path) -> Path:
 
     Args:
         source: The path to the file whose contents are staged.
-        destination: The path the staged file is published to later.
+        destination: The path to which the staged file is later published.
 
     Returns:
         The path to the staged temporary file.
@@ -884,7 +863,7 @@ def _publish_staged_file(staged_path: Path, destination: Path) -> None:
 
     Args:
         staged_path: The path to the staged temporary file.
-        destination: The destination path the staged file is renamed to.
+        destination: The path to which the staged file is renamed.
 
     Raises:
         PermissionError: If the destination stays locked by another process for every attempt.

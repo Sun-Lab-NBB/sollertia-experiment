@@ -37,7 +37,7 @@ MESOSCOPE_VR_SESSIONS: tuple[SessionTypes, ...] = tuple(sorted(SYSTEM_SESSION_TY
 sorted so that the messages listing them keep a stable order across runtimes."""
 
 
-class MesoscopeStorageDestination(StrEnum):
+class _MesoscopeStorageDestination(StrEnum):
     """Defines the canonical long-term storage destinations anticipated by the Mesoscope-VR data acquisition system.
 
     These members seed the default storage_directories configuration and define the order in which destinations are
@@ -52,7 +52,7 @@ class MesoscopeStorageDestination(StrEnum):
     """The remote compute server used as the primary long-term storage and analysis destination."""
 
 
-class MesoscopeAcquisitionOrder(StrEnum):
+class _MesoscopeAcquisitionOrder(StrEnum):
     """Defines the supported plane-acquisition orders for the Mesoscope reference and high-definition z-stacks.
 
     The ScanImagePC runAcquisition script programs one ascending sweep of every reference plane per acquired volume and
@@ -69,13 +69,8 @@ class MesoscopeAcquisitionOrder(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class RunTrainingThresholdLimits:
-    """Defines the absolute bounds applied to the run training running speed and epoch duration thresholds.
-
-    The run training logic clamps the effective speed and duration thresholds to these bounds, and the runtime control
-    GUI uses them to constrain the user-facing target threshold spin boxes. Sharing a single definition keeps the
-    acquisition runtime and the control GUI in agreement on the achievable threshold range.
-    """
+class _RunTrainingThresholdLimits:
+    """Defines the absolute bounds applied to the run training running speed and epoch duration thresholds."""
 
     minimum_speed_cm_s: float = 0.1
     """The lower bound, in centimeters per second, of the running speed threshold."""
@@ -87,12 +82,12 @@ class RunTrainingThresholdLimits:
     """The upper bound, in seconds, of the running epoch duration threshold."""
 
 
-RUN_TRAINING_THRESHOLD_LIMITS: RunTrainingThresholdLimits = RunTrainingThresholdLimits()
+RUN_TRAINING_THRESHOLD_LIMITS: _RunTrainingThresholdLimits = _RunTrainingThresholdLimits()
 """The active run training speed and duration threshold limits shared by the acquisition runtime and the control GUI."""
 
 
 @dataclass(slots=True)
-class MesoscopeFileSystem:
+class _MesoscopeFileSystem:
     """Stores the filesystem configuration of the Mesoscope-VR data acquisition system.
 
     Notes:
@@ -106,8 +101,8 @@ class MesoscopeFileSystem:
     during acquisition by the PC that manages the Mesoscope during runtime."""
     storage_directories: dict[str, Path] = field(
         default_factory=lambda: {
-            MesoscopeStorageDestination.NAS.value: Path(),
-            MesoscopeStorageDestination.SERVER.value: Path(),
+            _MesoscopeStorageDestination.NAS.value: Path(),
+            _MesoscopeStorageDestination.SERVER.value: Path(),
         }
     )
     """Maps the name of each long-term storage destination to the absolute path of the local-filesystem-mounted
@@ -264,7 +259,7 @@ class MesoscopeAcquisition:
     z_exclusion_um: tuple[int, int] = (0, 0)
     """The [minimum, maximum] boundaries, in micrometers, of the non-imaged exclusion zone used for two-plane imaging.
     Equal boundaries disable two-plane imaging. When the boundaries differ, they must fall within z_range_um."""
-    acquisition_order: MesoscopeAcquisitionOrder = MesoscopeAcquisitionOrder.INTERLEAVED
+    acquisition_order: _MesoscopeAcquisitionOrder = _MesoscopeAcquisitionOrder.INTERLEAVED
     """The order in which the target planes are acquired when building the reference and high-definition z-stacks. The
     ScanImagePC acquires the INTERLEAVED order for every value of this field."""
     registration_channel: int = 1
@@ -283,8 +278,8 @@ class MesoscopeAcquisition:
         """Validates that the acquisition parameters are positive and the z-range and exclusion-zone boundaries are
         correctly ordered and bounded.
         """
-        # The positivity guards mirror the validation the runAcquisition MATLAB arguments block enforced before these
-        # parameters moved into this configuration.
+        # The runAcquisition MATLAB arguments block enforces the same positivity constraints, so a value rejected here
+        # would be rejected on the ScanImagePC.
         positive_parameters: tuple[tuple[str, float], ...] = (
             ("z_step_um", self.z_step_um),
             ("registration_channel", self.registration_channel),
@@ -368,14 +363,14 @@ class MesoscopeVideoTracking:
     shuffle: int = 1
     """The shuffle index of the trained DeepLabCut model to run."""
     crop: str = ""
-    """The 'x1,x2,y1,y2' pixel rectangle to analyze instead of the full frame, matching the region the model was
-    trained on. An empty string analyzes the project's configured crop (or the full frame)."""
+    """The 'x1,x2,y1,y2' pixel rectangle to analyze instead of the full frame, matching the region on which the model
+    was trained. An empty string analyzes the project's configured crop (or the full frame)."""
     batch_size: int = 32
     """The number of frames the pose model processes per forward pass, sized for the acquisition rig's GPU."""
     chunks: int = 1
-    """The number of contiguous frame-range pieces the face-camera video is split into for concurrent analysis. Because
-    preprocessing analyzes a single video, raising this above one fills the GPU's decode gaps within that video and
-    shortens inference. A value of one analyzes the video as a single unbroken frame range."""
+    """The number of contiguous frame-range pieces into which the face-camera video is split for concurrent analysis.
+    Because preprocessing analyzes a single video, raising this above one fills the GPU's decode gaps within that video
+    and shortens inference. A value of one analyzes the video as a single unbroken frame range."""
     compile_model: bool = True
     """Determines whether the pose model is compiled with torch.compile for faster inference. Enabled by default because
     the rig's GPU amortizes the one-time warm-up cost over the long face-camera video."""
@@ -387,7 +382,7 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
 
     name: str = "mesoscope"
     """The descriptive name of the data acquisition system."""
-    filesystem: MesoscopeFileSystem = field(default_factory=MesoscopeFileSystem)
+    filesystem: _MesoscopeFileSystem = field(default_factory=_MesoscopeFileSystem)
     """Stores the filesystem configuration."""
     sheets: MesoscopeGoogleSheets = field(default_factory=MesoscopeGoogleSheets)
     """Stores the identifiers for the Google Sheets."""
@@ -435,7 +430,7 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
             for the calibration table, then restored after the write.
 
         Args:
-            path: The path to the .yaml file to save the data to.
+            path: The destination .yaml file path.
         """
         original_value = self.microcontrollers.valve_calibration_data
         try:
@@ -447,7 +442,7 @@ class MesoscopeSystemConfiguration(SystemConfiguration):
 
 
 @dataclass
-class ZaberPositions(YamlConfig):  # pragma: no cover
+class ZaberPositions(YamlConfig):
     """Stores Zaber motor positions reused between data acquisition sessions that use the Mesoscope-VR system."""
 
     headbar_z: int = 0
@@ -467,7 +462,7 @@ class ZaberPositions(YamlConfig):  # pragma: no cover
 
 
 @dataclass
-class MesoscopePositions(YamlConfig):  # pragma: no cover
+class MesoscopePositions(YamlConfig):
     """Stores the positions of real and virtual Mesoscope imaging axes reused between experiment sessions that use the
     Mesoscope-VR system.
     """
@@ -612,10 +607,6 @@ register_system_configuration(system=AcquisitionSystems.MESOSCOPE_VR, configurat
 def create_system_configuration_file() -> None:
     """Creates the .yaml configuration file for the Mesoscope-VR data acquisition system and configures the local
     machine (PC) to use this file for all future acquisition-system-related calls.
-
-    This package only supports the Mesoscope-VR acquisition system, so this thin wrapper always creates the
-    Mesoscope-VR configuration by delegating to the shared cross-system create_system_configuration_file, which owns
-    the file-creation logic.
     """
     _create_system_configuration_file(system=AcquisitionSystems.MESOSCOPE_VR)
 
