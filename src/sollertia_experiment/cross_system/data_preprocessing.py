@@ -11,7 +11,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from ataraxis_video_system import CAMERA_MANIFEST_FILENAME, CameraManifest, resolve_camera_video_path
 from ataraxis_base_utilities import LogLevel, console, ensure_directory_exists
-from sollertia_shared_assets import RAW_DATA_DIRECTORY, SessionData, RawDataFiles
+from sollertia_shared_assets import (
+    RAW_DATA_DIRECTORY,
+    CHECKSUM_EXCLUDED_FILES,
+    SessionData,
+    RawDataFiles,
+)
 from ataraxis_data_structures import (
     LOG_DIRECTORY_SUFFIX,
     delete_directory,
@@ -229,7 +234,15 @@ def push_session_data(session_data: SessionData, destinations: StorageDestinatio
         ensure_directory_exists(target)
 
     # Computes the xxHash3-128 checksum for the source directory before moving it to the target directories.
-    calculate_directory_checksum(directory=source, num_processes=None, save_checksum=True, progress=True)
+    # Excludes the same non-record files sollertia-forgery excludes when it verifies this digest, so a checksum
+    # computed over a session that already carries a checksum tracker stays reproducible downstream.
+    calculate_directory_checksum(
+        directory=source,
+        num_processes=None,
+        save_checksum=True,
+        progress=True,
+        excluded_files=CHECKSUM_EXCLUDED_FILES,
+    )
 
     # Parallelizes the data transfer to fully saturate the communication channels to the destination machines.
     with ProcessPoolExecutor(max_workers=max(1, len(targets))) as executor:
