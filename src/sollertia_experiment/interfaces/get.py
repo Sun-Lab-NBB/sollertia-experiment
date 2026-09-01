@@ -17,15 +17,15 @@ from ataraxis_communication_interface import discover_microcontrollers
 from ..vr_task import UnityBridgeClient
 from ..cross_system import CRCCalculator, discover_zaber_devices
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}  # pragma: no cover
-"""Ensures that displayed Click help messages are formatted according to the lab standard."""
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+"""The Click help-message width applied to every command in this group."""
 
 _MICROCONTROLLER_BAUDRATE: int = 115200
 """The baud rate used to communicate with the data acquisition system's microcontrollers during discovery."""
 
 
-@click.group("get", context_settings=CONTEXT_SETTINGS)
-def get() -> None:  # pragma: no cover
+@click.group("get", context_settings=_CONTEXT_SETTINGS)
+def get() -> None:
     """Evaluates the composition of the data acquisition system managed by the host-machine."""
 
 
@@ -44,7 +44,6 @@ def get_cameras() -> None:
     opencv_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.OPENCV]
     harvesters_cameras = [camera for camera in all_cameras if camera.interface == CameraInterfaces.HARVESTERS]
 
-    # Displays OpenCV camera information.
     if not opencv_cameras:
         console.echo(message="No OpenCV-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
@@ -66,12 +65,11 @@ def get_cameras() -> None:
                 )
             )
 
-    # Displays Harvesters camera information.
     if not harvesters_cameras:
         # An empty Harvesters listing has four causes, so each branch below names the one that applies, instead of
         # sending the operator to inspect camera cabling and power in every case. The runtime is evaluated first,
-        # because check_cti_file() also returns None where the runtime is absent. The check_cti_file() branch covers
-        # two of the four causes, an unconfigured .cti path and a configured path that no longer loads.
+        # because check_cti_file() also returns None where the runtime is absent. The check_cti_file() branch covers two
+        # of the four causes, an unconfigured .cti path and a configured path that no longer loads.
         if not genicam_runtime_available():
             console.echo(
                 message=f"Harvesters camera discovery skipped. {GENICAM_UNAVAILABLE_REASON}", level=LogLevel.WARNING

@@ -24,7 +24,7 @@ from ..mesoscope_vr import (
     create_experiment_configuration_file,
 )
 
-CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
+_CONTEXT_SETTINGS: dict[str, int] = {"max_content_width": 120}
 """Ensures that displayed Click help messages are formatted according to the lab standard."""
 
 
@@ -95,8 +95,8 @@ _pass_shared_parameters = click.make_pass_decorator(_SharedSessionParameters)
 """Injects the 'run' group's _SharedSessionParameters as the first argument of each of its subcommands."""
 
 
-@click.group("mesoscope", context_settings=CONTEXT_SETTINGS)
-def mesoscope() -> None:  # pragma: no cover
+@click.group("mesoscope", context_settings=_CONTEXT_SETTINGS)
+def mesoscope() -> None:
     """Configures, runs, and manages the Mesoscope-VR data acquisition system.
 
     This command group exposes every Mesoscope-VR-specific runtime: generating the system and experiment
@@ -106,7 +106,7 @@ def mesoscope() -> None:  # pragma: no cover
 
 
 @mesoscope.group("configure")
-def configure() -> None:  # pragma: no cover
+def configure() -> None:
     """Generates Mesoscope-VR configuration files.
 
     Exposes two configuration targets: 'system' creates the data acquisition system configuration file that binds the
@@ -116,7 +116,7 @@ def configure() -> None:  # pragma: no cover
 
 
 @configure.command("system")
-def configure_system() -> None:  # pragma: no cover
+def configure_system() -> None:
     """Creates the Mesoscope-VR data acquisition system configuration file under the working directory."""
     create_system_configuration_file()
 
@@ -190,7 +190,7 @@ def configure_experiment(
     puff_duration: int,
     *,
     force: bool,
-) -> None:  # pragma: no cover
+) -> None:
     """Creates a Mesoscope-VR experiment configuration from a task template under the configured data root."""
     create_experiment_configuration_file(
         project=project,
@@ -209,9 +209,9 @@ def maintain() -> None:
     """Runs the data acquisition system maintenance session.
 
     Calling this command exposes a GUI for directly interfacing with a small subset of the managed data acquisition
-    system's components that require frequent maintenance. It does not collect any data during runtime and does
-    not interface with the remote data storage infrastructure accessible to the data acquisition system. It is
-    designed to perform minor (day-to-day) maintenance tasks that do not require disassembling the system's components.
+    system's components that require frequent maintenance. The session operates against the local hardware alone,
+    writing nothing to the session tree or to long-term storage. It is designed to perform minor (day-to-day)
+    maintenance tasks that do not require disassembling the system's components.
     """
     maintenance_logic()
 
@@ -268,7 +268,7 @@ def run(
     project: str | None,
     animal: str | None,
     animal_weight: float | None,
-) -> None:  # pragma: no cover
+) -> None:
     """Runs the specified data acquisition session for the target animal and project combination.
 
     The user, project, animal, and animal weight are parsed on this group and shared by every subcommand, so they must
@@ -568,7 +568,7 @@ def preprocess(session_path: Path) -> None:
         console.error(message=message, error=FileNotFoundError)
 
     session_data = SessionData.load(session_path=resolved_session_path)
-    preprocess_session_data(session_data)
+    preprocess_session_data(session_data=session_data)
 
 
 @mesoscope.command("delete")
@@ -604,10 +604,8 @@ def delete(session_path: Path) -> None:
     if not resolved_session_path.is_relative_to(data_root):
         console.error(message=message, error=FileNotFoundError)
 
-    # Removes all data of the target session from all data acquisition and long-term storage machines accessible to the
-    # host-machine.
     session_data = SessionData.load(session_path=resolved_session_path)
-    purge_session(session_data)
+    purge_session(session_data=session_data)
 
 
 @mesoscope.command("migrate")

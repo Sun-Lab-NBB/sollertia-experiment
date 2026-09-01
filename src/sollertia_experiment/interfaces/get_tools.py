@@ -114,8 +114,8 @@ def set_zaber_device_setting_tool(
         fails. An unspecified policy instead returns a refusal carrying the previewed change and the accepted values,
         and a declining policy returns an abandonment notice.
     """
-    # Resolves the write policy before the device is touched, so an unspecified policy cannot reach the write through
-    # a falsy default. The preview read is the material the calling agent shows the user.
+    # Resolves the write policy before the device is touched, so a falsy default cannot carry an unspecified policy
+    # into the write. The preview read is the material the calling agent shows the user.
     if confirm is None:
         try:
             settings = get_zaber_device_settings(port=port, device_index=device_index)
@@ -142,7 +142,8 @@ def set_zaber_device_setting_tool(
         return f"Zaber setting write abandoned: {setting} on device {device_index} of port {port}"
 
     try:
-        # Converts value to appropriate type based on setting.
+        # The MCP transport delivers every value as a string, while the binding rejects a non-integer position or flag,
+        # so those five settings are coerced before the write and the two label settings are passed as written.
         if setting in {"park_position", "maintenance_position", "mount_position", "unsafe_flag", "shutdown_flag"}:
             typed_value: int | str = int(value)
         else:

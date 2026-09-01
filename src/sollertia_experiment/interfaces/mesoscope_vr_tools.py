@@ -20,6 +20,9 @@ from sollertia_shared_assets import (
 )
 
 from .mcp_instance import mcp, read_yaml, serialize, probe_writable, describe_dataclass, write_yaml_validated
+
+# The eye-tracking token is imported from the module that enforces it during preprocessing, so the validation
+# reported here cannot drift away from the requirement the preprocessing pipeline actually applies.
 from ..mesoscope_vr import (
     EYE_TRACKING_PROJECT_NAME,
     ZaberPositions,
@@ -32,8 +35,6 @@ from ..mesoscope_vr import (
     get_system_configuration_path,
     migrate_animal_between_projects,
 )
-# The eye-tracking token is imported from the module that enforces it during preprocessing, so the validation
-# reported here cannot drift away from the requirement the preprocessing pipeline actually applies.
 
 _SYSTEM_CONFIGURATION_GLOB: str = "*_system_configuration.yaml"
 """Glob pattern that matches the system configuration file of any acquisition system under the working directory's
@@ -357,7 +358,8 @@ def preprocess_session_tool(session_path: str) -> str:
         system_configuration = get_system_configuration()
         data_root = get_data_root()
 
-        # Validates that the session is stored locally.
+        # Ensures that the tool can only target sessions stored on the local host-machine, which keeps it off the
+        # sessions that long-term storage destinations expose to this filesystem.
         if not path.is_relative_to(data_root):
             return (
                 f"Error: Session directory must be inside the data root of the "
@@ -366,7 +368,7 @@ def preprocess_session_tool(session_path: str) -> str:
             )
 
         session_data = SessionData.load(session_path=path)
-        preprocess_session_data(session_data)
+        preprocess_session_data(session_data=session_data)
     except Exception as exception:
         return f"Error: {exception}"
     else:
@@ -410,7 +412,8 @@ def delete_session_tool(session_path: str, confirm_deletion: Literal["yes", "no"
         system_configuration = get_system_configuration()
         data_root = get_data_root()
 
-        # Validates that the session is stored locally.
+        # Ensures that the tool can only target sessions stored on the local host-machine. While this does not make
+        # the deletion safe, it reduces the risk of accidentally removing valid scientific data.
         if not path.is_relative_to(data_root):
             return (
                 f"Error: Session directory must be inside the data root of the "
@@ -419,7 +422,7 @@ def delete_session_tool(session_path: str, confirm_deletion: Literal["yes", "no"
             )
 
         session_data = SessionData.load(session_path=path)
-        purge_session(session_data)
+        purge_session(session_data=session_data)
     except Exception as exception:
         return f"Error: {exception}"
     else:
@@ -451,7 +454,16 @@ def migrate_animal_tool(source_project: str, destination_project: str, animal_id
 
 
 def _resolve_session_root(session_path: str) -> tuple[Path | None, dict[str, Any] | None]:
-    """Resolves an input session path to its root directory (the parent of raw_data)."""
+    """Resolves an input session path to its root directory (the parent of raw_data).
+
+    Args:
+        session_path: The path to the session directory or its raw_data subdirectory.
+
+    Returns:
+        A two-element tuple. On success the first element is the resolved session root and the second is None. On
+        failure the first element is None and the second carries an ``error`` description, which happens when the path
+        does not exist or holds no raw_data directory.
+    """
     path = Path(session_path)
     if not path.exists():
         return None, {"error": f"Session path does not exist: {path}"}
@@ -463,7 +475,15 @@ def _resolve_session_root(session_path: str) -> tuple[Path | None, dict[str, Any
 
 
 def _check_path(path: Path) -> dict[str, Any]:
-    """Returns a diagnostic report for a single filesystem path."""
+    """Returns a diagnostic report for a single filesystem path.
+
+    Args:
+        path: The path to the directory to check.
+
+    Returns:
+        A dictionary carrying the resolved path, its existence flag and, for a path that exists, its mount and
+        writability flags, together with an ``ok`` verdict and an ``error`` description when the check fails.
+    """
     report: dict[str, Any] = {"path": str(path), "exists": path.exists()}
     if not path.exists():
         report["ok"] = False
@@ -548,7 +568,7 @@ def _filesystem_paths_report(configuration: MesoscopeSystemConfiguration) -> dic
         both not configured and not ok.
 
     Args:
-        configuration: The Mesoscope-VR system configuration whose filesystem paths are reported on.
+        configuration: The Mesoscope-VR system configuration whose filesystem paths the report covers.
 
     Returns:
         A dictionary mapping each configuration path name to its diagnostic report.
@@ -670,7 +690,7 @@ def _verify_single_camera(camera_index: int, configuration_path: Path) -> dict[s
     """Verifies a single camera's live GenICam configuration against its stored configuration .yaml file.
 
     Args:
-        camera_index: The index of the Harvester-managed camera to connect to and dump the live configuration from.
+        camera_index: The index of the Harvester-managed camera from which the live configuration is dumped.
         configuration_path: The path to the stored GenICam configuration .yaml file. An unset (empty) path means the
             camera has no associated stored configuration.
 
@@ -687,9 +707,9 @@ def _verify_single_camera(camera_index: int, configuration_path: Path) -> dict[s
     except Exception as exception:
         return {"configured": True, "error": f"Failed to load stored camera configuration: {exception}"}
 
-    try:  # pragma: no cover
+    try:
         live = read_camera_configuration(camera_index=camera_index)
-    except Exception as exception:  # pragma: no cover
+    except Exception as exception:
         return {"configured": True, "error": f"Failed to read live camera configuration: {exception}"}
 
-    return {"configured": True, **_diff_genicam_configurations(stored=stored, live=live)}  # pragma: no cover
+    return {"configured": True, **_diff_genicam_configurations(stored=stored, live=live)}
