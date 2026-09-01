@@ -121,7 +121,7 @@ dev = [
 
 # Specifies files that should not be included in the source-code distribution.
 [tool.hatch.build.targets.sdist]
-exclude = [".github", "recipe"]
+exclude = [".github", ".codegraph", "recipe"]
 
 # Specifies the library structure.
 [tool.hatch.build.targets.wheel]
@@ -218,7 +218,7 @@ extra_checks = true
 pretty = true
 
 exclude = [
-    "sollertia-experiment-\\d+",  # The temporary folder created when building the sdist
+    "sollertia_experiment-\\d+",  # The temporary folder created when building the sdist
     "venv.*/",
     "build/",
     "dist/",
