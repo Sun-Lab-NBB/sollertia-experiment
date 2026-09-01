@@ -3,7 +3,13 @@ host-machine.
 """
 
 import click
-from ataraxis_video_system import CameraInterfaces, discover_camera_ids
+from ataraxis_video_system import (
+    GENICAM_UNAVAILABLE_REASON,
+    CameraInterfaces,
+    check_cti_file,
+    discover_camera_ids,
+    genicam_runtime_available,
+)
 from ataraxis_base_utilities import LogLevel, console
 from ataraxis_transport_layer_pc import print_available_ports
 from ataraxis_communication_interface import discover_microcontrollers
@@ -62,7 +68,24 @@ def get_cameras() -> None:
 
     # Displays Harvesters camera information.
     if not harvesters_cameras:
-        console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
+        # An empty Harvesters listing has three causes, so each branch below names the one that applies, instead of
+        # sending the operator to inspect camera cabling and power in all three cases. The runtime is evaluated first,
+        # because check_cti_file() also returns None where the runtime is absent.
+        if not genicam_runtime_available():
+            console.echo(
+                message=f"Harvesters camera discovery skipped. {GENICAM_UNAVAILABLE_REASON}", level=LogLevel.WARNING
+            )
+        elif check_cti_file() is None:
+            console.echo(
+                message=(
+                    "Harvesters camera discovery skipped. No GenTL Producer interface (.cti) file is configured. Use "
+                    "the 'axvs cti set' CLI command or the 'AXVS_CTI_PATH' environment variable to configure the file "
+                    "before discovering GenICam cameras."
+                ),
+                level=LogLevel.WARNING,
+            )
+        else:
+            console.echo(message="No Harvesters-compatible cameras discovered.", level=LogLevel.WARNING)
     else:
         # The Harvesters interface exposes the camera model and serial number, which makes it easy to map discovered
         # indices to physical hardware.
