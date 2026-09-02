@@ -16,9 +16,11 @@ from ..mesoscope_vr import (
     run_training_logic,
     lick_training_logic,
     window_checking_logic,
+    check_dlc_project_task,
     check_mesoscope_bridge,
     preprocess_session_data,
     get_system_configuration,
+    build_filesystem_paths_report,
     migrate_animal_between_projects,
     create_system_configuration_file,
     create_experiment_configuration_file,
@@ -100,8 +102,8 @@ def mesoscope() -> None:
     """Configures, runs, and manages the Mesoscope-VR data acquisition system.
 
     This command group exposes every Mesoscope-VR-specific runtime: generating the system and experiment
-    configuration files, performing system maintenance, checking the mesoscope control bridge, running data
-    acquisition sessions, and managing the data collected by the system.
+    configuration files, performing system maintenance, checking the system configuration, the filesystem paths, and
+    the mesoscope control bridge, running data acquisition sessions, and managing the data collected by the system.
     """
 
 
@@ -230,6 +232,77 @@ def check_bridge() -> None:
         console.echo(message=message, level=LogLevel.WARNING)
         return
     console.echo(message=status, level=LogLevel.SUCCESS if reachable else LogLevel.WARNING)
+
+
+@mesoscope.command("check-mounts")
+def check_mounts() -> None:
+    """Verifies every filesystem path declared in the Mesoscope-VR system configuration file.
+
+    The check covers the platform data root, the mesoscope acquisition directory, every configured long-term storage
+    destination, the two stored camera configuration files, and the DeepLabCut project that drives face-camera
+    inference. A path belonging to a feature the host leaves switched off passes the check as not configured.
+    """
+    try:
+        system_configuration = get_system_configuration()
+    except Exception as exception:
+        message = f"Unable to check the Mesoscope-VR filesystem paths. {exception}"
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
+
+    paths = build_filesystem_paths_report(configuration=system_configuration)
+    for name, report in paths.items():
+        passed = bool(report.get("ok", False))
+        error = report.get("error", "")
+        # An unset path is stored as the current working directory, so rendering its stored value would name that
+        # directory as a verified path. The platform data root report carries no 'configured' key, since the platform
+        # rather than this system configuration owns that path, so a missing key names an always-configured path.
+        location = report["path"] if report.get("configured", True) else "(not configured)"
+        status = f"{name}: {location or '(not set)'} | {'OK' if passed else 'FAIL'}"
+        console.echo(
+            message=f"{status} | {error}" if error else status,
+            level=LogLevel.INFO if passed else LogLevel.WARNING,
+        )
+
+    passed_count = sum(1 for report in paths.values() if report.get("ok", False))
+    message = f"Passed checks: {passed_count} out of {len(paths)} filesystem path(s)."
+    console.echo(message=message, level=LogLevel.SUCCESS if passed_count == len(paths) else LogLevel.WARNING)
+
+
+@mesoscope.command("validate-config")
+def validate_config() -> None:
+    """Validates the Mesoscope-VR system configuration file and reports every issue it carries.
+
+    Beyond checking each filesystem path the configuration declares, this command verifies that a configured
+    DeepLabCut project is able to produce the eye-tracking predictions accepted by session preprocessing.
+    """
+    try:
+        system_configuration = get_system_configuration()
+    except Exception as exception:
+        message = f"Unable to validate the Mesoscope-VR system configuration. {exception}"
+        console.echo(message=message, level=LogLevel.WARNING)
+        return
+
+    paths = build_filesystem_paths_report(configuration=system_configuration)
+    issues = [
+        f"{name}: {report.get('error', 'not ok')}" for name, report in paths.items() if not report.get("ok", False)
+    ]
+
+    # The face-camera inference contract reaches past the project file resolving, so a project that resolves is
+    # inspected further. An unset or unreadable project is already covered by the path report above.
+    if system_configuration.video_tracking.dlc_project_path != Path() and paths["dlc_project"].get("ok", False):
+        task_issue = check_dlc_project_task(project_path=system_configuration.video_tracking.dlc_project_path)
+        if task_issue is not None:
+            issues.append(f"dlc_project: {task_issue}")
+
+    if not issues:
+        message = f"The {system_configuration.name} system configuration is valid."
+        console.echo(message=message, level=LogLevel.SUCCESS)
+        return
+
+    message = f"The {system_configuration.name} system configuration carries {len(issues)} issue(s):"
+    console.echo(message=message, level=LogLevel.WARNING)
+    for issue in issues:
+        console.echo(message=issue, level=LogLevel.WARNING)
 
 
 @mesoscope.group("run")

@@ -183,24 +183,6 @@ def read_yaml(file_path: Path, validator_cls: type[YamlConfig]) -> dict[str, Any
     return {"file_path": str(file_path), "data": serialize(value=instance)}
 
 
-def probe_writable(path: Path) -> str | None:
-    """Probes write access to a directory by creating and removing a uniquely-named temporary file.
-
-    Args:
-        path: The directory whose write access is probed.
-
-    Returns:
-        None when the directory is writable, or a human-readable reason describing why it is not.
-    """
-    probe = path.joinpath(f".sollertia_experiment_probe_{uuid.uuid4().hex[:8]}")
-    try:
-        probe.touch()
-        probe.unlink()
-    except OSError as exception:
-        return str(exception)
-    return None
-
-
 def _unknown_payload_keys(payload: dict[str, Any], cls: type) -> list[str]:
     """Returns the dotted names of the payload keys that name no field of the target dataclass.
 

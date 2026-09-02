@@ -11,9 +11,11 @@ from ..mesoscope_vr import (
     run_training_logic as run_training_logic,
     lick_training_logic as lick_training_logic,
     window_checking_logic as window_checking_logic,
+    check_dlc_project_task as check_dlc_project_task,
     check_mesoscope_bridge as check_mesoscope_bridge,
     preprocess_session_data as preprocess_session_data,
     get_system_configuration as get_system_configuration,
+    build_filesystem_paths_report as build_filesystem_paths_report,
     migrate_animal_between_projects as migrate_animal_between_projects,
     create_system_configuration_file as create_system_configuration_file,
     create_experiment_configuration_file as create_experiment_configuration_file,
@@ -50,6 +52,8 @@ def configure_experiment(
 ) -> None: ...
 def maintain() -> None: ...
 def check_bridge() -> None: ...
+def check_mounts() -> None: ...
+def validate_config() -> None: ...
 @click.pass_context
 def run(
     context: click.Context, user: str | None, project: str | None, animal: str | None, animal_weight: float | None

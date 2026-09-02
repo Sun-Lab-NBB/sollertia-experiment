@@ -798,6 +798,8 @@ together with their descriptions and default values.
 | `sle mesoscope configure experiment` | Create a Mesoscope-VR experiment configuration from a task template  |
 | `sle mesoscope maintain`             | Run the Mesoscope-VR system maintenance session                      |
 | `sle mesoscope check-bridge`         | Check whether the ScanImagePC runAcquisition loop is reachable       |
+| `sle mesoscope check-mounts`         | Verify every filesystem path the Mesoscope-VR configuration declares |
+| `sle mesoscope validate-config`      | Validate the Mesoscope-VR system configuration and report its issues |
 | `sle mesoscope run`                  | Execute Mesoscope-VR data acquisition and training sessions          |
 | `sle mesoscope preprocess`           | Preprocess a session's data and push it to long-term storage         |
 | `sle mesoscope delete`               | Remove a session's data from all storage destinations                |
@@ -914,9 +916,11 @@ acquisition system:
 projects` and `slsa get experiments -p PROJECT` to list the projects and experiment configurations stored under the
 data root.
 
-***Note,*** the Mesoscope imaging control bridge has its own pre-flight check outside the `sle get` group. Use `sle
-mesoscope check-bridge` to confirm the ScanImagePC's `runAcquisition` control loop is reachable before starting a
-Mesoscope imaging session.
+***Note,*** the Mesoscope-VR pre-flight checks live in the `sle mesoscope` group rather than in the `sle get` group,
+because each one reads the Mesoscope-VR system configuration. Use `sle mesoscope check-mounts` to verify every
+filesystem path the configuration declares, `sle mesoscope validate-config` to report every issue the configuration
+carries, and `sle mesoscope check-bridge` to confirm the ScanImagePC's `runAcquisition` control loop is reachable
+before starting a Mesoscope imaging session.
 
 ***Note,*** for an orchestrated pre-flight verification of configuration, storage mounts, and hardware connectivity, use
 the **experiment** plugin's `system-health-check` and `acquisition-system-setup` skills.
@@ -1182,11 +1186,11 @@ validate Zaber non-volatile settings or probe a filesystem mount have no CLI com
 | `check_mount_accessibility_tool`    | Verifies a filesystem path exists and is writable                |
 | `check_unity_bridge_tool`           | Checks whether the Unity Editor MCP Bridge is reachable          |
 
-The Mesoscope-VR tools cover a different surface from the `sle mesoscope` CLI layer. Four commands pair one to one
-with a tool, `check-bridge`, `preprocess`, `delete`, and `migrate`, and `configure system` shares the configuration
-write path with `write_system_configuration_tool`. The other six commands, `configure experiment`, `maintain`, and
-the four `run` subcommands, have no tool, and the ten configuration inspection and session snapshot tools have no
-CLI command.
+The Mesoscope-VR tools cover a different surface from the `sle mesoscope` CLI layer. Six commands pair one to one
+with a tool, `check-bridge`, `check-mounts`, `validate-config`, `preprocess`, `delete`, and `migrate`, and `configure
+system` shares the configuration write path with `write_system_configuration_tool`. The other six commands, `configure
+experiment`, `maintain`, and the four `run` subcommands, have no tool, and the eight configuration inspection and
+session snapshot tools have no CLI command.
 
 | Tool                                         | Description                                                      |
 |----------------------------------------------|------------------------------------------------------------------|
