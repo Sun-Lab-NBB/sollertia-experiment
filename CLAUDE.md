@@ -262,9 +262,9 @@ registration seam.
 
 1. Identify the appropriate CLI module: `get.py` for general, hardware-agnostic discovery commands (`sle get`), or
    `mesoscope_vr.py` for Mesoscope-VR-specific commands (`sle mesoscope`). The `sle mesoscope` group covers `maintain`,
-   `check-bridge`, `preprocess`, `delete`, `migrate`, the `configure` command group with its `system` and `experiment`
-   subcommands, and the `run` command group with its `window-checking`, `lick-training`, `run-training`, and
-   `experiment` subcommands
+   `check-bridge`, `check-mounts`, `validate-config`, `preprocess`, `delete`, `migrate`, the `configure` command group
+   with its `system` and `experiment` subcommands, and the `run` command group with its `window-checking`,
+   `lick-training`, `run-training`, and `experiment` subcommands
 2. Add Click-decorated command functions following existing patterns
 3. Import logic functions from the relevant acquisition system package
 4. Register commands with the appropriate Click group. The `get` and `mesoscope` groups reach the top-level `sle`

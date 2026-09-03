@@ -8,9 +8,10 @@ from typing import Literal
 from pathlib import Path
 
 from ..vr_task import UnityBridgeClient
-from .mcp_instance import mcp, probe_writable
+from .mcp_instance import mcp
 from ..cross_system import (
     CRCCalculator,
+    probe_writable,
     get_zaber_devices_info,
     set_zaber_device_setting,
     get_zaber_device_settings,
@@ -216,14 +217,17 @@ def validate_zaber_configuration_tool(port: str, device_index: int) -> str:
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        A validation report including checksum verification, position bounds checking, and any errors or warnings,
-        or an error description when the device cannot be reached.
+        A validation report naming the validated port, device index, device label, and axis label, followed by the
+        checksum verification, the position bounds check, and any errors or warnings, or an error description when the
+        device cannot be reached.
     """
     try:
         result = validate_zaber_device_configuration(port=port, device_index=device_index)
         status = "VALID" if result.is_valid else "INVALID"
         parts = [
             (
+                f"Port: {result.port} | Index: {result.device_index} | "
+                f"Device: {result.device_label or '(not set)'} | Axis: {result.axis_label or '(not set)'} | "
                 f"Status: {status} | Checksum: {'OK' if result.checksum_valid else 'FAIL'} | "
                 f"Positions: {'OK' if result.positions_valid else 'FAIL'}"
             )

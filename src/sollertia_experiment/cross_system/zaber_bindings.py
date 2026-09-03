@@ -68,6 +68,14 @@ class _ZaberValidationResult:
     """Contains critical issues that prevent the device from being used with the binding library."""
     warnings: tuple[str, ...]
     """Contains non-critical issues that may affect device operation."""
+    port: str
+    """The serial port that carries the validated device."""
+    device_index: int
+    """The zero-based index of the validated device in the daisy-chain of devices connected to the serial port."""
+    device_label: str
+    """The user-assigned name of the validated device."""
+    axis_label: str
+    """The user-assigned name of the validated device's axis."""
 
 
 @dataclass(slots=True)
@@ -84,9 +92,9 @@ class _ZaberAxisData:
 class _ZaberDeviceData:
     """Stores the identification data about a Zaber device."""
 
-    device_number: int
-    """The 1-based positional number of the device in the daisy-chain of devices connected to the same serial
-    port. This equals the device_index used by the configuration functions plus one."""
+    device_index: int
+    """The zero-based index of the device in the daisy-chain of devices connected to the same serial port. This is the
+    index the configuration functions accept."""
     device_id: int
     """The unique identifier code of the device."""
     label: str
@@ -397,7 +405,8 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> _ZaberV
         device_index: Zero-based index in the daisy-chain (0 = closest to USB port).
 
     Returns:
-        The pass or fail outcome of the check, together with the error and warning messages it produced.
+        The pass or fail outcome of the check, the identity of the validated device, and the error and warning
+        messages the check produced.
 
     Raises:
         ConnectionError: If unable to connect to the specified port.
@@ -461,6 +470,10 @@ def validate_zaber_device_configuration(port: str, device_index: int) -> _ZaberV
         positions_valid=positions_valid,
         errors=tuple(errors),
         warnings=tuple(warnings),
+        port=port,
+        device_index=device_index,
+        device_label=settings.device_label,
+        axis_label=settings.axis_label,
     )
 
 
@@ -1048,7 +1061,7 @@ def _attempt_connection(port: str) -> list[_ZaberDeviceData]:
         # Parses each detected device and its axes into _ZaberDeviceData instances.
         return [
             _ZaberDeviceData(
-                device_number=number + 1,
+                device_index=number,
                 device_id=device.device_id,
                 label=device.label,
                 name=device.name,
@@ -1107,7 +1120,7 @@ def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
             for device in port_info.devices:
                 device_row = [
                     port_info.port_name,
-                    str(device.device_number),
+                    str(device.device_index),
                     str(device.device_id),
                     device.label,
                     device.name,
@@ -1120,7 +1133,7 @@ def _format_device_info(port_info_list: list[_ZaberPortData]) -> str:
 
     return tabulate(
         tabular_data=table_data,
-        headers=["Port", "Device Num", "ID", "Label", "Name", "Axis ID", "Axis Label"],
+        headers=["Port", "Index", "ID", "Label", "Name", "Axis ID", "Axis Label"],
         tablefmt="grid",
         stralign="center",
     )

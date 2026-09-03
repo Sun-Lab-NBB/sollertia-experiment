@@ -7,6 +7,10 @@ from .system import (
     create_experiment_configuration_file as create_experiment_configuration_file,
 )
 from ..cross_system import get_system_configuration_path as get_system_configuration_path
+from .system_health import (
+    check_dlc_project_task as check_dlc_project_task,
+    build_filesystem_paths_report as build_filesystem_paths_report,
+)
 from .data_acquisition import (
     experiment_logic as experiment_logic,
     maintenance_logic as maintenance_logic,
@@ -27,6 +31,8 @@ __all__ = [
     "MesoscopePositions",
     "MesoscopeSystemConfiguration",
     "ZaberPositions",
+    "build_filesystem_paths_report",
+    "check_dlc_project_task",
     "check_mesoscope_bridge",
     "create_experiment_configuration_file",
     "create_system_configuration_file",

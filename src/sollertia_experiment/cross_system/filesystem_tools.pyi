@@ -1,0 +1,3 @@
+from pathlib import Path
+
+def probe_writable(path: Path) -> str | None: ...

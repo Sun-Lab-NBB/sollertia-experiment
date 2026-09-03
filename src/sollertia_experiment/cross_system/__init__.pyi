@@ -13,6 +13,7 @@ from .zaber_bindings import (
     get_zaber_device_settings as get_zaber_device_settings,
     validate_zaber_device_configuration as validate_zaber_device_configuration,
 )
+from .filesystem_tools import probe_writable as probe_writable
 from .terminal_prompts import (
     request_text as request_text,
     wait_for_enter as wait_for_enter,
@@ -82,6 +83,7 @@ __all__ = [
     "get_zaber_device_settings",
     "get_zaber_devices_info",
     "migrate_session_directory",
+    "probe_writable",
     "push_session_data",
     "register_system_configuration",
     "rename_session_videos",

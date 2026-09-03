@@ -36,6 +36,10 @@ class _ZaberValidationResult:
     positions_valid: bool
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
+    port: str
+    device_index: int
+    device_label: str
+    axis_label: str
 
 @dataclass(slots=True)
 class _ZaberAxisData:
@@ -44,7 +48,7 @@ class _ZaberAxisData:
 
 @dataclass(slots=True)
 class _ZaberDeviceData:
-    device_number: int
+    device_index: int
     device_id: int
     label: str
     name: str

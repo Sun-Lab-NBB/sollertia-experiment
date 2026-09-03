@@ -1135,6 +1135,16 @@ def experiment_logic(
     message = f"Initializing the {experiment_name} experiment session..."
     console.echo(message=message, level=LogLevel.INFO)
 
+    # Verifies the caller-supplied override before the session's data hierarchy is created on disk, so an invalid
+    # override aborts the runtime without leaving an unusable session directory behind.
+    if maximum_unconsumed_rewards is not None and maximum_unconsumed_rewards < 0:
+        message = (
+            f"Unable to execute the {experiment_name} experiment session for the animal {animal_id}. The "
+            f"maximum_unconsumed_rewards argument must be zero, which removes the limit, or a positive count, but "
+            f"got {maximum_unconsumed_rewards}."
+        )
+        console.error(message=message, error=ValueError)
+
     # Queries the data acquisition system runtime parameters.
     system_configuration = get_system_configuration()
 
@@ -1156,6 +1166,33 @@ def experiment_logic(
             f"experiment before running experiment sessions."
         )
         console.error(message=message, error=FileNotFoundError)
+
+    # Resolves the path to the project's own copy of the experiment configuration file. Reusing the ProjectData property
+    # keeps this path in lockstep with the source path SessionData.create resolves when it copies the configuration file
+    # into the created session's raw data directory.
+    source_configuration_path = ProjectData(
+        root=get_data_root(), project_name=project_name
+    ).configuration_directory.joinpath(f"{experiment_name}.yaml")
+
+    # Loads the experiment configuration data from the project's own copy of the configuration file. This call and the
+    # verification below both run before the session's data hierarchy is created on disk, so a configuration that fails
+    # verification aborts the runtime without leaving an unusable session directory behind.
+    experiment_config: MesoscopeExperimentConfiguration = MesoscopeExperimentConfiguration.from_yaml(
+        file_path=source_configuration_path
+    )
+
+    # Verifies that all Mesoscope-VR states used during experiments are valid.
+    valid_states = (MesoscopeVRStates.REST, MesoscopeVRStates.RUN)
+    supported_state_codes = ", ".join(f"{state.value} ({state.name.lower()})" for state in valid_states)
+    state: ExperimentState
+    for state in experiment_config.experiment_states.values():
+        if state.system_state_code not in valid_states:
+            message = (
+                f"Invalid Mesoscope-VR system state code {state.system_state_code} encountered when verifying "
+                f"{experiment_name} experiment configuration. Currently, only codes {supported_state_codes} are "
+                f"supported for the Mesoscope-VR system."
+            )
+            console.error(message=message, error=ValueError)
 
     # Verifies that the animal participates exclusively in the specified project.
     _verify_animal_project_membership(
@@ -1179,24 +1216,6 @@ def experiment_logic(
         acquisition_system=AcquisitionSystems.MESOSCOPE_VR,
     )
     mesoscope_data = MesoscopeData(session_data=session_data, system_configuration=system_configuration)
-
-    # Uses initialized SessionData instance to load the experiment configuration data.
-    experiment_config: MesoscopeExperimentConfiguration = MesoscopeExperimentConfiguration.from_yaml(
-        file_path=session_data.raw_data.experiment_configuration_path
-    )
-
-    # Verifies that all Mesoscope-VR states used during experiments are valid.
-    valid_states = (MesoscopeVRStates.REST, MesoscopeVRStates.RUN)
-    supported_state_codes = ", ".join(f"{state.value} ({state.name.lower()})" for state in valid_states)
-    state: ExperimentState
-    for state in experiment_config.experiment_states.values():
-        if state.system_state_code not in valid_states:
-            message = (
-                f"Invalid Mesoscope-VR system state code {state.system_state_code} encountered when verifying "
-                f"{experiment_name} experiment configuration. Currently, only codes {supported_state_codes} are "
-                f"supported for the Mesoscope-VR system."
-            )
-            console.error(message=message, error=ValueError)
 
     # If the experimental animal has previously participated in this type of sessions, loads the previous session's
     # parameters and uses them to override the default configuration parameters in the pregenerated descriptor instance.
@@ -1229,6 +1248,9 @@ def experiment_logic(
     if maximum_unconsumed_rewards is not None:
         descriptor.maximum_unconsumed_rewards = maximum_unconsumed_rewards
 
+    # Backstops the argument check above for a negative value loaded from the previous session's descriptor. That
+    # value is reachable only after the session's data hierarchy is created, because the previous descriptor is
+    # resolved through the created session's MesoscopeData instance.
     if descriptor.maximum_unconsumed_rewards < 0:
         message = (
             f"Unable to execute the session for the animal {animal_id}. The maximum_unconsumed_rewards parameter must "
