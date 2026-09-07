@@ -5,6 +5,7 @@ session's runtime and moving it to the long-term storage destinations.
 from __future__ import annotations
 
 import os
+import sys
 import json
 import shutil
 import signal
@@ -482,7 +483,15 @@ def _launch_face_tracking(
     log_file = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log").open("wb")
     try:
         # Places the child in its own process group, so an aborted preprocessing run signals the whole 'conda run' ->
-        # 'slvt' -> inference worker tree rather than the wrapper process alone.
+        # 'slvt' -> inference worker tree rather than the wrapper process alone. Windows spells the same intent as a
+        # new console process group, which is the only group GenerateConsoleCtrlEvent can address.
+        if sys.platform == "win32":
+            return subprocess.Popen(
+                args=command,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
         return subprocess.Popen(args=command, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
     finally:
         # The child process holds its own duplicated descriptor, so the parent's handle is no longer needed.
@@ -535,8 +544,8 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
 
     Notes:
         The 'conda run' wrapper the inference launches under does not forward signals to the tool it wraps, so the
-        signal goes to the whole process group the child heads. The group is interrupted rather than terminated,
-        because slvt reaps its GPU worker processes from the KeyboardInterrupt handler of its inference pipeline.
+        signal goes to the whole process group the child heads. POSIX interrupts that group rather than terminating
+        it, because slvt reaps its GPU worker processes from the KeyboardInterrupt handler of its inference pipeline.
 
         The wait on the interrupted child is bounded and escalates to a kill of the same group, so an unresponsive
         child never stalls the abort that triggers this cleanup.
@@ -554,16 +563,54 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
     )
     console.echo(message=message, level=LogLevel.WARNING)
 
-    # Suppresses the lookup error for the race where the group exits between the poll above and the signal below.
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(os.getpgid(pid=process.pid), signal.SIGINT)
+    _interrupt_face_tracking_group(process=process)
     try:
         process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
     except subprocess.TimeoutExpired:
         # A group that ignores the interrupt keeps the GPU reserved, so it is killed and the child is reaped outright.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(pid=process.pid), signal.SIGKILL)
+        _kill_face_tracking_group(process=process)
         process.wait()
+
+
+def _interrupt_face_tracking_group(process: subprocess.Popen[bytes]) -> None:
+    """Interrupts the process group headed by the face-camera eye-tracking inference subprocess.
+
+    Notes:
+        The signal is best effort, so the error raised for a group that exits between the caller's poll and this call
+        is suppressed. Windows has no group-wide SIGINT, because GenerateConsoleCtrlEvent drops CTRL_C_EVENT for a
+        specific process group, so the console break event is sent there instead. That event terminates a Python group
+        member outright rather than raising KeyboardInterrupt in it, so the graceful worker teardown happens on POSIX
+        alone.
+
+    Args:
+        process: The inference subprocess returned by _launch_face_tracking.
+    """
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError):
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        return
+
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(os.getpgid(pid=process.pid), signal.SIGINT)
+
+
+def _kill_face_tracking_group(process: subprocess.Popen[bytes]) -> None:
+    """Kills the process group headed by the face-camera eye-tracking inference subprocess.
+
+    Notes:
+        Windows has no group kill, so the tree rooted at the wrapper is torn down through taskkill. Reaching the whole
+        tree matters more than the exit status of the tool, so its output is captured and its return code is ignored.
+
+    Args:
+        process: The inference subprocess returned by _launch_face_tracking.
+    """
+    if sys.platform == "win32":
+        command = ["taskkill", "/F", "/T", "/PID", str(process.pid)]
+        subprocess.run(args=command, check=False, capture_output=True)
+        return
+
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(os.getpgid(pid=process.pid), signal.SIGKILL)
 
 
 def _read_inference_log_tail(log_path: Path) -> str:

@@ -9,10 +9,10 @@ import questionary
 from prompt_toolkit.input.defaults import create_input
 from prompt_toolkit.input.typeahead import clear_typeahead
 
-try:
+if sys.platform == "win32":
+    import msvcrt
+else:
     import termios
-except ImportError:  # The termios module is only available on POSIX platforms.
-    termios = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -134,13 +134,17 @@ def _flush_input_buffer() -> None:
     Clearing both prevents buffered key presses from being consumed by the next prompt.
     """
     # Skips flushing when the standard input is not an interactive terminal, as there is no buffer to clear and the
-    # termios call below would fail.
+    # console calls below would fail.
     if not sys.stdin.isatty():
         return
 
     # Clears the prompt_toolkit type-ahead buffer keyed to the standard input file descriptor.
     clear_typeahead(create_input())
 
-    # Discards keystrokes received by the operating system terminal but not yet read by the application.
-    if termios is not None:
+    # Discards keystrokes received by the operating system terminal but not yet read by the application. The Windows
+    # console offers no bulk flush, so its pending keystrokes are drained one at a time instead.
+    if sys.platform == "win32":
+        while msvcrt.kbhit():
+            msvcrt.getwch()
+    else:
         termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
