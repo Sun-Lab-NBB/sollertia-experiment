@@ -204,15 +204,15 @@ automatically installed from pip / conda as part of library installation. The de
 and configured on the **VRPC** before calling runtime commands via the command line interface (CLI) exposed by this
 library.
 
-- [MQTT broker](https://mosquitto.org/) version **2.0.22**. The broker runs on the VRPC, and the VRPC-side runtime
+- [MQTT broker](https://mosquitto.org/) version **2.1.2**. The broker runs on the VRPC, and the VRPC-side runtime
   reaches it on the **default** loopback IP (127.0.0.1) and Port (1883). Controlling the Mesoscope from a separate
   ScanImagePC additionally requires exposing the broker on the local network, as described in
   [MQTT Broker Access](#mqtt-broker-access).
 - [FFMPEG](https://www.ffmpeg.org/download.html). As a minimum, the version of FFMPEG should support H265 and H264
-  codecs with hardware acceleration (Nvidia GPU). This library was tested with the version **8.0.1**.
+  codecs with hardware acceleration (Nvidia GPU). This library was tested with the version **9.0.1**.
 - [MvImpactAcquire](https://assets-2.balluff.com/mvIMPACT_Acquire/). This library is tested with version **2.9.2**,
   which is freely distributed. Higher GenTL producer versions likely work too, but they require purchasing a license.
-- [Zaber Launcher](https://software.zaber.com/zaber-launcher/download) version **2025.12.30-1**.
+- [Zaber Launcher](https://software.zaber.com/zaber-launcher/download) version **2026.5.15-1**.
 - [Unity Game Engine](https://unity.com/products/unity-engine) version **6000.3.23f1 LTS**.
 
 ***Note,*** face-camera pose inference is an ***optional*** preprocessing step, so the dependency below is required
@@ -460,7 +460,7 @@ running on the ScanImagePC. The MQTT broker runs on the **VRPC** and is shared w
 Because the ScanImagePC connects to this broker over the local network, the broker must be configured to accept
 non-loopback connections.
 
-By default, Mosquitto 2.0 binds only to the loopback interface (127.0.0.1), so a separate ScanImagePC cannot reach it.
+By default, Mosquitto binds only to the loopback interface (127.0.0.1), so a separate ScanImagePC cannot reach it.
 To expose the broker on the local network, add the following to the VRPC's `mosquitto.conf`:
 
 ```conf
