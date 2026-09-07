@@ -30,7 +30,8 @@ ___
 
 ## Features
 
-- Supports the Linux operating system.
+- Supports Windows, Linux, and macOS, with Linux as the intended platform and the only one that receives extensive
+  testing.
 - System-agnostic acquisition and preprocessing runtime, designed to be extended with new acquisition systems.
 - Mesoscope-VR reference acquisition system combining two-photon imaging with a Unity Virtual Reality behavioral task.
 - A single consolidated `sle` command line interface for hardware discovery, configuration, acquisition, and data
@@ -192,10 +193,10 @@ in depth by the **mesoscope** plugin's `mesoscope-vr` skill. Use the **experimen
 `acquisition-system-setup` skills to verify the dependencies below before running sessions.
 
 #### Main Dependency
-- ***Linux*** operating system. The library *may* also work on Windows and (less likely) macOS. It has been explicitly
-  written for and tested on the mainline [6.18 kernel](https://kernelnewbies.org/Linux_6.18) and Ubuntu 24.04 LTS
-  distribution of the GNU Linux operating system using [Wayland](https://wayland.freedesktop.org/) window system
-  architecture.
+- ***Linux*** operating system. The library also runs on Windows and macOS, but it is intended for Linux, which is the
+  only platform on which it is extensively tested. It has been explicitly written for the Ubuntu 26.04 LTS distribution
+  of the GNU Linux operating system, using the [Wayland](https://wayland.freedesktop.org/) window system architecture
+  and the kernel that ships with that release.
 
 #### Software Dependencies
 ***Note,*** This list only includes *external dependencies*, which are installed *in addition* to all dependencies
