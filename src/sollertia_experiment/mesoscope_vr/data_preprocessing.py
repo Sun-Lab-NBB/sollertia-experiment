@@ -23,7 +23,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 from natsort import natsorted
 import tifffile
-from ataraxis_time import TimeUnits, convert_time
+from ataraxis_time import Timeout, TimeUnits, PrecisionTimer, TimerPrecisions, convert_time
 from ataraxis_base_utilities import LogLevel, console, chunk_iterable, resolve_worker_count, ensure_directory_exists
 from sollertia_shared_assets import (
     RAW_DATA_DIRECTORY,
@@ -122,6 +122,15 @@ _FACE_TRACKING_TERMINATION_TIMEOUT: float = 30.0
 """The number of seconds the eye-tracking inference subprocess is given to exit after it is signaled to terminate, past
 which it is killed outright. The grace period accommodates DeepLabCut releasing the GPU and closing its prediction
 files during shutdown."""
+
+_OUTPUT_REMOVAL_TIMEOUT_MS: int = 10_000
+"""The number of milliseconds the removal of an eye-tracking inference run's outputs keeps retrying while a terminated
+inference process still holds one of the files open, past which the surviving files are reported for manual removal.
+Windows refuses to unlink a file another process holds open, and the terminated inference workers release their handles
+only once their own teardown completes."""
+
+_OUTPUT_REMOVAL_POLL_DELAY_MS: int = 100
+"""The number of milliseconds between attempts to remove the outputs of a terminated eye-tracking inference run."""
 
 
 def preprocess_session_data(session_data: SessionData) -> None:
@@ -411,7 +420,7 @@ def _launch_face_tracking(
     session_data: SessionData, configuration: MesoscopeVideoTracking
 ) -> subprocess.Popen[bytes] | None:
     """Starts DeepLabCut face-camera eye-tracking inference as a background subprocess, or does nothing when it is not
-    configured.
+    configured or its predictions already exist.
 
     Notes:
         Inference runs asynchronously so it overlaps the CPU- and disk-bound preprocessing stages while using the rig's
@@ -419,7 +428,12 @@ def _launch_face_tracking(
         that cannot be imported into the acquisition process. Predictions are written beside the face-camera video in
         the raw camera_data directory (the 'slvt infer' default when no output directory is passed), so they are
         checksummed and shipped to long-term storage as part of the raw data. The subprocess output is redirected to a
-        transient log file rather than a pipe, so a long-running child cannot deadlock on a full pipe buffer.
+        transient log file, so a long-running child cannot deadlock on a full pipe buffer.
+
+        An existing predictions file indicates that the processing has been completed, because 'slvt infer' writes the
+        file only after every frame of the video is analyzed. The outputs of a run that fails or is aborted are
+        removed. A host crash inside that write still leaves a partial file the next run reuses, so retrying after such
+        a crash requires removing the prediction files first.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -427,15 +441,31 @@ def _launch_face_tracking(
             project, and inference parameters.
 
     Returns:
-        The running inference subprocess to join later, or None when inference is not configured or the face-camera
-        video is missing.
+        The running inference subprocess, or None when inference is not configured, its predictions already exist, or
+        the face-camera video is missing.
     """
     # Face-camera inference is opt-in: it runs only when the host machine configures both the conda environment and the
     # DeepLabCut project. An unset (empty) value disables it, matching the configuration section idiom.
     if not configuration.conda_environment or configuration.dlc_project_path == Path():
         return None
 
-    face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
+    face_video = _resolve_face_video_path(session_data=session_data)
+
+    # A rerun of the preprocessing, such as a retry after a failed transfer or a project migration, finds the
+    # predictions of the earlier run beside the video. Skipping the inference keeps the rerun off the GPU and ships the
+    # predictions the earlier run verified. The check precedes the video check, so a session that carries predictions
+    # without its video is reported as processed.
+    predictions = _find_face_tracking_predictions(face_video=face_video)
+    if predictions:
+        predictions_listing = ", ".join(prediction.name for prediction in predictions)
+        message = (
+            f"Face-camera eye-tracking predictions for session {session_data.session_name} already exist beside the "
+            f"face-camera video ({predictions_listing}). Skipping inference. Remove the prediction files to rerun it "
+            f"the next time the session is preprocessed."
+        )
+        console.echo(message=message, level=LogLevel.INFO)
+        return None
+
     if not face_video.exists():
         message = (
             f"Unable to start face-camera eye-tracking inference for session {session_data.session_name}: the expected "
@@ -480,7 +510,7 @@ def _launch_face_tracking(
 
     # Redirects the subprocess output to a transient log file. A file rather than a pipe avoids a deadlock when the
     # long-running child fills an unread pipe buffer, and preserves DeepLabCut's output for diagnosing a failure.
-    log_file = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log").open("wb")
+    log_file = _resolve_inference_log_path(session_data=session_data).open("wb")
     try:
         # Places the child in its own process group, so an aborted preprocessing run signals the whole 'conda run' ->
         # 'slvt' -> inference worker tree rather than the wrapper process alone. Windows spells the same intent as a
@@ -502,15 +532,15 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
     """Waits for the face-camera eye-tracking inference to finish and verifies it produced predictions.
 
     Notes:
-        A failed or missing inference aborts the transfer and leaves the local session copy intact for a manual retry,
-        rather than shipping the session without its eye-tracking predictions. A successful run leaves the DeepLabCut
+        A failed or missing inference removes the outputs of the run, aborts the transfer, and leaves the local session
+        copy intact for a manual retry, which then runs the inference afresh. A successful run leaves the DeepLabCut
         '.h5' (and its companion pickle files) beside the face-camera video in raw camera_data, where the checksum and
         transfer then capture them. The transient inference log is removed on success and retained on failure for
         inspection.
 
         The prediction is accepted only when its name carries the EYE_TRACKING_PROJECT_NAME token, on which the
         downstream sollertia-forgery locator matches. A run driven by a DeepLabCut project under a different name
-        therefore fails here, rather than shipping a session whose predictions the downstream pipeline skips.
+        therefore fails here, before the session ships with predictions the downstream pipeline skips.
 
     Args:
         process: The running inference subprocess returned by _launch_face_tracking.
@@ -521,11 +551,14 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
             after the eye-tracking project.
     """
     return_code = process.wait()
-    face_video = session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
-    predictions = list(face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.h5"))
-    log_path = Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log")
+    face_video = _resolve_face_video_path(session_data=session_data)
+    predictions = _find_face_tracking_predictions(face_video=face_video)
+    log_path = _resolve_inference_log_path(session_data=session_data)
 
     if return_code != 0 or not predictions:
+        # A run that died inside the write of its prediction file leaves a partial file under the final name, which the
+        # skip in _launch_face_tracking would otherwise trust on the retry.
+        _remove_face_tracking_outputs(face_video=face_video)
         message = (
             f"Face-camera eye-tracking inference failed for session {session_data.session_name} (exit code "
             f"{return_code}, {len(predictions)} prediction file(s) written). Aborting the transfer to long-term "
@@ -540,12 +573,13 @@ def _join_face_tracking(process: subprocess.Popen[bytes], session_data: SessionD
 
 
 def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: SessionData) -> None:
-    """Stops the face-camera eye-tracking inference subprocess and waits for it to exit.
+    """Stops the face-camera eye-tracking inference subprocess, waits for it to exit, and discards the outputs of a run
+    that did not exit cleanly.
 
     Notes:
         The 'conda run' wrapper the inference launches under does not forward signals to the tool it wraps, so the
-        signal goes to the whole process group the child heads. POSIX interrupts that group rather than terminating
-        it, because slvt reaps its GPU worker processes from the KeyboardInterrupt handler of its inference pipeline.
+        signal goes to the whole process group the child heads. POSIX interrupts that group, because slvt reaps its GPU
+        worker processes from the KeyboardInterrupt handler of its inference pipeline.
 
         The wait on the interrupted child is bounded and escalates to a kill of the same group, so an unresponsive
         child never stalls the abort that triggers this cleanup.
@@ -554,22 +588,29 @@ def _terminate_face_tracking(process: subprocess.Popen[bytes], session_data: Ses
         process: The inference subprocess returned by _launch_face_tracking.
         session_data: The SessionData instance that defines the processed session.
     """
-    if process.poll() is not None:
+    if process.poll() is None:
+        message = (
+            f"Preprocessing of the session {session_data.session_name} aborted while the face-camera eye-tracking "
+            f"inference was still running. Terminating the inference subprocess."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
+
+        _interrupt_face_tracking_group(process=process)
+        try:
+            process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            # A group that ignores the interrupt keeps the GPU reserved, so it is killed and the child is reaped
+            # outright.
+            _kill_face_tracking_group(process=process)
+            process.wait()
+
+    # A child that exited cleanly finished writing its prediction file, so the retry reuses it and the transient log is
+    # released as it is after a verified run. A child that exited any other way may have died inside that write,
+    # leaving a partial file under the final name that the retry's skip would otherwise trust.
+    if process.returncode == 0:
+        _resolve_inference_log_path(session_data=session_data).unlink(missing_ok=True)
         return
-
-    message = (
-        f"Preprocessing of the session {session_data.session_name} aborted while the face-camera eye-tracking "
-        f"inference was still running. Terminating the inference subprocess."
-    )
-    console.echo(message=message, level=LogLevel.WARNING)
-
-    _interrupt_face_tracking_group(process=process)
-    try:
-        process.wait(timeout=_FACE_TRACKING_TERMINATION_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        # A group that ignores the interrupt keeps the GPU reserved, so it is killed and the child is reaped outright.
-        _kill_face_tracking_group(process=process)
-        process.wait()
+    _remove_face_tracking_outputs(face_video=_resolve_face_video_path(session_data=session_data))
 
 
 def _interrupt_face_tracking_group(process: subprocess.Popen[bytes]) -> None:
@@ -611,6 +652,82 @@ def _kill_face_tracking_group(process: subprocess.Popen[bytes]) -> None:
 
     with contextlib.suppress(ProcessLookupError):
         os.killpg(os.getpgid(pid=process.pid), signal.SIGKILL)
+
+
+def _resolve_face_video_path(session_data: SessionData) -> Path:
+    """Resolves the path to the session's renamed face-camera video inside the raw camera_data directory.
+
+    Args:
+        session_data: The SessionData instance that defines the processed session.
+
+    Returns:
+        The path to the face-camera video.
+    """
+    return session_data.raw_data.camera_data_path.joinpath(f"{session_data.session_name}_{_FACE_CAMERA_NAME}.mp4")
+
+
+def _resolve_inference_log_path(session_data: SessionData) -> Path:
+    """Resolves the path to the transient log file that captures the output of the session's eye-tracking inference.
+
+    Args:
+        session_data: The SessionData instance that defines the processed session.
+
+    Returns:
+        The path to the log file inside the operating system's temporary directory.
+    """
+    return Path(tempfile.gettempdir()).joinpath(f"slvt_infer_{session_data.session_name}.log")
+
+
+def _find_face_tracking_predictions(face_video: Path) -> tuple[Path, ...]:
+    """Locates the DeepLabCut prediction files named after the eye-tracking project beside the face-camera video.
+
+    Args:
+        face_video: The path to the face-camera video the predictions accompany.
+
+    Returns:
+        The matching '.h5' prediction files in sorted order, or an empty tuple when the video has none.
+    """
+    return tuple(sorted(face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.h5")))
+
+
+def _remove_face_tracking_outputs(face_video: Path) -> None:
+    """Removes the prediction and companion pickle files an eye-tracking inference run wrote beside the face-camera
+    video, reporting any file that survives the removal.
+
+    Notes:
+        A file that a terminated inference worker still holds open cannot be unlinked on Windows, so the removal is
+        retried for a bounded period. A file that survives the retries is reported as a WARNING that names it, so the
+        removal never displaces the failure it cleans up after with an error of its own.
+
+    Args:
+        face_video: The path to the face-camera video the outputs accompany.
+    """
+    timeout = Timeout(duration=_OUTPUT_REMOVAL_TIMEOUT_MS, precision=TimerPrecisions.MILLISECOND)
+    delay_timer = PrecisionTimer(precision=TimerPrecisions.MILLISECOND)
+    surviving: list[Path] = []
+    while True:
+        surviving.clear()
+        outputs = chain(
+            face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.h5"),
+            face_video.parent.glob(f"{face_video.stem}*{EYE_TRACKING_PROJECT_NAME}*.pickle"),
+        )
+        for output in outputs:
+            try:
+                output.unlink(missing_ok=True)
+            except OSError:
+                surviving.append(output)
+        if not surviving or timeout.expired:
+            break
+        delay_timer.delay(delay=_OUTPUT_REMOVAL_POLL_DELAY_MS, allow_sleep=True, block=False)
+
+    if surviving:
+        surviving_listing = ", ".join(output.name for output in surviving)
+        message = (
+            f"Unable to remove the outputs of the failed face-camera eye-tracking inference from {face_video.parent}: "
+            f"{surviving_listing}. Remove them by hand before preprocessing the session again, as the next run would "
+            f"otherwise reuse a partial prediction file."
+        )
+        console.echo(message=message, level=LogLevel.WARNING)
 
 
 def _read_inference_log_tail(log_path: Path) -> str:

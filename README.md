@@ -226,8 +226,8 @@ Engine by experiment sessions alone.
   because DeepLabCut cannot share this library's Python environment. The step runs only when the
   `video_tracking.conda_environment` and `video_tracking.dlc_project_path` fields of the Mesoscope-VR system
   configuration are both set, and leaving either unset disables it and leaves the rest of preprocessing unaffected. When
-  they are set but the environment or the model is unavailable, preprocessing aborts the transfer to long-term storage
-  and retains the local session copy for a manual retry.
+  they are set but the environment or the model is unavailable, preprocessing a session that still awaits its
+  predictions aborts the transfer to long-term storage and retains the local session copy for a manual retry.
 
 #### Hardware Dependencies
 
@@ -729,8 +729,10 @@ raw data section, on the VRPC:
    written beside `{session_name}_face_camera.mp4` inside *camera_data* by the `slvt infer` subprocess during
    preprocessing. They are only generated for **experiment** sessions, and only when the system configuration's
    `video_tracking` section sets both `conda_environment` and `dlc_project_path`, as an unset value disables the
-   inference. A failed inference or a missing prediction file aborts the transfer to long-term storage and retains the
-   local session copy for a manual retry, with the inference log kept in the system temporary directory as
+   inference. A prediction file already present beside the video is reused and the inference is skipped, so removing
+   the prediction files forces a fresh run the next time the session is preprocessed. A failed inference or a missing
+   prediction file aborts the transfer to long-term storage and retains the local session copy for a manual retry. The
+   outputs of the failed run are removed and the inference log is kept in the system temporary directory as
    `slvt_infer_{session_name}.log`.
 
 ##### ScanImagePC
