@@ -72,6 +72,7 @@ _MESOSCOPE_START_TIMEOUT_MS: int
 _EXPECTED_FRAME_PULSES: int
 _MICROLITERS_PER_MILLILITER: float
 _MILLISECONDS_PER_SECOND: float
+_MINIMUM_FIRST_REWARD_VOLUME_UL: float
 
 class MesoscopeVRSystem:
     _MESOSCOPE_FRAME_DELAY_MS: int
@@ -93,6 +94,7 @@ class MesoscopeVRSystem:
     _distance: np.float64
     _lick_count: np.uint64
     _unconsumed_reward_count: int
+    _first_reward_pending: bool
     _pause_start_time: int
     paused_time: int
     _delivered_water_volume: np.float64
@@ -142,6 +144,7 @@ class MesoscopeVRSystem:
     def setup_aversive_guidance(
         self, initial_guided_trials: int = 0, recovery_mode_threshold: int = 9, recovery_guided_trials: int = 3
     ) -> None: ...
+    def arm_first_reward(self) -> None: ...
     @property
     def terminated(self) -> bool: ...
     @property
