@@ -1302,6 +1302,9 @@ def experiment_logic(
                 system.rest()
             elif state.system_state_code == MesoscopeVRStates.RUN:
                 system.run()
+                # Arms the first reward floor at the phase transition, as run() also restores the run state after every
+                # pause.
+                system.arm_first_reward()
             else:
                 message = (
                     f"Unsupported Mesoscope-VR system state code {state.system_state_code} encountered when executing "

@@ -99,6 +99,11 @@ _MILLISECONDS_PER_SECOND: float = 1000.0
 """The number of milliseconds in a single second, used to scale the distance traveled over the measured
 speed-calculation window into centimeters per second."""
 
+_MINIMUM_FIRST_REWARD_VOLUME_UL: float = 15.0
+"""The minimum volume of water, in microliters, dispensed by the first Unity-requested water reward delivered during
+the active run state of each experiment run phase. Water left idle in the reward delivery line during rest phases takes
+time to dispense, which the larger reward offsets."""
+
 
 class MesoscopeVRSystem:
     """Provides methods for conducting data acquisition sessions using the Mesoscope-VR system.
@@ -141,6 +146,8 @@ class MesoscopeVRSystem:
         _lick_count: The total number of licks performed by the animal since runtime onset.
         _unconsumed_reward_count: The number of rewards delivered to the animal that have not yet been consumed
             by the animal.
+        _first_reward_pending: Determines whether the next Unity-requested water reward dispensed during the active
+            run state is the first reward of the current run phase.
         _pause_start_time: The absolute time, in microseconds elapsed since the runtime onset, of the last
             runtime pause onset.
         paused_time: The total time, in seconds, the session's data acquisition runtime spent in the paused
@@ -272,6 +279,7 @@ class MesoscopeVRSystem:
         self._distance: np.float64 = np.float64(0.0)
         self._lick_count: np.uint64 = np.uint64(0)
         self._unconsumed_reward_count: int = 0
+        self._first_reward_pending: bool = False
         self._pause_start_time: int = 0
         self.paused_time: int = 0
         self._delivered_water_volume: np.float64 = np.float64(0.0)
@@ -944,6 +952,16 @@ class MesoscopeVRSystem:
         # carried over from a previous experiment state.
         self._ui.set_aversive_guidance_state(enabled=initial_guided_trials > 0)
 
+    def arm_first_reward(self) -> None:
+        """Marks the next Unity-requested water reward dispensed during the active run state as the first reward of a
+        run phase, raising its volume to at least the minimum first reward volume.
+
+        Notes:
+            The floor stays armed through simulated rewards, manual GUI rewards, and pauses, and is released by the
+            first Unity-requested reward that dispenses water.
+        """
+        self._first_reward_pending = True
+
     @property
     def terminated(self) -> bool:
         """Returns True if the system has entered the termination state."""
@@ -1572,7 +1590,17 @@ class MesoscopeVRSystem:
                 # animal left the reward zone without earning it.
                 if event.delivered:
                     reward_size, tone_duration = self._trial_state.reinforcing_rewards[trial_position]
-                    self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration)
+
+                    # Unity can resolve rewards during the rest state and while the runtime is paused, so the first
+                    # reward floor applies only inside the active run state. It remains armed until water is dispensed,
+                    # because a simulated reward leaves the idle water in the line.
+                    first_reward = (
+                        self._first_reward_pending and self._system_state == MesoscopeVRStates.RUN and not self._paused
+                    )
+                    if first_reward:
+                        reward_size = max(reward_size, _MINIMUM_FIRST_REWARD_VOLUME_UL)
+                    if self.resolve_reward(reward_size=reward_size, tone_duration=tone_duration) and first_reward:
+                        self._first_reward_pending = False
                 succeeded = event.delivered
                 self._trial_state.reinforcing_rewarded = succeeded
 
