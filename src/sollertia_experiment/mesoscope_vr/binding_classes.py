@@ -110,40 +110,17 @@ class ZaberMotors:
         return f"ZaberMotors(is_connected={self.is_connected})"
 
     def restore_position(self) -> None:
-        """Restores the managed Zaber motors to the positions used during the previous runtime in parallel.
+        """Restores the LickPort group motors to the positions used during the previous runtime in parallel, while
+        maintaining the current position for all other managed Zaber motors.
 
         Notes:
-            If previous positions are not available, the method falls back to moving the HeadBar and Wheel motors to
-            their 'mounting' positions and the LickPort motors to their 'parking' positions, both saved in the
-            non-volatile memory of each motor controller. These positions are designed to work for most animals and
-            provide an initial position for the animal to be mounted into the Mesoscope-VR enclosure.
+            If previous positions are not available, the LickPort motors move to their 'parking' positions saved in the
+            non-volatile memory of each motor controller.
         """
         self.unpark_motors()
 
-        # If previous position data is available, restores all motors to the positions used during previous sessions.
-        # Otherwise, sets HeadBar and Wheel to the mounting position and the LickPort to the parking position. Note: the
-        # LickPort's parking position is closer to the animal than the mounting position, but still too far to be usable
-        # during runtime, requiring manual fine-tuning.
-        self._headbar_z.move(
-            position=self._headbar_z.mount_position
-            if self._previous_positions is None
-            else self._previous_positions.headbar_z,
-        )
-        self._headbar_pitch.move(
-            position=self._headbar_pitch.mount_position
-            if self._previous_positions is None
-            else self._previous_positions.headbar_pitch,
-        )
-        self._headbar_roll.move(
-            position=self._headbar_roll.mount_position
-            if self._previous_positions is None
-            else self._previous_positions.headbar_roll,
-        )
-        self._wheel_x.move(
-            position=self._wheel_x.mount_position
-            if self._previous_positions is None
-            else self._previous_positions.wheel_x,
-        )
+        # The LickPort's parking position is closer to the animal than the mounting position, but still too far to be
+        # usable during runtime, requiring manual fine-tuning.
         self._lickport_z.move(
             position=self._lickport_z.park_position
             if self._previous_positions is None
