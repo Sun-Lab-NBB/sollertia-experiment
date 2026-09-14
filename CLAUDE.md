@@ -160,10 +160,11 @@ share this environment.
 
 This library carries the producer half of every binding. A binding declares the tool's address in identity fields on
 the acquisition system's configuration, and launches only when every one of them is set. It resolves that address at
-call time rather than at import time. It returns silently when the host has not configured the tool, and logs a warning
-and returns when the tool's input is missing, so preprocessing completes in both cases. The consumer half lives in
-`sollertia-forgery`, where a donated locator finds the artifact and decides whether the dependent job is possible for
-that session. `forging:processing-input-format` owns that half.
+call time. It returns silently when the host has not configured the tool, reuses an artifact already present beside the
+input, and logs a warning and returns when the tool's input is missing, so preprocessing completes in all three cases.
+A run that fails or is aborted removes its outputs. The consumer half lives in `sollertia-forgery`, where a donated
+locator finds the artifact and decides whether the dependent job is possible for that session.
+`forging:processing-input-format` owns that half.
 
 One binding exists today. Mesoscope-VR preprocessing invokes `slvt infer` from `sollertia-video-tracking` through
 `conda run`, because DeepLabCut supports only Python 3.10 to 3.12 and the numpy 1.x series, against this stack's
