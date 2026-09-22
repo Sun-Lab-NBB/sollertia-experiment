@@ -46,7 +46,7 @@ dependencies = [
     # Ataraxis Libraries
     "ataraxis-time==7.0.0",
     "ataraxis-base-utilities==7.0.0",
-    "ataraxis-data-structures==7.1.0",
+    "ataraxis-data-structures==7.2.0",
     "ataraxis-transport-layer-pc==5.1.0",
     "ataraxis-communication-interface==7.1.1",
     "ataraxis-video-system==5.1.1",
@@ -88,8 +88,7 @@ dependencies = [
 
     # MCP and HTTP
     "mcp==2.0.0",
-    # Pinned directly, rather than left to the mcp requirement, because the Unity bridge client uses it to
-    # communicate with the Unity Editor.
+    # Pinned directly because the Unity bridge client uses it to communicate with the Unity Editor.
     "httpx2==2.12.0",
 ]
 
