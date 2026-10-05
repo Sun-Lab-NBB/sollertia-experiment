@@ -13,6 +13,7 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import DataLogger
 
 from .system import (
+    SESSION_TYPE_SETTINGS as SESSION_TYPE_SETTINGS,
     MesoscopeData as MesoscopeData,
     ZaberPositions as ZaberPositions,
     MesoscopeVRStates as MesoscopeVRStates,
@@ -82,6 +83,7 @@ class MesoscopeVRSystem:
     _terminated: bool
     _paused: bool
     _mesoscope_started: bool
+    _visualizer_mode: VisualizerMode
     descriptor: MesoscopeExperimentDescriptor | LickTrainingDescriptor | RunTrainingDescriptor
     _experiment_configuration: MesoscopeExperimentConfiguration | None
     _system_configuration: MesoscopeSystemConfiguration
