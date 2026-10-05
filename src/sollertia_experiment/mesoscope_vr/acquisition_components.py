@@ -10,7 +10,7 @@ from enum import IntEnum
 import math
 import atexit
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from decimal import ROUND_FLOOR, Decimal
 from dataclasses import field, fields, dataclass
 
@@ -18,6 +18,7 @@ import numpy as np
 from ataraxis_time import PrecisionTimer, TimerPrecisions
 from ataraxis_base_utilities import LogLevel, console
 from sollertia_shared_assets import (
+    DESCRIPTOR_REGISTRY,
     SessionData,
     SessionTypes,
     MesoscopeGasPuffTrial,
@@ -28,7 +29,7 @@ from sollertia_shared_assets import (
     MesoscopeExperimentDescriptor,
 )
 
-from .system import MesoscopeData, MesoscopePositions
+from .system import SESSION_TYPE_SETTINGS, MesoscopeData, MesoscopePositions
 from .runtime_ui import collect_surgery_quality, collect_experimenter_notes, collect_experimenter_given_water_volume
 from ..cross_system import (
     request_text,
@@ -286,7 +287,7 @@ def generate_mesoscope_position_snapshot(
     mesoscope_positions = mesoscope_driver.query_state()
     mesoscope_positions.red_dot_alignment_z = _prompt_red_dot_alignment(previous_value=previous_red_dot_alignment_z)
 
-    # Rounds every position down to at most three decimal places, discarding the spurious sub-micrometer and
+    # Rounds every position down to at most three decimal places, discarding the spurious sub-nanometer and
     # sub-millidegree precision reported by the ScanImage software before the snapshot is persisted.
     for position_field in fields(mesoscope_positions):
         rounded_value = _floor_to_three_decimals(value=getattr(mesoscope_positions, position_field.name))
@@ -544,7 +545,7 @@ def setup_mesoscope(
 
     if window_checking:
         # Since window checking may reveal that the evaluated animal is not fit for participating in experiments,
-        # optionally allows aborting the runtime early for window checking sessions.
+        # optionally allows skipping the reference generation for window checking sessions.
         message = "Do you want to generate the ROI and MotionEstimator snapshots for this animal?"
         console.echo(message=message, level=LogLevel.INFO)
         RESPONSE_DELAY_TIMER.delay(delay=RESPONSE_DELAY, block=False)
@@ -553,7 +554,7 @@ def setup_mesoscope(
         if not request_confirmation(
             message="Generate the ROI and MotionEstimator snapshots for this animal?", default=False
         ):
-            # Aborts the runtime if the user does not intend to generate the ROI and MotionEstimator data.
+            # Ends the mesoscope preparation without the ROI and MotionEstimator data, and the session still completes.
             console.echo(message="Mesoscope preparation: Complete.", level=LogLevel.SUCCESS)
             return
 
@@ -891,10 +892,10 @@ def _resolve_previous_session_water_context(persistent_data_path: Path) -> _Prev
 
     Notes:
         Both values are read from the newest per-session-type descriptor that a prior session cached in the animal's
-        persistent directory. Window checking descriptors are skipped because they record neither the animal's weight
-        nor its water intake. The descriptor filenames mirror the persistent layout defined by the _VRPCPersistentData
-        class. The total intake matches the preprocessing definition, summing the runtime-dispensed and
-        experimenter-given volumes while excluding water dispensed during the paused state.
+        persistent directory. Only the session types marked in SESSION_TYPE_SETTINGS as recording water intake are
+        read, so window checking descriptors are skipped. The total intake matches the preprocessing definition,
+        summing the runtime-dispensed and experimenter-given volumes while excluding water dispensed during the paused
+        state.
 
     Args:
         persistent_data_path: The path to the animal's persistent directory that stores the cached descriptors.
@@ -903,28 +904,22 @@ def _resolve_previous_session_water_context(persistent_data_path: Path) -> _Prev
         A _PreviousSessionWaterContext carrying the most recent prior session's animal weight and total water intake,
         or None when no prior session recorded them.
     """
-    descriptor_file_names = (
-        "lick_training_descriptor.yaml",
-        "run_training_descriptor.yaml",
-        "mesoscope_experiment_descriptor.yaml",
-    )
-    existing_paths = [
-        candidate_path
-        for file_name in descriptor_file_names
-        if (candidate_path := persistent_data_path / file_name).exists()
-    ]
+    session_types_by_path = {
+        persistent_data_path / settings.descriptor_file_name: session_type
+        for session_type, settings in SESSION_TYPE_SETTINGS.items()
+        if settings.records_water_intake
+    }
+    existing_paths = [candidate_path for candidate_path in session_types_by_path if candidate_path.exists()]
     if not existing_paths:
         return None
 
+    # Every session type that records water intake maps to a descriptor carrying the weight and water fields. The cast
+    # restores the concrete types erased by DESCRIPTOR_REGISTRY.
     newest_path = max(existing_paths, key=lambda path: path.stat().st_mtime)
-    if newest_path.name == descriptor_file_names[0]:
-        descriptor: LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor = (
-            LickTrainingDescriptor.from_yaml(file_path=newest_path)
-        )
-    elif newest_path.name == descriptor_file_names[1]:
-        descriptor = RunTrainingDescriptor.from_yaml(file_path=newest_path)
-    else:
-        descriptor = MesoscopeExperimentDescriptor.from_yaml(file_path=newest_path)
+    descriptor = cast(
+        "LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor",
+        DESCRIPTOR_REGISTRY[session_types_by_path[newest_path]].from_yaml(file_path=newest_path),
+    )
 
     received_water_volume_ml = round(
         descriptor.dispensed_water_volume_ml + descriptor.experimenter_given_water_volume_ml, ndigits=3

@@ -45,7 +45,7 @@ from ataraxis_data_structures import (
     initialize_worker_threads,
 )
 
-from .system import MESOSCOPE_VR_SESSIONS, MesoscopeData, get_system_configuration
+from .system import MESOSCOPE_VR_SESSIONS, SESSION_TYPE_SETTINGS, MesoscopeData, get_system_configuration
 from ..cross_system import (
     WaterLog,
     push_session_data,
@@ -922,8 +922,8 @@ def _process_invariant_metadata(frame_stack_path: Path, cindra_parameters_path: 
         cindra_parameters_path: The path to the cindra_parameters.json file to be created.
         metadata_path: The path to the frame_invariant_metadata.json file to be created.
     """
-    # Reads the frame-invariant metadata from the first page (frame) of the stack. This metadata is the same across
-    # all frames and stacks.
+    # Reads the frame-invariant metadata from the stack's ScanImage file header. This metadata is the same across all
+    # frames and stacks.
     with tifffile.TiffFile(frame_stack_path) as tiff:
         metadata = tiff.scanimage_metadata
         # Loads the data for the first frame in the stack to generate cindra_parameters.json.
@@ -1302,15 +1302,18 @@ def _preprocess_mesoscope_directory(
 
 
 def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: MesoscopeGoogleSheets) -> None:
-    """Updates the water restriction log to include the processed session's data and adds the animal's
-    surgical intervention record to the session's data directory as the surgery_metadata.yaml file.
+    """Updates the water restriction log to include the processed session's data, for session types that record water
+    intake, and adds the animal's surgical intervention record to the session's data directory as the
+    surgery_metadata.yaml file.
 
     Notes:
         Google Sheets processing is optional and gated on the configured sheet identifiers. If neither sheet identifier
         is set, the function skips all Google Sheets processing with a warning and does not require Google service
         account credentials. If at least one sheet identifier is set, the host-machine must provide valid credentials,
         and a missing or invalid credentials file aborts preprocessing. When credentials are available, a sheet whose
-        identifier is unset is skipped individually with a warning.
+        identifier is unset is skipped individually with a warning. Window checking sessions update the surgery quality
+        assessment and leave the water log unchanged, as does every session type whose descriptor records no water
+        intake.
 
     Args:
         session_data: The SessionData instance that defines the processed session.
@@ -1333,8 +1336,8 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
         return
 
     # At least one Google Sheet is configured, so the host-machine is expected to provide valid Google service account
-    # credentials. Resolving the path raises a FileNotFoundError if the credentials are missing or invalid, aborting
-    # preprocessing.
+    # credentials. Resolving the path raises a FileNotFoundError if the credentials file is missing or the working
+    # directory is not configured, aborting preprocessing.
     credentials_path = get_credentials(credentials=CredentialsTypes.GOOGLE)
 
     # Resolves the animal's unique identifier code and loads the session's descriptor file based on the session's type.
@@ -1401,8 +1404,12 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             console.echo(message=message, level=LogLevel.SUCCESS)
             return
 
-        # For non-window-checking sessions, updates the water restriction log, if the water restriction log Google Sheet
-        # is configured. Skips the update with a warning otherwise.
+        # Session types whose descriptors record no weight or water intake leave the water restriction log unchanged.
+        if not SESSION_TYPE_SETTINGS[SessionTypes(session_type)].records_water_intake:
+            return
+
+        # Updates the water restriction log, if the water restriction log Google Sheet is configured. Skips the update
+        # with a warning otherwise.
         if not sheets_data.water_log_sheet_id:
             message = (
                 f"The water restriction log Google Sheet is not configured for the host-machine. Skipping the water "
@@ -1411,8 +1418,8 @@ def _preprocess_google_sheet_data(session_data: SessionData, sheets_data: Mesosc
             console.echo(message=message, level=LogLevel.WARNING)
             return
 
-        # Every remaining Mesoscope-VR session type maps to a descriptor that records the animal's weight and water
-        # intake. The cast restores the concrete types DESCRIPTOR_REGISTRY erases.
+        # The session type records water intake, so its descriptor carries the animal's weight and water fields. The
+        # cast restores the concrete types erased by DESCRIPTOR_REGISTRY.
         water_descriptor = cast(
             "LickTrainingDescriptor | RunTrainingDescriptor | MesoscopeExperimentDescriptor", descriptor
         )

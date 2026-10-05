@@ -23,6 +23,7 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import YamlConfig
 
 from ..vr_task import VRTaskConfiguration
+from .visualizer import VisualizerMode
 from ..cross_system import (
     StorageDestination,
     StorageDestinations,
@@ -84,6 +85,47 @@ class _RunTrainingThresholdLimits:
 
 RUN_TRAINING_THRESHOLD_LIMITS: _RunTrainingThresholdLimits = _RunTrainingThresholdLimits()
 """The active run training speed and duration threshold limits shared by the acquisition runtime and the control GUI."""
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionTypeSettings:
+    """Defines how the Mesoscope-VR acquisition runtime handles one session type."""
+
+    descriptor_file_name: str
+    """The name of the file that caches the session type's most recent descriptor in the animal's persistent
+    directory."""
+    visualizer_mode: VisualizerMode | None
+    """The display mode of the behavior visualizer, or None for a session type that runs without the runtime control
+    UI."""
+    records_water_intake: bool
+    """Determines whether the session type's descriptor records the animal's weight and water intake."""
+
+
+SESSION_TYPE_SETTINGS: dict[SessionTypes, _SessionTypeSettings] = {
+    SessionTypes.LICK_TRAINING: _SessionTypeSettings(
+        descriptor_file_name="lick_training_descriptor.yaml",
+        visualizer_mode=VisualizerMode.LICK_TRAINING,
+        records_water_intake=True,
+    ),
+    SessionTypes.RUN_TRAINING: _SessionTypeSettings(
+        descriptor_file_name="run_training_descriptor.yaml",
+        visualizer_mode=VisualizerMode.RUN_TRAINING,
+        records_water_intake=True,
+    ),
+    SessionTypes.MESOSCOPE_EXPERIMENT: _SessionTypeSettings(
+        descriptor_file_name="mesoscope_experiment_descriptor.yaml",
+        visualizer_mode=VisualizerMode.EXPERIMENT,
+        records_water_intake=True,
+    ),
+    SessionTypes.WINDOW_CHECKING: _SessionTypeSettings(
+        descriptor_file_name="window_checking_descriptor.yaml",
+        visualizer_mode=None,
+        records_water_intake=False,
+    ),
+}
+"""Maps every session type supported by the Mesoscope-VR system to its runtime settings. Importing this module fails
+when the keys differ from MESOSCOPE_VR_SESSIONS, so a session type added to sollertia-shared-assets cannot run until it
+has an entry here."""
 
 
 @dataclass(slots=True)
@@ -278,8 +320,8 @@ class MesoscopeAcquisition:
         """Validates that the acquisition parameters are positive and the z-range and exclusion-zone boundaries are
         correctly ordered and bounded.
         """
-        # The runAcquisition MATLAB arguments block enforces the same positivity constraints, so a value rejected here
-        # would be rejected on the ScanImagePC.
+        # These guards are the only validation the acquisition parameters receive, because the runAcquisition MATLAB
+        # script on the ScanImagePC copies them into its configuration without checking them.
         positive_parameters: tuple[tuple[str, float], ...] = (
             ("z_step_um", self.z_step_um),
             ("registration_channel", self.registration_channel),
@@ -538,22 +580,16 @@ class _VRPCPersistentData:
         self.mesoscope_positions_path = self.persistent_data_path.joinpath("mesoscope_positions.yaml")
         self.window_screenshot_path = self.persistent_data_path.joinpath("window_screenshot.png")
 
-        if self.session_type == SessionTypes.LICK_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("lick_training_descriptor.yaml")
-        elif self.session_type == SessionTypes.RUN_TRAINING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("run_training_descriptor.yaml")
-        elif self.session_type == SessionTypes.MESOSCOPE_EXPERIMENT:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("mesoscope_experiment_descriptor.yaml")
-        elif self.session_type == SessionTypes.WINDOW_CHECKING:
-            self.session_descriptor_path = self.persistent_data_path.joinpath("window_checking_descriptor.yaml")
-
-        else:
+        if self.session_type not in SESSION_TYPE_SETTINGS:
             message = (
                 f"Unable to resolve the filesystem layout for the Mesoscope-VR data acquisition system. The session "
                 f"type must be one of the supported types ({','.join(MESOSCOPE_VR_SESSIONS)}), but got "
                 f"'{self.session_type}'."
             )
             console.error(message=message, error=ValueError)
+
+        descriptor_file_name = SESSION_TYPE_SETTINGS[SessionTypes(self.session_type)].descriptor_file_name
+        self.session_descriptor_path = self.persistent_data_path.joinpath(descriptor_file_name)
 
         ensure_directory_exists(path=self.persistent_data_path)
 
@@ -726,7 +762,7 @@ class MesoscopeData:
         session_data: The SessionData instance that defines the processed data acquisition session.
 
     Attributes:
-        vrpc_data: Defines the layout of the session-specific VRPC's persistent data directory.
+        vrpc_data: Defines the layout of the animal's VRPC persistent data directory, resolved for the session's type.
         scanimagepc_data: Defines the layout of the ScanImagePC's mesoscope data directory.
         destinations: Defines the configured long-term data storage destinations mounted to the VRPC's filesystem. Only
             destinations whose storage root is configured in the system configuration are included.
@@ -795,3 +831,35 @@ class MesoscopeData:
             f"MesoscopeData(destinations={self.destinations}, "
             f"unconfigured_destinations={self.unconfigured_destinations})"
         )
+
+
+def _verify_session_type_settings() -> None:
+    """Verifies that SESSION_TYPE_SETTINGS holds exactly one entry for each session type in MESOSCOPE_VR_SESSIONS.
+
+    Raises:
+        RuntimeError: If a supported session type has no entry, or an entry names an unsupported session type.
+    """
+    supported_types = set(MESOSCOPE_VR_SESSIONS)
+
+    missing_types = sorted(supported_types - SESSION_TYPE_SETTINGS.keys())
+    if missing_types:
+        message = (
+            f"Unable to validate the Mesoscope-VR session type settings. SESSION_TYPE_SETTINGS in "
+            f"'mesoscope_vr/system.py' must hold an entry for every session type claimed by the Mesoscope-VR system, "
+            f"but got no entry for {', '.join(missing_types)}. See the mesoscope:mesoscope-vr-runtime skill for the "
+            f"edits required by a new session type."
+        )
+        console.error(message=message, error=RuntimeError)
+
+    unsupported_types = sorted(SESSION_TYPE_SETTINGS.keys() - supported_types)
+    if unsupported_types:
+        message = (
+            f"Unable to validate the Mesoscope-VR session type settings. Every SESSION_TYPE_SETTINGS entry must name a "
+            f"session type claimed by the Mesoscope-VR system, but got entries for {', '.join(unsupported_types)}."
+        )
+        console.error(message=message, error=RuntimeError)
+
+
+# Fails the import when SESSION_TYPE_SETTINGS disagrees with the session types claimed by the Mesoscope-VR system in
+# sollertia-shared-assets, so an unwired session type stops the sle CLI and MCP server at startup.
+_verify_session_type_settings()

@@ -32,7 +32,14 @@ from sollertia_shared_assets import (
 )
 from ataraxis_data_structures import DataLogger, LogPackage
 
-from .system import MesoscopeData, ZaberPositions, MesoscopeVRStates, MesoscopePositions, get_system_configuration
+from .system import (
+    SESSION_TYPE_SETTINGS,
+    MesoscopeData,
+    ZaberPositions,
+    MesoscopeVRStates,
+    MesoscopePositions,
+    get_system_configuration,
+)
 from ..vr_task import (
     VRTaskDriver,
     StimulusCause,
@@ -117,7 +124,7 @@ class MesoscopeVRSystem:
 
     Args:
         session_data: The SessionData instance that defines the session for which to acquire the data.
-        session_descriptor: The partially configured SessionDescriptor instance that stores the task metadata of the
+        session_descriptor: The partially configured session descriptor instance that stores the task metadata of the
             session for which to acquire the data.
         experiment_configuration: The MesoscopeExperimentConfiguration instance that specifies the experiment
             configuration to use during the session's data acquisition or None, if the session is not a mesoscope
@@ -128,7 +135,7 @@ class MesoscopeVRSystem:
         _terminated: Determines whether the session's data acquisition has terminated.
         _paused: Determines whether the session's data acquisition has been temporarily paused.
         _mesoscope_started: Determines whether the system has started acquiring Mesoscope frames.
-        descriptor: The SessionDescriptor instance for the session whose data is acquired by the system during
+        descriptor: The session descriptor instance for the session whose data is acquired by the system during
             runtime.
         _experiment_configuration: The MesoscopeExperimentConfiguration instance for the session whose data is acquired
             by the system during runtime or None, if the session is not of the 'mesoscope experiment' type.
@@ -138,6 +145,8 @@ class MesoscopeVRSystem:
             runtime.
         _is_mesoscope_experiment: Determines whether the acquired session images the brain with the mesoscope and
             drives the Unity Virtual Reality task.
+        _visualizer_mode: The display mode of the runtime control UI and the behavior visualizer for the session's
+            type.
         _mesoscope_data: The MesoscopeData instance that defines the filesystem layout of the data acquisition system.
         _system_state: The code that communicates the current Mesoscope-VR system's state.
         _runtime_state: The code that communicates the current data acquisition session's task state (stage).
@@ -194,6 +203,7 @@ class MesoscopeVRSystem:
 
     Raises:
         RuntimeError: If the host-machine does not have enough logical CPU cores to support the runtime.
+        ValueError: If the session's type has no behavior visualizer mode.
     """
 
     _MESOSCOPE_FRAME_DELAY_MS: int = 300
@@ -227,6 +237,18 @@ class MesoscopeVRSystem:
                 f"{cpu_count} cores are available."
             )
             console.error(message=message, error=RuntimeError)
+
+        # Resolves the behavior visualizer mode before creating any runtime asset, because a session type without a
+        # mode cannot start the runtime control UI.
+        visualizer_mode = SESSION_TYPE_SETTINGS[SessionTypes(session_data.session_type)].visualizer_mode
+        if visualizer_mode is None:
+            message = (
+                f"Unable to initialize the Mesoscope-VR system runtime control class for the "
+                f"{session_data.session_type} session. The session type must have a behavior visualizer mode in "
+                f"SESSION_TYPE_SETTINGS, but got None."
+            )
+            console.error(message=message, error=ValueError)
+        self._visualizer_mode: VisualizerMode = visualizer_mode
 
         self.descriptor: MesoscopeExperimentDescriptor | LickTrainingDescriptor | RunTrainingDescriptor = (
             session_descriptor
@@ -448,9 +470,8 @@ class MesoscopeVRSystem:
         self._cameras.start_face_camera()
         self._cameras.start_body_camera()
 
-        # If necessary, carries out the Zaber motor setup and animal mounting sequence, which includes the red-dot
-        # alignment adjustment to the HeadBar positions. The stop() sequence snapshots the resulting motor positions,
-        # once the session carries no uninitialized-session marker.
+        # If necessary, carries out the Zaber motor setup and animal mounting sequence. The stop() sequence snapshots
+        # the resulting motor positions, once the session carries no uninitialized-session marker.
         setup_zaber_motors(zaber_motors=self._zaber_motors)
 
         if self._is_mesoscope_experiment:
@@ -462,20 +483,11 @@ class MesoscopeVRSystem:
                 mesoscope_driver=self._mesoscope,
             )
 
-        # Determines the visualizer mode based on session type. This mode is used by both the runtime control UI and
-        # the behavior visualizer to conditionally enable/disable UI elements.
-        if self._session_data.session_type == SessionTypes.LICK_TRAINING:
-            visualizer_mode = VisualizerMode.LICK_TRAINING
-        elif self._session_data.session_type == SessionTypes.RUN_TRAINING:
-            visualizer_mode = VisualizerMode.RUN_TRAINING
-        else:
-            visualizer_mode = VisualizerMode.EXPERIMENT
-
         # Determines which trial types are used based on the experiment configuration. This affects both the runtime
         # control UI and the visualizer layouts.
         has_reinforcing_trials = True
         has_aversive_trials = True
-        if visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration is not None:
+        if self._visualizer_mode == VisualizerMode.EXPERIMENT and self._experiment_configuration is not None:
             trial_structures = self._experiment_configuration.trial_structures.values()
             has_reinforcing_trials = any(isinstance(trial, MesoscopeWaterRewardTrial) for trial in trial_structures)
             has_aversive_trials = any(isinstance(trial, MesoscopeGasPuffTrial) for trial in trial_structures)
@@ -485,7 +497,7 @@ class MesoscopeVRSystem:
         has_mesoscope = self._is_mesoscope_experiment
 
         self._ui.start(
-            mode=visualizer_mode,
+            mode=self._visualizer_mode,
             has_reinforcing_trials=has_reinforcing_trials,
             has_aversive_trials=has_aversive_trials,
             has_mesoscope=has_mesoscope,
@@ -502,7 +514,7 @@ class MesoscopeVRSystem:
         # Initializes the runtime visualizer. This HAS to be initialized after cameras and the UI to prevent collisions
         # in the QT backend, which is used by all three assets.
         self._visualizer.open(
-            mode=visualizer_mode,
+            mode=self._visualizer_mode,
             has_reinforcing_trials=has_reinforcing_trials,
             has_aversive_trials=has_aversive_trials,
         )
@@ -596,7 +608,7 @@ class MesoscopeVRSystem:
             ),
         )
 
-        # Updates the internally stored SessionDescriptor instance with runtime data, collects the experimenter notes
+        # Updates the internally stored session descriptor instance with runtime data, collects the experimenter notes
         # through a blocking terminal prompt, and saves the completed descriptor to disk.
         run_shutdown_step(description="finalizing the session descriptor", step=self._generate_session_descriptor)
 
@@ -1302,8 +1314,8 @@ class MesoscopeVRSystem:
         Notes:
             The log entry brackets the periods during which the recorded frame acquisition pulses correspond to frames
             the ScanImagePC saves to disk. Pulses logged outside a bracket originate from the operator scanning
-            manually or from the scanner arming, so the preprocessing pipeline discards them. Entries are emitted only
-            when the tracked state changes, so the log alternates between the two values.
+            manually or from the scanner arming. Entries are emitted only when the tracked state changes, so the log
+            alternates between the two values.
 
         Args:
             acquiring: Determines whether the system expects the Mesoscope to be acquiring the session's frames.
@@ -1332,8 +1344,8 @@ class MesoscopeVRSystem:
 
             Does not touch the session-level trial counters (reinforcing_failed_trials, aversive_failed_trials,
             reinforcing_guided_trials, aversive_guided_trials) or the running trial position (_trial_state.completed).
-            Callers handle sequence-local resets (encoder distance tracker, _distance, _trial_state.completed)
-            independently around this refresh.
+            Callers handle sequence-local resets (encoder distance tracker, _distance, _trial_state.completed,
+            _resolved_stimulus_count) independently around this refresh.
 
         Raises:
             RuntimeError: If the Virtual Reality task driver is not initialized, which indicates the method was called
@@ -1848,9 +1860,9 @@ class MesoscopeVRSystem:
         """Updates the contents of the acquired session's descriptor file with data collected during runtime and caches
         it to the session's raw_data directory.
         """
-        # The presence of the 'nk.bin' marker indicates that the session has not been properly initialized. Since
-        # this method can be called as part of the emergency shutdown process for a session that encountered an
-        # initialization error, if the marker exists, ends the runtime early.
+        # The presence of the 'nk.bin' marker indicates that the session has not been properly initialized. The stop()
+        # sequence reaches this method with the marker still present when the operator aborts the runtime at the
+        # start() checkpoint, so the method returns early in that case.
         if self._session_data.raw_data.nk_path.exists():
             return
 
