@@ -11,6 +11,7 @@ from sollertia_shared_assets import (
 from ataraxis_data_structures import YamlConfig
 
 from ..vr_task import VRTaskConfiguration as VRTaskConfiguration
+from .visualizer import VisualizerMode as VisualizerMode
 from ..cross_system import (
     StorageDestination as StorageDestination,
     StorageDestinations as StorageDestinations,
@@ -37,6 +38,14 @@ class _RunTrainingThresholdLimits:
     maximum_duration_s: float = ...
 
 RUN_TRAINING_THRESHOLD_LIMITS: _RunTrainingThresholdLimits
+
+@dataclass(frozen=True, slots=True)
+class _SessionTypeSettings:
+    descriptor_file_name: str
+    visualizer_mode: VisualizerMode | None
+    records_water_intake: bool
+
+SESSION_TYPE_SETTINGS: dict[SessionTypes, _SessionTypeSettings]
 
 @dataclass(slots=True)
 class _MesoscopeFileSystem:
@@ -207,3 +216,5 @@ class MesoscopeData:
     unconfigured_destinations: tuple[str, ...]
     def __init__(self, system_configuration: MesoscopeSystemConfiguration, session_data: SessionData) -> None: ...
     def __repr__(self) -> str: ...
+
+def _verify_session_type_settings() -> None: ...

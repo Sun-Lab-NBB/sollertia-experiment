@@ -10,14 +10,15 @@ from ataraxis_time import PrecisionTimer
 from sollertia_shared_assets import (
     SessionData as SessionData,
     MesoscopeGasPuffTrial as MesoscopeGasPuffTrial,
-    RunTrainingDescriptor,
-    LickTrainingDescriptor,
+    RunTrainingDescriptor as RunTrainingDescriptor,
+    LickTrainingDescriptor as LickTrainingDescriptor,
     WindowCheckingDescriptor,
     MesoscopeWaterRewardTrial as MesoscopeWaterRewardTrial,
-    MesoscopeExperimentDescriptor,
+    MesoscopeExperimentDescriptor as MesoscopeExperimentDescriptor,
 )
 
 from .system import (
+    SESSION_TYPE_SETTINGS as SESSION_TYPE_SETTINGS,
     MesoscopeData as MesoscopeData,
     MesoscopePositions as MesoscopePositions,
 )

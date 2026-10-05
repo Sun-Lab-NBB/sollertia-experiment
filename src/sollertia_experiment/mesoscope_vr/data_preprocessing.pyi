@@ -15,6 +15,7 @@ from sollertia_shared_assets import (
 
 from .system import (
     MESOSCOPE_VR_SESSIONS as MESOSCOPE_VR_SESSIONS,
+    SESSION_TYPE_SETTINGS as SESSION_TYPE_SETTINGS,
     MesoscopeData as MesoscopeData,
     MesoscopeGoogleSheets as MesoscopeGoogleSheets,
     MesoscopeVideoTracking as MesoscopeVideoTracking,
